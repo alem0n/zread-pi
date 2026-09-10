@@ -87,6 +87,12 @@ process.chdir(repo);
 const { App } = await import("../src/tui/app");
 const { routes } = await import("../src/routes");
 const { ProcessTerminal } = await import("@earendil-works/pi-tui");
+const { getVersion } = await import("../src/utils/display");
+
+// 项目版本（仓库根 package.json，AGENTS.md §4.4 唯一来源）
+const projectVersion = (
+  JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf-8")) as { version: string }
+).version;
 
 // ---------------------------------------------------------------------------
 // 2) 假终端（捕获输出 / 注入按键）
@@ -158,6 +164,16 @@ function screenText(app: InstanceType<typeof App>, width = 100): string {
 
 console.log("▶ TUI 冒烟测试");
 
+// --- 用例 0：版本号与项目版本同步（开发模式未注入 CLI_VERSION） ---
+{
+  check(
+    "getVersion() 与根 package.json 版本一致",
+    getVersion() === projectVersion,
+    `getVersion()=${getVersion()}，根 package.json=${projectVersion}`,
+  );
+  check("版本号不是兜底值", getVersion() !== "0.0.0-dev", `getVersion()=${getVersion()}`);
+}
+
 // --- 用例 1：wiki 首页布局 ---
 {
   const { app, terminal } = createApp(["/wiki"]);
@@ -173,13 +189,17 @@ console.log("▶ TUI 冒烟测试");
     stripAnsi(raw[0]).startsWith("  ╭") && stripAnsi(raw[0]).endsWith("╮"),
     indent(stripAnsi(raw[0] ?? "")),
   );
-  checkContains("标题行包含项目名与版本", text, "open-zread 0.0.0-dev");
+  checkContains("标题行包含项目名与版本", text, `open-zread ${projectVersion}`);
   checkContains("标题行包含提供商", text, "提供商: openai-compatible");
   checkContains("标题行包含模型", text, "模型: gpt-4o-mini");
   checkContains("标题行包含 Base URL", text, "Base URL: http://127.0.0.1:1/v1");
   checkContains("标题行包含目录", text, "目录: ");
   checkContains("包含介绍文字", text, "将本地代码库转化为可读的 Wiki 文档。");
-  checkContains("包含 github 链接", text, "开源项目: https://github.com/bb-boy680/open-zread");
+  check(
+    "不再显示开源项目链接",
+    !text.includes("开源项目") && !text.includes("github.com/bb-boy680"),
+    indent(text),
+  );
   checkContains("无 wiki.json 时状态为「尚无文档目录」", text, "── 尚无文档目录 ─");
   checkContains("选项：生成文档", text, "生成文档");
   checkContains("选项：配置", text, "配置");

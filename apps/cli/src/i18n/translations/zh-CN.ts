@@ -18,7 +18,6 @@ export const zhCN: TranslationKeys = {
     baseUrl: 'Base URL',
     directory: '目录',
     intro: '将本地代码库转化为可读的 Wiki 文档。',
-    github: '开源项目: {url}',
   },
   config: {
     title: 'Zread — 编辑配置',
