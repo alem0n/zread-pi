@@ -77,7 +77,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/console 接管 82 项）、`render-all-routes.ts`（全部 13 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 82 + 13 + 9 + 19 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/console 接管 89 项）、`render-all-routes.ts`（全部 13 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 89 + 13 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
