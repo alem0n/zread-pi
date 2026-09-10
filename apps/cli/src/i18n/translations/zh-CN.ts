@@ -8,6 +8,8 @@ export const zhCN: TranslationKeys = {
   cli: {
     version: '显示版本号',
     help: '显示帮助信息',
+    dirDesc: '指定目标目录（默认: 当前目录）',
+    dirInvalid: '目标目录不存在或不是目录: {path}',
     wikiDesc: 'Wiki 文档生成',
     configDesc: '交互式配置编辑器',
     browseDesc: '启动 Wiki 预览服务器',

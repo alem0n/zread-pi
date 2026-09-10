@@ -3,4 +3,5 @@
  */
 
 export * from './display';
+export * from './target-dir';
 export * from './thinking';

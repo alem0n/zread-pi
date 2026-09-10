@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { loadConfigSync } from "@open-zread/utils";
 import { getVersion } from "./utils";
+import { enterTargetDir } from "./utils/target-dir";
 import { runConfig } from "./commands/config";
 import { runWiki } from "./commands/wiki";
 import { runBrowse } from "./commands/browse";
@@ -17,13 +18,30 @@ const program = new Command();
 program
   .name("open-zread")
   .version(getVersion(), "-v, --version", t.cli.version)
-  .helpOption("-h, --help", t.cli.help);
+  .helpOption("-h, --help", t.cli.help)
+  // 全局选项：对 wiki / config / browse 都生效（含默认命令的 `open-zread -d <path>` 写法）
+  .option("-d, --dir <path>", t.cli.dirDesc);
+
+/**
+ * 应用 -d/--dir：把进程工作目录切到目标目录（缺省=当前目录）。
+ * 目录无效时打印错误并以退出码 1 结束，不进入 TUI。
+ */
+function applyTargetDir(): boolean {
+  const result = enterTargetDir(program.opts().dir as string | undefined);
+  if (!result.ok) {
+    process.stderr.write(`${t.cli.dirInvalid.replace("{path}", result.path)}\n`);
+    process.exitCode = 1;
+    return false;
+  }
+  return true;
+}
 
 // 默认命令：Wiki 文档生成（直接运行 open-zread 即可）
 program
   .command("wiki", { isDefault: true })
   .description(t.cli.wikiDesc)
   .action(async () => {
+    if (!applyTargetDir()) return;
     await runWiki();
   });
 
@@ -32,6 +50,7 @@ program
   .command("config")
   .description(t.cli.configDesc)
   .action(async () => {
+    if (!applyTargetDir()) return;
     await runConfig();
   });
 
@@ -40,6 +59,7 @@ program
   .command("browse")
   .description(t.cli.browseDesc)
   .action(async () => {
+    if (!applyTargetDir()) return;
     await runBrowse();
   });
 

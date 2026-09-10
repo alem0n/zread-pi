@@ -10,6 +10,8 @@ export interface TranslationKeys {
   cli: {
     version: string;
     help: string;
+    dirDesc: string;
+    dirInvalid: string;
     wikiDesc: string;
     configDesc: string;
     browseDesc: string;
