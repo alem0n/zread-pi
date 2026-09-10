@@ -13,7 +13,7 @@
 import { matchesKey } from "@earendil-works/pi-tui";
 import { getProviderRegistry } from "@open-zread/utils";
 import type { ProviderInfo } from "@open-zread/utils";
-import { barIndicator } from "../../tui/components/select";
+import { barIndicator, computeItemWindow, scrollIndicator } from "../../tui/components/select";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
@@ -37,6 +37,8 @@ export default class ConfigProviderPage extends Screen {
   private loading = true;
   private error: string | null = null;
   private searchField = new TextField({ placeholder: "输入 Provider 名称..." });
+  /** 最近一次渲染的可见项数（PageUp/PageDown 步长） */
+  private lastVisibleCount = 10;
 
   protected override init(): void {
     this.searchField.onChange = (value) => {
@@ -81,6 +83,26 @@ export default class ConfigProviderPage extends Screen {
     }
     if (matchesKey(data, "down") || data === "j") {
       this.selectedIndex = Math.min(maxIndex, this.selectedIndex + 1);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "pageUp")) {
+      this.selectedIndex = Math.max(0, this.selectedIndex - this.lastVisibleCount);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "pageDown")) {
+      this.selectedIndex = Math.min(maxIndex, this.selectedIndex + this.lastVisibleCount);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "home")) {
+      this.selectedIndex = 0;
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "end")) {
+      this.selectedIndex = maxIndex;
       this.refresh();
       return true;
     }
@@ -137,14 +159,26 @@ export default class ConfigProviderPage extends Screen {
       ];
     }
 
-    const lines: string[] = [""];
     const { config } = this.app.config;
+    const items = this.displayProviders;
 
-    if (this.displayProviders.length === 0) {
-      lines.push(style("没有 Provider", { dim: true }));
+    // 可用行数 = 页面高度 - 列表上方(1 空行) - 列表下方(1 空行 + footer)
+    const post = ["", style(this.t("provider.footer"), { dim: true })];
+    const budget = Math.max(1, this.app.availableRows - 1 - post.length);
+
+    const body: string[] = [];
+    if (items.length === 0) {
+      body.push(style("没有 Provider", { dim: true }));
     } else {
-      for (let index = 0; index < this.displayProviders.length; index++) {
-        const provider = this.displayProviders[index];
+      // 分页：只渲染窗口内的项，保证选中项始终可见
+      const { start, end } = computeItemWindow(
+        items.map(() => 1),
+        this.selectedIndex,
+        budget,
+      );
+      this.lastVisibleCount = Math.max(1, end - start);
+      for (let index = start; index < end; index++) {
+        const provider = items[index];
         const isSelected = index === this.selectedIndex;
         let row = barIndicator(isSelected);
         row += style(provider.name, isSelected ? { bold: true, color: "white" } : { color: "gray" });
@@ -154,12 +188,14 @@ export default class ConfigProviderPage extends Screen {
         if (provider.id !== "custom" && provider.npm) {
           row += style(` (${provider.npm})`, { dim: true, color: "gray" });
         }
-        lines.push(padRight(clampLine(row, width), width));
+        body.push(padRight(clampLine(row, width), width));
       }
+
+      const indicator = scrollIndicator(this.selectedIndex, items.length, start, end);
+      if (indicator) body.push(padRight(style(indicator, { dim: true }), width));
     }
 
-    lines.push("", style(this.t("provider.footer"), { dim: true }));
-    return lines;
+    return ["", ...body, ...post];
   }
 
   // ==================== 内部实现 ====================

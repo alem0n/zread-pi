@@ -66,6 +66,10 @@ export class Layout implements Component {
     // 介绍文字区块的 marginTop={1}
     lines.push("");
     lines.push(...this.intro.render(inner));
+
+    // 记录头部占用的行数：页面据此计算列表可用行数（分页窗口）
+    this.app.layoutOverhead = lines.length;
+
     lines.push(...this.app.currentScreen.render(inner));
 
     return lines.map((line) => clampLine("  " + line, total));

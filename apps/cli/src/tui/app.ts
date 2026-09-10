@@ -8,9 +8,12 @@
  */
 
 import {
+  KeybindingsManager,
   matchesKey,
   ProcessTerminal,
+  setKeybindings,
   TuiAltScreen,
+  TUI_KEYBINDINGS,
   type Terminal,
   type TuiInputListenerResult,
 } from "@earendil-works/pi-tui";
@@ -34,6 +37,35 @@ export interface AppOptions {
   onExit?: () => void;
 }
 
+let keybindingsInstalled = false;
+
+/**
+ * 本应用没有全屏滚动容器（列表自带分页窗口），因此释放备用屏幕占用的视口按键，
+ * 让 PageUp/PageDown/Home/End 落到当前页面的列表上。
+ */
+function installKeybindings(): void {
+  if (keybindingsInstalled) return;
+  keybindingsInstalled = true;
+  setKeybindings(
+    new KeybindingsManager(TUI_KEYBINDINGS, {
+      "tui.altScreen.pageUp": [],
+      "tui.altScreen.pageDown": [],
+      "tui.altScreen.halfPageUp": [],
+      "tui.altScreen.halfPageDown": [],
+      "tui.altScreen.lineUp": [],
+      "tui.altScreen.lineDown": [],
+      "tui.altScreen.top": [],
+      "tui.altScreen.bottom": [],
+      "tui.altScreen.search": [],
+      "tui.altScreen.searchNext": [],
+      "tui.altScreen.searchPrevious": [],
+      "tui.altScreen.searchClose": [],
+      "tui.altScreen.previousPrompt": [],
+      "tui.altScreen.nextPrompt": [],
+    }),
+  );
+}
+
 export class App {
   readonly tui: TuiAltScreen;
   readonly config = new ConfigStore();
@@ -46,8 +78,11 @@ export class App {
   private escClaimed = false;
   private stopped = false;
   private entering = false;
+  /** 布局头部（项目信息框 + 介绍文字）占用的行数，由 Layout 每帧写入 */
+  layoutOverhead = 0;
 
   constructor(private options: AppOptions) {
+    installKeybindings();
     this.router = new Router(options.routes);
     this.tui = new TuiAltScreen(options.terminal ?? new ProcessTerminal());
     this.layout = new Layout(this);
@@ -124,6 +159,16 @@ export class App {
   }
 
   // ==================== 渲染 ====================
+
+  /** 终端行数 */
+  get terminalRows(): number {
+    return this.tui.terminal.rows || 24;
+  }
+
+  /** 页面内容区可用行数（终端行数 - 布局头部） */
+  get availableRows(): number {
+    return Math.max(3, this.terminalRows - this.layoutOverhead);
+  }
 
   requestRender(): void {
     if (this.stopped) return;

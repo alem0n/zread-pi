@@ -11,7 +11,7 @@
 import { matchesKey } from "@earendil-works/pi-tui";
 import { getProviderRegistry } from "@open-zread/utils";
 import type { ModelInfo } from "@open-zread/utils";
-import { barIndicator } from "../../tui/components/select";
+import { barIndicator, computeItemWindow, scrollIndicator } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { clampLine, padRight } from "../../tui/text-layout";
@@ -31,6 +31,8 @@ export default class ConfigModelPage extends Screen {
   private selectedIndex = 0;
   private loading = true;
   private error: string | null = null;
+  /** 最近一次渲染的可见项数（PageUp/PageDown 步长） */
+  private lastVisibleCount = 10;
 
   protected override init(): void {
     this.providerId = this.app.location?.params.providerId ?? "";
@@ -48,6 +50,26 @@ export default class ConfigModelPage extends Screen {
     }
     if (matchesKey(data, "down") || data === "j") {
       this.selectedIndex = Math.min(items.length - 1, this.selectedIndex + 1);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "pageUp")) {
+      this.selectedIndex = Math.max(0, this.selectedIndex - this.lastVisibleCount);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "pageDown")) {
+      this.selectedIndex = Math.min(items.length - 1, this.selectedIndex + this.lastVisibleCount);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "home")) {
+      this.selectedIndex = 0;
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, "end")) {
+      this.selectedIndex = Math.max(0, items.length - 1);
       this.refresh();
       return true;
     }
@@ -89,17 +111,20 @@ export default class ConfigModelPage extends Screen {
       lines.push("", style(this.t("model.noModels"), { dim: true }));
     }
 
-    // Model 列表（marginTop={1}）
-    lines.push("");
+    // Model 列表（marginTop={1}）+ Footer（marginTop={1}）
     const items = this.displayItems;
-    for (let index = 0; index < items.length; index++) {
+    const post = ["", style(this.t("model.footer"), { dim: true })];
+    const budget = Math.max(1, this.app.availableRows - lines.length - 1 - post.length);
+
+    const { start, end } = computeItemWindow(items.map(() => 1), this.selectedIndex, budget);
+    this.lastVisibleCount = Math.max(1, end - start);
+    for (let index = start; index < end; index++) {
       lines.push(padRight(clampLine(this.renderModelRow(items[index], index), width), width));
     }
+    const indicator = scrollIndicator(this.selectedIndex, items.length, start, end);
+    if (indicator) lines.push(padRight(style(indicator, { dim: true }), width));
 
-    // Footer（marginTop={1}）
-    lines.push("", style(this.t("model.footer"), { dim: true }));
-
-    return lines;
+    return ["", ...lines, ...post];
   }
 
   // ==================== 内部实现 ====================

@@ -135,18 +135,16 @@ export default class WikiHomePage extends Screen {
         ? "yellow"
         : undefined;
 
-    const lines: string[] = [];
-
     // 状态分割线
-    lines.push(...new Divider(statusTitle, statusColor).render(width));
+    const pre = new Divider(statusTitle, statusColor).render(width);
 
-    // 选项列表（marginTop={1}）
-    lines.push("", ...this.select.render(width));
+    // 选项列表（marginTop={1}）+ Footer（marginTop={1}）
+    const post = ["", style(this.t("wiki.footer"), { dim: true })];
+    this.select.setViewportRows(
+      Math.max(3, this.app.availableRows - pre.length - 1 - post.length),
+    );
 
-    // Footer（marginTop={1}）
-    lines.push("", style(this.t("wiki.footer"), { dim: true }));
-
-    return lines;
+    return [...pre, "", ...this.select.render(width), ...post];
   }
 
   // ==================== 内部实现 ====================

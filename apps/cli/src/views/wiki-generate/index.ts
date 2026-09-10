@@ -56,7 +56,11 @@ export default class WikiGeneratePage extends Screen {
     this.ticker = setInterval(() => {
       if (this.syncRetryStates()) this.refresh();
     }, 1000);
+  }
 
+  override async onEnter(): Promise<void> {
+    // 直接进入该路由时（未经 wiki 首页）也要先加载 wiki.json，再决定是否生成目录
+    await this.app.wiki.load();
     this.controller.init();
   }
 
@@ -86,19 +90,19 @@ export default class WikiGeneratePage extends Screen {
     // 目录生成部分
     lines.push(...this.renderCatalogSection(width));
 
-    // 文章生成部分（目录完成后显示）
-    lines.push(...this.renderArticlesSection(width));
-
     // 底部导航（marginTop={1}）
-    lines.push(
+    const footer = [
       "",
       style(
         `↑/↓: ${this.t("wikiGenerate.navigate")} | r: ${this.t("wikiGenerate.retry")} | ctrl+c: ${this.t("wikiGenerate.exit")}`,
         { dim: true },
       ),
-    );
+    ];
 
-    return lines;
+    // 文章生成部分（目录完成后显示）
+    lines.push(...this.renderArticlesSection(width, lines.length, footer.length));
+
+    return [...lines, ...footer];
   }
 
   // ==================== 目录段 ====================
@@ -169,7 +173,7 @@ export default class WikiGeneratePage extends Screen {
 
   // ==================== 文章段 ====================
 
-  private renderArticlesSection(width: number): string[] {
+  private renderArticlesSection(width: number, preLines: number, postLines: number): string[] {
     const { state } = this.controller;
     if (!this.controller.catalogCompleted || state.wikiPages.length === 0) return [];
 
@@ -186,6 +190,10 @@ export default class WikiGeneratePage extends Screen {
     });
 
     this.select.setItems(pages.map((page) => ({ value: page.slug, page })));
+    // 分页：只有列表内的行数受可用高度约束
+    this.select.setViewportRows(
+      Math.max(3, this.app.availableRows - preLines - postLines - 3),
+    );
 
     return [
       ...new Divider(articlesTitle).render(width),

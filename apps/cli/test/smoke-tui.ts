@@ -75,7 +75,19 @@ await writeFile(
   "utf-8",
 );
 
-// 预置 Provider 缓存（避免测试触发网络同步）
+// 预置 Provider 缓存（避免测试触发网络同步）；刻意多放一些 provider 以覆盖长列表分页
+const extraProviders: Record<string, unknown> = {};
+for (let i = 1; i <= 60; i++) {
+  const id = `p-${String(i).padStart(2, "0")}`;
+  extraProviders[id] = {
+    id,
+    name: `Provider ${i}`,
+    npm: `npm-${i}`,
+    base_url: "http://127.0.0.1:1/v1",
+    models: { m1: { id: "m1", name: "M1", max_tokens: 4096 } },
+  };
+}
+
 await writeFile(
   join(home, ".zread", "providers.json"),
   JSON.stringify({
@@ -106,6 +118,7 @@ await writeFile(
           },
         },
       },
+      ...extraProviders,
     },
   }),
   "utf-8",
@@ -349,7 +362,7 @@ console.log("▶ TUI 冒烟测试");
   await settle(10);
   let text = screenText(app);
   checkContains("按 / 进入搜索模式", text, "搜索: ");
-  checkContains("搜索模式显示结果数", text, "找到 2 个结果");
+  check("搜索模式显示结果数", /找到 \d+ 个结果/.test(text), indent(text));
 
   terminal.send("anth");
   await settle(10);
@@ -400,6 +413,143 @@ console.log("▶ TUI 冒烟测试");
   );
 
   app.exit();
+}
+
+// --- 用例 8：长列表分页（窗口跟随选中项 + 位置指示 + PageUp/PageDown/Home/End）---
+{
+  const { app, terminal } = createApp(["/config/provider"]);
+  await app.start();
+  await settle();
+
+  // providers.json 里 62 个 provider + “自定义 Provider” = 63 项，终端 40 行装不下
+  let text = screenText(app);
+  check(
+    "长列表：整页渲染不超过终端高度（不会把内容挤出屏幕）",
+    app.tui.render(100).length <= terminal.rows,
+    `lines=${app.tui.render(100).length} rows=${terminal.rows}`,
+  );
+  checkContains("长列表：位置指示出现", text, "(2/63)");
+  checkContains("长列表：窗口内首项可见", text, "Provider 1 ");
+  check("长列表：只渲染可视窗口（不含远端项）", !text.includes("Provider 60"), indent(text));
+
+  // ↓ 30 次：选中项必须仍在可视窗口内
+  for (let i = 0; i < 30; i++) terminal.send("\x1b[B");
+  text = screenText(app);
+  checkContains("滚动后选中项仍在可视区", text, "│ Provider 29 ");
+  checkContains("滚动后位置指示更新", text, "(32/63)");
+
+  // End：末项
+  terminal.send("\x1b[F");
+  text = screenText(app);
+  checkContains("End 跳到末项", text, "│ Provider 60 ");
+  checkContains("末项位置指示", text, "(63/63)");
+
+  // Home：首项
+  terminal.send("\x1b[H");
+  text = screenText(app);
+  checkContains("Home 跳到首项", text, "│ 自定义 Provider...");
+  checkContains("首项位置指示", text, "(1/63)");
+
+  // PageDown / PageUp：整页跳转
+  const before = Number(/\((\d+)\/63\)/.exec(text)?.[1] ?? "0");
+  terminal.send("\x1b[6~");
+  const afterDown = Number(/\((\d+)\/63\)/.exec(screenText(app))?.[1] ?? "0");
+  check("PageDown 整页向下跳转", afterDown - before >= 5, `${before} -> ${afterDown}`);
+  terminal.send("\x1b[5~");
+  const afterUp = Number(/\((\d+)\/63\)/.exec(screenText(app))?.[1] ?? "0");
+  check("PageUp 整页向上跳转", afterDown - afterUp >= 5, `${afterDown} -> ${afterUp}`);
+
+  app.exit();
+}
+
+// --- 用例 9：小终端时列表窗口自适应（不越界、选中项仍可见）---
+{
+  const { app, terminal } = createApp(["/config/provider"]);
+  terminal.rows = 20;
+  await app.start();
+  await settle();
+
+  const lines = app.tui.render(100);
+  check("小终端：渲染行数不超过终端高度", lines.length <= 20, `lines=${lines.length}`);
+  const text = screenText(app);
+  checkContains("小终端：选中项可见", text, "│ OpenAI Compatible");
+  checkContains("小终端：仍可翻页", text, "(2/63)");
+
+  // 缩小到 14 行：仍不应把选中项挤出屏幕
+  terminal.rows = 14;
+  (app.tui as unknown as { requestRender: (force?: boolean) => void }).requestRender(true);
+  await settle(30);
+  const small = app.tui.render(100);
+  check("14 行终端：渲染行数可控", small.length <= 16, `lines=${small.length}`);
+  checkContains("14 行终端：列表仍渲染选中项", screenText(app), "OpenAI Compatible");
+
+  app.exit();
+}
+
+// --- 用例 10：wiki 生成页的文章列表分页（长列表）---
+{
+  const wikiDir = join(repo, ".open-zread", "wiki");
+  const pages = [];
+  for (let i = 1; i <= 40; i++) {
+    pages.push({
+      slug: `p-${i}`,
+      title: `Article ${i}`,
+      file: `a-${i}.md`,
+      section: "S",
+      level: "Beginner",
+      associatedFiles: [],
+    });
+  }
+  await mkdir(join(wikiDir, "S"), { recursive: true });
+  await writeFile(
+    join(wikiDir, "wiki.json"),
+    JSON.stringify({ id: "w", generated_at: new Date().toISOString(), language: "zh", pages }),
+    "utf-8",
+  );
+  for (const page of pages) {
+    await writeFile(join(wikiDir, page.section, page.file), `# ${page.title}\n`, "utf-8");
+  }
+
+  const { app, terminal } = createApp(["/wiki/generate?mode=manage"]);
+  await app.start();
+  await settle(80);
+
+  let text = screenText(app);
+  check(
+    "文章列表分页：整页渲染不超过终端高度",
+    app.tui.render(100).length <= terminal.rows,
+    `lines=${app.tui.render(100).length} rows=${terminal.rows}`,
+  );
+  checkContains("文章列表分页：位置指示", text, "(1/40)");
+  checkContains("文章列表分页：首项可见", text, "Article 1");
+  check("文章列表分页：不渲染窗口外的项", !text.includes("Article 40"), indent(text));
+
+  // End：跳到末项
+  terminal.send("\x1b[F");
+  await settle(20);
+  text = screenText(app);
+  checkContains("文章列表：End 后末项可见", text, "Article 40");
+  checkContains("文章列表：末项位置指示", text, "(40/40)");
+
+  // 末项会被重新生成（r 为选中项重新生成）——仅校验按键不被分页吞掉
+  app.exit();
+}
+
+// --- 用例 11：console 接管（TUI 期间不往终端写东西）---
+{
+  const { captureConsoleToLog } = await import("../src/tui/console-guard");
+  const { getLogFile } = await import("@open-zread/utils");
+  const { readFile } = await import("node:fs/promises");
+
+  const restore = captureConsoleToLog();
+  console.error("guard-probe-error-31337");
+  console.log("guard-probe-log-31338");
+  restore();
+
+  const log = await readFile(getLogFile(), "utf-8");
+  checkContains("console.error 被转存到日志", log, "guard-probe-error-31337");
+  checkContains("console.log 被转存到日志", log, "guard-probe-log-31338");
+  check("接管后 console.error 不再直接可用（已还原）", typeof console.error === "function");
 }
 
 // ---------------------------------------------------------------------------
