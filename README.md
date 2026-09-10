@@ -93,7 +93,7 @@ bun run browse:dev
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件 | 6/6 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截 | 6/6 |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页冒烟 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + mock LLM 的生成/同步全链路 | 82 + 13 + 9 + 19 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页冒烟 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + mock LLM 的生成/同步全链路 | 89 + 13 + 9 + 19 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
@@ -154,6 +154,7 @@ apps/cli/src/
 - **翻页按键**：`PageUp` / `PageDown` 整页翻，`Home` / `End` 到首/末项（原有 `↑↓` `j` `k` `Enter` 行为不变）。备用屏幕默认会吃掉这几个键，应用启动时用 `setKeybindings` 释放（`tui/app.ts`）。
 - **终端自适应**：窗口行数 = 终端行数 − 布局头部 − 列表上下文案，窗口缩小（拖窗口）时自动重算，整页渲染不再超出终端高度。
 - **异步加载都能刷到屏幕**：加载态、进度态、保存态、重试倒计时都走 `requestRender()`；`test:tui` 用假终端断言了「加载中 → 列表」「目录完成 → 文章列表」等中间态确实被渲染。
+- **按键立即重绘**：页面按键交给 pi-tui 的聚焦分发（`Screen.handleInput` → `Screen.handleKey`），pi-tui 分发后会自动请求一次立即重绘，页面无需手动 `refresh()`；同时 Kitty 键盘协议的上报松开事件被统一过滤，一次按键只处理一次（此前用原始输入监听器自行转发，改状态后不重绘，需点一下鼠标才看到切换）。
 - **直接进入子路由时先加载 `wiki.json`**：`/wiki/generate`、`/wiki/sync` 的 `onEnter` 会 `await wiki.load()` 再启动流程（否则会误判为「无目录」而重新扫描）。
 - **防止杂散输出花屏**：TUI 期间 `console.*` 被接管并转存到 `~/.zread/logs/open-zread-*.log`（典型来源：provider-registry 同步失败时的 `console.error`），退出时还原（`tui/console-guard.ts`）。
 

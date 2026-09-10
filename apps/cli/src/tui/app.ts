@@ -5,9 +5,11 @@
  * - 持有 TUI / ConfigStore / I18nStore
  * - 路由栈与页面生命周期（onEnter / onDestroy）
  * - 全局按键：ctrl+c 退出；ESC 返回上一级（子页面可用 claimEsc 抢占）
+ * - 其余按键不在此处理，由 pi-tui 分发给聚焦页面（Screen.handleInput）
  */
 
 import {
+  isKeyRelease,
   KeybindingsManager,
   matchesKey,
   ProcessTerminal,
@@ -216,8 +218,23 @@ export class App {
     }
   }
 
-  /** 返回 true 表示已消费该按键（仅 ESC 会影响全局行为） */
+  /**
+   * 全局输入监听器（pi-tui 的输入监听器在聚焦组件之前执行）。
+   *
+   * 只拦截全局键：ctrl+c 退出、ESC（页面未消费时走全局返回逻辑）。
+   * 其余按键必须返回 undefined：pi-tui 会分发给聚焦页面（Screen.handleInput），
+   * 并在分发后自动请求重绘。这里不能再自己调用 screen.handleKey()，
+   * 否则页面按键不会触发重绘（表现为「改了选中项但界面不动，点一下鼠标才刷新」）。
+   *
+   * @returns 返回 { consume: true } 表示已拦截；返回 undefined 表示交给聚焦页面
+   */
   private handleInput(data: string): TuiInputListenerResult {
+    // ProcessTerminal 会开启 Kitty 键盘协议（flags=7，含上报事件类型），
+    // 松开键也会到达这里；而 matchesKey 不区分按下/松开。
+    // 未声明 wantsKeyRelease 的页面不应收到松开事件，交给 pi-tui 的标准路径过滤，
+    // 避免一次按键被处理两次（↑↓ 跳两格、Enter 进两级）。
+    if (isKeyRelease(data)) return undefined;
+
     if (matchesKey(data, "ctrl+c")) {
       this.exit();
       return { consume: true };
@@ -234,7 +251,6 @@ export class App {
       return { consume: true };
     }
 
-    screen.handleKey(data);
     return undefined;
   }
 

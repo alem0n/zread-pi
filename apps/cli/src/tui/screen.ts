@@ -3,6 +3,7 @@
  *
  * 迁移前的每个 Ink 页面组件（含 useInput / useImmer 逻辑）在这里被改写成一个类：
  * - render(width)      → 返回该页面占用的行
+ * - handleInput(data)  → pi-tui 聚焦组件的按键入口，转发给 handleKey
  * - handleKey(data)    → 页面级按键处理（返回值只对 ESC 有意义，true = 已消费）
  * - onEnter/onDestroy  → 挂载 / 卸载副作用
  *
@@ -37,6 +38,17 @@ export abstract class Screen implements Component {
   }
 
   abstract render(width: number): string[];
+
+  /**
+   * pi-tui 聚焦组件的按键入口（Component.handleInput）。
+   *
+   * 页面按键逻辑仍写在 handleKey 里，这里只做转发，让按键走 pi-tui 的标准分发路径：
+   * 1. pi-tui 会过滤 Kitty 协议的按键松开事件（Screen 未声明 wantsKeyRelease）；
+   * 2. pi-tui 在调用 handleInput 后会自动请求一次立即重绘，页面无需手动 refresh()。
+   */
+  handleInput(data: string): void {
+    this.handleKey(data);
+  }
 
   /**
    * 页面级按键处理。

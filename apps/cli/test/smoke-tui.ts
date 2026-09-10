@@ -4,6 +4,7 @@
  * 覆盖：
  * - 布局：项目信息框 / 介绍文字 / 页面内容的宽度与顺序
  * - 交互：↑↓ j k 选择、Enter 进入、ESC 返回与根页面退出、ctrl+c 退出、s 保存
+ * - 重绘：按键后必须由 pi-tui 自动重绘（观察终端实际写入，而不是直接调用 render）
  * - 页面：wiki 首页、配置首页、语言页、并发数页
  * - 输入框：数字输入 + Enter 写回配置
  *
@@ -550,6 +551,61 @@ console.log("▶ TUI 冒烟测试");
   checkContains("console.error 被转存到日志", log, "guard-probe-error-31337");
   checkContains("console.log 被转存到日志", log, "guard-probe-log-31338");
   check("接管后 console.error 不再直接可用（已还原）", typeof console.error === "function");
+}
+
+// --- 用例 12：按键立即重绘 + Kitty 松开事件过滤 ---
+// 回归：此前 App 用原始输入监听器自行转发按键，绕过了 pi-tui 的聚焦分发，
+// 而 pi-tui 只在分发给聚焦组件后才自动 requestRender；页面又大多没手动 refresh()，
+// 于是 ↑↓ 改了选中项但屏幕不动，必须点一下鼠标（鼠标路径会 requestRender）才刷新。
+{
+  const { app, terminal } = createApp(["/config"]);
+  await app.start();
+  await settle();
+
+  // 进入「界面语言」（首项，默认选中）
+  terminal.send("\r");
+  await settle(60);
+  checkContains("重绘用例：进入语言页", screenText(app), "❯ 中文");
+
+  // 直接 app.tui.render() 会绕过渲染循环，这里必须观察终端实际写入的帧
+  terminal.writes.length = 0;
+  terminal.send("\x1b[B");
+  await settle(60);
+  check(
+    "按键后终端收到重绘帧（不再依赖鼠标点击）",
+    terminal.writes.length > 0,
+    `writes=${terminal.writes.length}`,
+  );
+  const afterDown = stripAnsi(terminal.writes.join(""));
+  checkContains("重绘帧反映新的选中项", afterDown, "❯ 英文");
+
+  // Kitty 键盘协议（ProcessTerminal 启用 flags=7，会同时上报按下/松开）：
+  // ↓ 按下应回绕到「中文」，松开必须被 pi-tui 过滤（否则会再移动一次）
+  terminal.writes.length = 0;
+  terminal.send("\x1b[1;1:1B");
+  terminal.send("\x1b[1;1:3B");
+  await settle(60);
+  const afterKittyDown = stripAnsi(terminal.writes.join(""));
+  checkContains("Kitty ↓ 按下后回绕到首项", afterKittyDown, "❯ 中文");
+  check("Kitty ↓ 松开不重复移动", !afterKittyDown.includes("❯ 英文"), indent(afterKittyDown));
+
+  // ESC 松开不应触发全局返回/退出
+  terminal.writes.length = 0;
+  terminal.send("\x1b[27;1:3u");
+  await settle(60);
+  check(
+    "Kitty ESC 松开不触发返回/退出",
+    app.location?.pathname === "/config/language" && terminal.writes.length === 0,
+    `pathname=${app.location?.pathname} writes=${terminal.writes.length}`,
+  );
+
+  // Enter 松开不应重复导航（松开若被处理，会在配置首页再次确认并进入语言页）
+  terminal.send("\x1b[13;1:1u");
+  terminal.send("\x1b[13;1:3u");
+  await settle(80);
+  check("Kitty Enter 松开不重复导航", app.location?.pathname === "/config", `pathname=${app.location?.pathname}`);
+
+  app.exit();
 }
 
 // ---------------------------------------------------------------------------
