@@ -183,7 +183,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ```bash
 bun run typecheck
 bun run test:catalog    # 32/32
-bun run test            # 全部套件（含 test:context 17/17、TUI 150 + 路由 16 + 真实终端 9 + mock 全链路 19）
+bun run test            # 全部套件（含 test:context 18/18、TUI 150 + 路由 16 + 真实终端 9 + mock 全链路 19）
 ```
 
 ### 8.5 思考深度（pi thinking level，第四步）
@@ -218,5 +218,5 @@ bun run test            # 全部套件（含 test:context 17/17、TUI 150 + 路�
   如果上下文将满且压缩已无法腾出空间（单个巨大 turn、可总结内容为空、摘要请求失败/关闭压缩），
   在轮次边界优雅停止并产出 `subtype: "error_context_full"`；
 - `convertToLlm` 改用 pi harness 版本，保证 `compactionSummary` 消息能转成模型可见的 user 消息；
-- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，17 项）覆盖
-  「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」「maxTurns → error_max_turns」。
+- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，18 项）覆盖
+  「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」「maxTurns → error_max_turns（可读错误文案）」。

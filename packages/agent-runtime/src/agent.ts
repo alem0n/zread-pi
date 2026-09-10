@@ -867,9 +867,13 @@ class AgentRuntimeImpl implements AgentInstance {
 					? [
 							`Context window nearly full (estimated ${contextFullInfo?.tokens ?? 0} / ${contextFullInfo?.window ?? model.contextWindow} tokens); stopped gracefully before overflow.`,
 						]
-					: failure?.errorMessage
-						? [failure.errorMessage]
-						: undefined;
+					: stoppedByMaxTurns
+						? [
+								`Reached max turns (${options.maxTurns ?? 30}); stopped gracefully before completing the task.`,
+							]
+						: failure?.errorMessage
+							? [failure.errorMessage]
+							: undefined;
 				yield {
 					type: "result",
 					subtype,

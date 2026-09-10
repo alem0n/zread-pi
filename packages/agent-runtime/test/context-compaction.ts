@@ -220,6 +220,11 @@ console.log("\n▶ 场景 4：maxTurns 到达上限 → error_max_turns");
 	});
 
 	check("结果为 error_max_turns", result.subtype === "error_max_turns", String(result.subtype));
+	check(
+		"错误信息为可读文案（含 max turns）",
+		result.errors?.[0]?.includes("Reached max turns") === true,
+		result.errors?.join(" | ") ?? "(无)",
+	);
 	check("恰好执行 maxTurns=2 个 turn", result.numTurns === 2, String(result.numTurns));
 	check("只发出 2 次模型请求", result.callCount === 2, `callCount=${result.callCount}`);
 }

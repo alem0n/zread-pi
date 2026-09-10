@@ -81,7 +81,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | --- | --- | --- |
 | `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout | 32/32 |
 | `test:agent` | pi 循环、工具执行、钩子、流式事件、429 重试、usage、thinkingLevel 透传、maxTurns | 11/11 |
-| `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 上限 `error_max_turns` | 17/17 |
+| `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 上限 `error_max_turns`（含可读错误文案） | 18/18 |
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
