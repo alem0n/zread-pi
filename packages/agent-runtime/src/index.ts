@@ -35,6 +35,33 @@ export type {
 } from "./providers/index.js";
 
 // ---------------------------------------------------------------------------
+// Provider 目录（pi-ai 登录 / 模型列表 / 多 Provider 配置）
+// ---------------------------------------------------------------------------
+
+export {
+	CUSTOM_PROVIDER_APIS,
+	getZreadCatalog,
+	reloadZreadCatalog,
+	setZreadCatalogConfig,
+	hasZreadProvider,
+	getZreadProvider,
+	getZreadProviderModels,
+	getZreadModel,
+	listZreadProviders,
+	refreshZreadProviderModels,
+	loginZreadProvider,
+	logoutZreadProvider,
+	resolveZreadProviderAuth,
+	streamZreadModel,
+	completeZreadModel,
+} from "./pi/provider-catalog.js";
+export type { ZreadCatalog, ZreadProviderSummary, CustomProviderApi } from "./pi/provider-catalog.js";
+export { FileCredentialStore } from "./pi/auth-store.js";
+export { FileModelsStore } from "./pi/models-store.js";
+export { createRuntimeModel, inferProviderId, resolveApiType } from "./pi/runtime-model.js";
+export type { RuntimeModel, RuntimeModelOptions } from "./pi/runtime-model.js";
+
+// ---------------------------------------------------------------------------
 // 工具
 // ---------------------------------------------------------------------------
 

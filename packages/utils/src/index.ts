@@ -19,7 +19,22 @@ export {
 export { logger, getLogFile } from './logger.js';
 
 // Config
-export { loadConfig, loadConfigSync, saveConfig, validateConfig, getDefaultLanguage, getConfigPath, isFirstTimeConfig, DEFAULT_CONFIG } from './config/index.js';
+export {
+  loadConfig,
+  loadConfigSync,
+  saveConfig,
+  validateConfig,
+  getDefaultLanguage,
+  getConfigPath,
+  getZreadDir,
+  getZreadAuthPath,
+  getZreadModelsStorePath,
+  getProviderConfig,
+  getConfiguredProviderIds,
+  normalizeProviderConfigs,
+  isFirstTimeConfig,
+  DEFAULT_CONFIG,
+} from './config/index.js';
 
 // Cache
 export {

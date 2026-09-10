@@ -23,7 +23,8 @@ import {
 	type TSchema,
 } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
-import { createRuntimeModel, type RuntimeModel } from "./pi/runtime-model.js";
+import { createRuntimeModel, inferProviderId, type RuntimeModel } from "./pi/runtime-model.js";
+import { hasZreadProvider } from "./pi/provider-catalog.js";
 import { computeBackoff, isRetryableMessage, sleep, type RetryConfig } from "./retry.js";
 import type {
 	ContentBlock,
@@ -374,7 +375,16 @@ class AgentRuntimeImpl implements AgentInstance {
 		const override = options.runtimeOverride;
 		if (!modelId && !override) throw new Error("Agent option `model` is required");
 		if (!options.apiKey && !override) {
-			throw new Error("LLM configuration incomplete: apiKey is required");
+			// 新版配置的凭据在 ~/.zread/auth.json（pi CredentialStore），
+			// 只要 providerId 命中 catalog 就无需显式 apiKey。
+			const providerId =
+				options.providerId ??
+				(modelId
+					? inferProviderId({ modelId, baseURL: options.baseURL, apiType: options.apiType })
+					: undefined);
+			if (!providerId || !hasZreadProvider(providerId)) {
+				throw new Error("LLM configuration incomplete: apiKey is required");
+			}
 		}
 
 		const cwd = options.cwd ?? process.cwd();
@@ -404,7 +414,7 @@ class AgentRuntimeImpl implements AgentInstance {
 			apiTypeForContext = runtime.apiType;
 			providerIdForContext = runtime.providerId;
 			streamBase = (streamModel, streamContext, streamOptions) =>
-				runtime.models.streamSimple(streamModel, streamContext, streamOptions);
+				runtime.streamSimple(streamModel, streamContext, streamOptions);
 		}
 
 		const toolDefinitions = (options.tools ?? []).filter(
