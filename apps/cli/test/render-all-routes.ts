@@ -16,6 +16,7 @@ await writeFile(
     "  model: gpt-4o-mini",
     "  api_key: sk-test",
     "  base_url: http://127.0.0.1:1/v1",
+    "  providers: {}",
     "concurrency:",
     "  max_concurrent: 3",
     "  max_retries: 1",
@@ -23,25 +24,10 @@ await writeFile(
   ].join("\n"),
   "utf-8",
 );
-await writeFile(
-  join(home, ".zread", "providers.json"),
-  JSON.stringify({
-    version: "t",
-    synced_at: new Date().toISOString(),
-    providers: {
-      "openai-compatible": {
-        id: "openai-compatible",
-        name: "OpenAI Compatible",
-        npm: "openai",
-        base_url: "http://127.0.0.1:1/v1",
-        models: { "gpt-4o-mini": { id: "gpt-4o-mini", name: "GPT-4o Mini", max_tokens: 16384 } },
-      },
-    },
-  }),
-  "utf-8",
-);
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+delete process.env.ANTHROPIC_API_KEY;
+delete process.env.OPENAI_API_KEY;
 process.chdir(await mkdtemp(join(tmpdir(), "zread-routes-repo-")));
 
 const { App } = await import("../src/tui/app");
@@ -71,9 +57,11 @@ const paths = [
   "/config/doc_language",
   "/config/provider",
   "/config/provider/custom",
-  "/config/provider/openai-compatible",
-  "/config/provider/openai-compatible/model/gpt-4o-mini",
+  "/config/provider/anthropic",
+  "/config/provider/anthropic/model/claude-sonnet-4-5",
+  "/config/provider/anthropic/model-new",
   "/config/provider/anthropic/custom",
+  "/config/provider/openai-compatible",
   "/config/concurrency",
   "/config/retry",
   "/wiki",

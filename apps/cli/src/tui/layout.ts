@@ -81,7 +81,11 @@ export class Layout implements Component {
 
     const llmProvider = config.llm.provider || "未设置";
     const llmModel = config.llm.model || "未设置";
-    const llmBaseUrl = config.llm.base_url || "default";
+    // base_url 优先看当前 provider 的覆盖配置（凭据/端点已迁到 per-provider 配置）
+    const providerBaseUrl = config.llm.provider
+      ? config.llm.providers?.[config.llm.provider]?.base_url
+      : null;
+    const llmBaseUrl = providerBaseUrl || config.llm.base_url || "default";
     const currentDir = getShortPath(process.cwd());
 
     return [

@@ -137,7 +137,7 @@ export function createProvider(
 				messages: params.messages.map(toPiMessage),
 			};
 
-			const message = await scoped.models.completeSimple(scoped.model, context, {
+			const message = await scoped.completeSimple(scoped.model, context, {
 				maxTokens: params.maxTokens,
 			});
 

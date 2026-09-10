@@ -173,16 +173,16 @@ export async function resolveBrowseChat(
   const config = await (deps.loadConfig ?? loadConfig)();
   const llm = config.llm;
 
-  if (!llm.provider || !llm.model || !llm.api_key) {
+  if (!llm.provider || !llm.model) {
     throw new BrowseChatHttpError(
       400,
       'missing_config',
-      'LLM provider, model, and API key must be configured',
+      'LLM provider and model must be configured',
     );
   }
 
   const provider = (deps.createProvider ?? createProvider)(llm.provider, {
-    apiKey: llm.api_key,
+    apiKey: llm.api_key ?? undefined,
     baseURL: llm.base_url ?? undefined,
   });
   const response = await provider.createMessage({

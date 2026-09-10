@@ -3,10 +3,33 @@ import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { parse, stringify } from 'yaml';
-import type { AppConfig } from '@open-zread/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig } from '@open-zread/types';
 import { ensureDir } from '../file-io';
 
-const CONFIG_PATH = join(homedir(), '.zread', 'config.yaml');
+/** ~/.zread 目录（延迟计算，测试可以覆盖 HOME/USERPROFILE） */
+export function getZreadDir(): string {
+  return join(homedir(), '.zread');
+}
+
+/** 应用配置文件路径 */
+export function getConfigPath(): string {
+  return join(getZreadDir(), 'config.yaml');
+}
+
+/**
+ * pi-ai 凭据文件路径。
+ *
+ * 与 pi coding-agent 的 auth.json 同格式：{ [providerId]: Credential }，
+ * 因此可以同时保存多个 Provider 的 API Key / OAuth token。
+ */
+export function getZreadAuthPath(): string {
+  return join(getZreadDir(), 'auth.json');
+}
+
+/** 动态模型目录缓存路径（pi ModelsStore 落盘位置） */
+export function getZreadModelsStorePath(): string {
+  return join(getZreadDir(), 'models-store.json');
+}
 
 /**
  * 默认配置 - 首次使用时的初始配置
@@ -19,6 +42,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     model: null,
     api_key: null,
     base_url: null,
+    providers: {},
   },
   concurrency: {
     max_concurrent: 1,
@@ -26,29 +50,104 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
 };
 
-export function getConfigPath(): string {
-  return CONFIG_PATH;
+/** 判断一个值是否是合法的自定义模型配置 */
+function normalizeCustomModel(value: unknown): CustomModelConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.id !== 'string' || raw.id.trim().length === 0) return null;
+
+  const model: CustomModelConfig = { id: raw.id.trim() };
+  if (typeof raw.name === 'string' && raw.name.trim()) model.name = raw.name.trim();
+  if (typeof raw.api === 'string' && raw.api.trim()) model.api = raw.api.trim();
+  if (typeof raw.base_url === 'string' && raw.base_url.trim()) model.base_url = raw.base_url.trim();
+  if (typeof raw.context_window === 'number' && Number.isFinite(raw.context_window)) {
+    model.context_window = raw.context_window;
+  }
+  if (typeof raw.max_tokens === 'number' && Number.isFinite(raw.max_tokens)) {
+    model.max_tokens = raw.max_tokens;
+  }
+  if (typeof raw.reasoning === 'boolean') model.reasoning = raw.reasoning;
+  if (typeof raw.supports_vision === 'boolean') model.supports_vision = raw.supports_vision;
+  return model;
+}
+
+/** 归一化单个 Provider 配置 */
+function normalizeProviderConfig(value: unknown): LlmProviderConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+
+  const authType: LlmAuthType | null =
+    raw.auth_type === 'api_key' || raw.auth_type === 'oauth' ? raw.auth_type : null;
+
+  const models = Array.isArray(raw.models)
+    ? raw.models.map(normalizeCustomModel).filter((model): model is CustomModelConfig => model !== null)
+    : [];
+
+  return {
+    auth_type: authType,
+    base_url: typeof raw.base_url === 'string' && raw.base_url.trim() ? raw.base_url.trim() : null,
+    api: typeof raw.api === 'string' && raw.api.trim() ? raw.api.trim() : null,
+    model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : null,
+    models,
+  };
+}
+
+/** 归一化 providers 映射（容错：坏数据直接忽略，不影响其它配置） */
+export function normalizeProviderConfigs(value: unknown): Record<string, LlmProviderConfig> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result: Record<string, LlmProviderConfig> = {};
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!id.trim()) continue;
+    const normalized = normalizeProviderConfig(entry);
+    if (normalized) result[id] = normalized;
+  }
+  return result;
+}
+
+/**
+ * 读取某个 Provider 的配置（不存在时返回空配置）。
+ * 调用方拿到的始终是一个完整对象，可直接修改后由 ConfigStore 落盘。
+ */
+export function getProviderConfig(config: AppConfig, providerId: string): LlmProviderConfig {
+  const existing = config.llm.providers?.[providerId];
+  return {
+    auth_type: existing?.auth_type ?? null,
+    base_url: existing?.base_url ?? null,
+    api: existing?.api ?? null,
+    model: existing?.model ?? null,
+    models: existing?.models ? [...existing.models] : [],
+  };
+}
+
+/** 已配置过的 Provider id 列表（含未内置的自定义 Provider） */
+export function getConfiguredProviderIds(config: AppConfig): string[] {
+  return Object.keys(config.llm.providers ?? {});
 }
 
 /**
  * 检查配置是否为首次配置（LLM 未配置）
+ *
+ * 新版配置把凭据保存在 ~/.zread/auth.json，因此只要 provider/model 已选定
+ * 就视为已配置；旧版 config.yaml 里的 api_key 仍然兼容。
  */
 export function isFirstTimeConfig(config: AppConfig): boolean {
+  if (config.llm.provider && config.llm.model) return false;
   return config.llm.api_key === null;
 }
 
 export async function loadConfig(): Promise<AppConfig> {
+  const configPath = getConfigPath();
   // 配置文件不存在，返回默认配置
-  if (!existsSync(CONFIG_PATH)) {
+  if (!existsSync(configPath)) {
     return DEFAULT_CONFIG;
   }
 
   try {
-    const content = await readFile(CONFIG_PATH, 'utf-8');
+    const content = await readFile(configPath, 'utf-8');
     const rawConfig = parse(content);
     return validateConfig(rawConfig);
   } catch (error) {
-    throw new Error(`Config file read failed: ${CONFIG_PATH}\nPlease ensure config file exists and format is correct`, { cause: error });
+    throw new Error(`Config file read failed: ${configPath}\nPlease ensure config file exists and format is correct`, { cause: error });
   }
 }
 
@@ -57,8 +156,9 @@ export async function loadConfig(): Promise<AppConfig> {
  */
 export function loadConfigSync(): AppConfig | null {
   try {
-    if (!existsSync(CONFIG_PATH)) return null;
-    const content = readFileSync(CONFIG_PATH, 'utf-8');
+    const configPath = getConfigPath();
+    if (!existsSync(configPath)) return null;
+    const content = readFileSync(configPath, 'utf-8');
     const rawConfig = parse(content);
     return validateConfig(rawConfig);
   } catch {
@@ -100,6 +200,7 @@ export function validateConfig(raw: unknown): AppConfig {
       model: llm.model as string | null,
       api_key: llm.api_key as string | null,
       base_url: llm.base_url as string | null,
+      providers: normalizeProviderConfigs(llm.providers),
     },
     concurrency: {
       max_concurrent: concurrency.max_concurrent as number,
@@ -111,8 +212,8 @@ export function validateConfig(raw: unknown): AppConfig {
 export async function saveConfig(config: AppConfig): Promise<void> {
   validateConfig(config);
   const yamlContent = stringify(config);
-  await ensureDir(dirname(CONFIG_PATH));
-  await writeFile(CONFIG_PATH, yamlContent, 'utf-8');
+  await ensureDir(dirname(getConfigPath()));
+  await writeFile(getConfigPath(), yamlContent, 'utf-8');
 }
 
 export function getDefaultLanguage(config: AppConfig): string {

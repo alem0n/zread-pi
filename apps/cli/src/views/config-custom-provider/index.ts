@@ -5,37 +5,19 @@
  * 1. 完全自定义 Provider (providerId === 'custom'): Base URL → Model Name → API Key
  * 2. 已有 Provider 自定义模型 (providerId !== 'custom'): Model Name → API Key
  *
- * 完成后直接返回首页，不自动保存（由首页 s 键统一保存）
+ * 凭据写入 ~/.zread/auth.json（pi-ai login），模型与 base_url 写入
+ * config.llm.providers[providerId]，由首页 s 键统一保存。
  */
 
 import { matchesKey } from "@earendil-works/pi-tui";
-import { getProviderRegistry } from "@open-zread/utils";
-import type { AppConfig } from "@open-zread/types";
+import { getZreadProvider, loginZreadProvider, setZreadCatalogConfig } from "@open-zread/agent-runtime";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { clampLine } from "../../tui/text-layout";
+import { migrateLegacyCredentials } from "../../utils/llm-config";
 
 type Step = "baseUrl" | "modelName" | "apiKey";
-
-interface PrefilledValues {
-  apiKey: string;
-  baseUrl: string;
-  modelName: string;
-}
-
-/** 与 usePrefilledConfig 等价的预填充计算 */
-function computePrefilled(providerId: string | undefined, config: AppConfig): PrefilledValues {
-  const id = providerId ?? "custom";
-  const providerMatches = id === config.llm.provider;
-  const modelMatches = providerMatches && config.llm.model !== null;
-
-  return {
-    apiKey: providerMatches ? (config.llm.api_key ?? "") : "",
-    baseUrl: providerMatches ? (config.llm.base_url ?? "") : "",
-    modelName: modelMatches ? (config.llm.model ?? "") : "",
-  };
-}
 
 export default class ConfigCustomProviderPage extends Screen {
   private providerId: string | undefined;
@@ -47,6 +29,7 @@ export default class ConfigCustomProviderPage extends Screen {
   private modelName = "";
   private apiKey = "";
   private errors: Record<Step, string> = { baseUrl: "", modelName: "", apiKey: "" };
+  private saving = false;
 
   private baseUrlField = new TextField();
   private modelNameField = new TextField();
@@ -69,17 +52,18 @@ export default class ConfigCustomProviderPage extends Screen {
 
     this.baseUrlField.onSubmit = () => this.handleBaseUrlSubmit();
     this.modelNameField.onSubmit = () => this.handleModelNameSubmit();
-    this.apiKeyField.onSubmit = () => this.handleApiKeySubmit();
+    this.apiKeyField.onSubmit = () => void this.handleApiKeySubmit();
 
-    // 预填充值：当前 provider 匹配时才预填充
-    const prefilled = computePrefilled(this.providerId, this.app.config.config);
-    if (prefilled.baseUrl) {
-      this.baseUrl = prefilled.baseUrl;
-      this.modelName = prefilled.modelName;
-      this.apiKey = prefilled.apiKey;
+    // 预填充：config.llm.providers[id] 的 base_url / 最近模型
+    const id = this.providerId ?? "custom";
+    const providerConfig = this.app.config.getProviderConfig(id);
+    if (providerConfig.base_url) {
+      this.baseUrl = providerConfig.base_url;
       this.baseUrlField.setValue(this.baseUrl);
+    }
+    if (providerConfig.model) {
+      this.modelName = providerConfig.model;
       this.modelNameField.setValue(this.modelName);
-      this.apiKeyField.setValue(this.apiKey);
     }
 
     this.baseUrlField.setPlaceholder(this.t("customProvider.baseUrlPlaceholder"));
@@ -180,6 +164,10 @@ export default class ConfigCustomProviderPage extends Screen {
       lines.push("", style(`Base URL: ${this.providerBaseUrl}`, { dim: true }));
     }
 
+    if (this.saving) {
+      lines.push("", style(this.t("auth.loggingIn"), { color: "yellow" }));
+    }
+
     // Footer（marginTop={1}）
     lines.push("", style(this.t("customProvider.footer"), { dim: true }));
 
@@ -233,18 +221,13 @@ export default class ConfigCustomProviderPage extends Screen {
 
   private async loadProvider(): Promise<void> {
     if (!this.providerId) return;
-    try {
-      const registry = await getProviderRegistry();
-      const provider = registry.getProvider(this.providerId);
-      if (provider) {
-        this.providerBaseUrl = provider.base_url || "";
-        if (provider.base_url) {
-          this.baseUrl = provider.base_url;
-          this.baseUrlField.setValue(provider.base_url);
-        }
+    const provider = getZreadProvider(this.providerId);
+    if (provider) {
+      this.providerBaseUrl = provider.baseUrl ?? "";
+      if (provider.baseUrl) {
+        this.baseUrl = provider.baseUrl;
+        this.baseUrlField.setValue(provider.baseUrl);
       }
-    } catch {
-      // 忽略加载失败
     }
     this.refresh();
   }
@@ -261,6 +244,7 @@ export default class ConfigCustomProviderPage extends Screen {
 
   /** 前一步（ESC 由此处理，App 不处理） */
   private handleBack(): void {
+    if (this.saving) return;
     this.errors = { baseUrl: "", modelName: "", apiKey: "" };
     switch (this.step) {
       case "baseUrl":
@@ -310,8 +294,8 @@ export default class ConfigCustomProviderPage extends Screen {
     this.setStep("apiKey");
   }
 
-  /** API Key 提交处理：设置字段值，直接返回首页 */
-  private handleApiKeySubmit(): void {
+  /** API Key 提交处理：pi-ai login 写凭据 + 配置写模型，返回上一级 */
+  private async handleApiKeySubmit(): Promise<void> {
     this.errors = { ...this.errors, apiKey: "" };
 
     if (!this.apiKey.trim()) {
@@ -320,15 +304,42 @@ export default class ConfigCustomProviderPage extends Screen {
       return;
     }
 
-    // 设置配置字段（暂存，由首页 s 键统一保存）
-    this.app.config.setField("llm.provider", this.providerId || "custom");
-    this.app.config.setField("llm.model", this.modelName.trim());
-    this.app.config.setField("llm.api_key", this.apiKey.trim());
-    const finalBaseUrl = this.baseUrl.trim() || this.providerBaseUrl;
-    if (finalBaseUrl) {
-      this.app.config.setField("llm.base_url", finalBaseUrl);
+    const providerId = this.providerId || "custom";
+    const modelId = this.modelName.trim();
+    const finalBaseUrl = (this.baseUrl.trim() || this.providerBaseUrl) || null;
+
+    // 1) 配置：provider + 自定义模型（先迁移旧扁平字段，再切当前模型）
+    this.app.config.setProviderConfig(providerId, {
+      base_url: finalBaseUrl,
+      api: this.app.config.getProviderConfig(providerId).api ?? "openai-completions",
+      auth_type: "api_key",
+    });
+    this.app.config.upsertCustomModel(providerId, { id: modelId, name: modelId });
+    await migrateLegacyCredentials(this.app.config);
+    this.app.config.setActiveModel(providerId, modelId);
+
+    // 2) 凭据：交给 pi-ai login 写入 ~/.zread/auth.json
+    this.saving = true;
+    this.refresh();
+    try {
+      setZreadCatalogConfig(this.app.config.config);
+      await loginZreadProvider(providerId, "api_key", {
+        prompt: async () => this.apiKey.trim(),
+        notify: () => {
+          // 自定义 Provider 的 api_key 登录没有额外事件
+        },
+      });
+    } catch (err) {
+      this.errors = {
+        ...this.errors,
+        apiKey: err instanceof Error ? err.message : String(err),
+      };
+      this.saving = false;
+      this.refresh();
+      return;
     }
 
+    this.saving = false;
     // 直接返回上一级（使用 -1 避免路由栈堆积）
     this.app.releaseEsc();
     this.app.navigate(-1);

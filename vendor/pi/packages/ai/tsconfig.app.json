@@ -10,7 +10,20 @@
 		"src/index.ts",
 		"src/api/anthropic-messages.lazy.ts",
 		"src/api/openai-completions.lazy.ts",
-		"src/api/openai-responses.lazy.ts"
+		"src/api/openai-responses.lazy.ts",
+		"src/providers/all.ts",
+		"src/bun-oauth.ts",
+		"src/auth/oauth/load.ts",
+		"src/auth/oauth/anthropic.ts",
+		"src/auth/oauth/device-code.ts",
+		"src/auth/oauth/github-copilot.ts",
+		"src/auth/oauth/kimi-coding.ts",
+		"src/auth/oauth/oauth-page.ts",
+		"src/auth/oauth/openai-codex.ts",
+		"src/auth/oauth/openrouter.ts",
+		"src/auth/oauth/pkce.ts",
+		"src/auth/oauth/radius.ts",
+		"src/auth/oauth/xai.ts"
 	],
 	"exclude": ["node_modules", "dist", "**/*.d.ts", "src/**/*.d.ts"]
 }

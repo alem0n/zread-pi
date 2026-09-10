@@ -11,7 +11,7 @@
  * 运行：bun run test:tui（无需真实 API Key / 网络）
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
@@ -76,57 +76,12 @@ await writeFile(
   "utf-8",
 );
 
-// 预置 Provider 缓存（避免测试触发网络同步）；刻意多放一些 provider 以覆盖长列表分页
-const extraProviders: Record<string, unknown> = {};
-for (let i = 1; i <= 60; i++) {
-  const id = `p-${String(i).padStart(2, "0")}`;
-  extraProviders[id] = {
-    id,
-    name: `Provider ${i}`,
-    npm: `npm-${i}`,
-    base_url: "http://127.0.0.1:1/v1",
-    models: { m1: { id: "m1", name: "M1", max_tokens: 4096 } },
-  };
-}
-
-await writeFile(
-  join(home, ".zread", "providers.json"),
-  JSON.stringify({
-    version: "test",
-    synced_at: new Date().toISOString(),
-    providers: {
-      "openai-compatible": {
-        id: "openai-compatible",
-        name: "OpenAI Compatible",
-        npm: "openai",
-        base_url: "http://127.0.0.1:1/v1",
-        models: {
-          "gpt-4o-mini": { id: "gpt-4o-mini", name: "GPT-4o Mini", max_tokens: 16384, supports_tools: true },
-        },
-      },
-      anthropic: {
-        id: "anthropic",
-        name: "Anthropic",
-        npm: "@ai-sdk/anthropic",
-        models: {
-          "claude-sonnet-4-6": {
-            id: "claude-sonnet-4-6",
-            name: "Claude Sonnet 4.6",
-            max_tokens: 16384,
-            supports_tools: true,
-            supports_vision: true,
-            supports_thinking: true,
-          },
-        },
-      },
-      ...extraProviders,
-    },
-  }),
-  "utf-8",
-);
-
+// 预置 Provider 目录不再需要：Provider/模型列表直接来自 pi-ai 内置目录。
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// 避免宿主环境的 API Key 影响「未配置」判定（测试走 auth.json）
+delete process.env.ANTHROPIC_API_KEY;
+delete process.env.OPENAI_API_KEY;
 process.chdir(repo);
 
 const { App } = await import("../src/tui/app");
@@ -329,20 +284,29 @@ console.log("▶ TUI 冒烟测试");
   app.exit();
 }
 
-// --- 用例 5：config provider 列表（j/k 导航 + Enter 进入模型页）---
+// --- 用例 5：config provider 列表（pi-ai 内置目录 + 登录状态 + Enter 进入模型页）---
 {
   const { app, terminal } = createApp(["/config/provider"]);
   await app.start();
   await settle();
 
-  const text = screenText(app);
-  checkContains("Provider 页：自定义选项固定第一位", text, "自定义 Provider...");
-  checkContains("Provider 页：本地缓存 provider", text, "OpenAI Compatible");
-  checkContains("Provider 页：当前 provider 标记", text, "← 当前");
+  // 初始选中当前生效的旧 provider（openai-compatible，列表末尾）
+  let text = screenText(app);
+  checkContains("Provider 页：当前 provider 标记", text, "│ openai-compatible");
+  checkContains("Provider 页：当前 provider 标记文字", text, "← 当前");
+  checkContains("Provider 页：已配置标记（旧扁平 api_key）", text, "已配置");
   checkContains("Provider 页 Footer", text, "↑↓ 导航 | enter 选择 | / 搜索 | r 刷新 | esc 返回");
 
-  // 选中第一项（自定义 Provider）→ Enter → /config/provider/custom
-  terminal.send("k");
+  // Home 回顶部：自定义选项固定第一位 + pi-ai 内置 provider
+  terminal.send("\x1b[H");
+  await settle(10);
+  text = screenText(app);
+  checkContains("Provider 页：自定义选项固定第一位", text, "自定义 Provider...");
+  checkContains("Provider 页：pi-ai 内置 provider", text, "Anthropic");
+  checkContains("Provider 页：内置 provider 模型数", text, "个模型");
+  checkContains("Provider 页：未配置标记", text, "未配置");
+
+  // 当前就在首项（自定义 Provider）→ Enter → /config/provider/custom
   terminal.send("\r");
   await settle();
   const customText = screenText(app);
@@ -374,44 +338,176 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("\x1b");
   await settle(10);
   text = screenText(app);
-  checkContains("esc 退出搜索并恢复列表", text, "自定义 Provider...");
+  check("esc 退出搜索模式", !text.includes("搜索: "), indent(text));
+  checkContains("esc 退出搜索并恢复列表（当前 provider 行）", text, "│ openai-compatible");
   check("退出搜索后未退出应用", true);
 
   app.exit();
 }
 
-// --- 用例 7：API Key 两步输入（API Key → Base URL）---
+// --- 用例 7：登录页（OAuth/API Key 选择 + pi-ai login 写 auth.json）---
 {
-  const { app, terminal } = createApp(["/config/provider/openai-compatible/model/gpt-4o-mini"]);
+  const { app, terminal } = createApp(["/config/provider/anthropic/model/claude-sonnet-4-5"]);
   await app.start();
   await settle();
 
   let text = screenText(app);
-  checkContains("API Key 步骤：预填充值可见", text, "API Key: sk-test");
-  checkContains("API Key 步骤：提示下一步", text, "enter 下一步 | ESC 返回");
+  checkContains("登录页：显示提供商与模型", text, "Anthropic");
+  checkContains("登录页：未配置状态", text, "未配置");
+  checkContains("登录页：选择登录方式", text, "选择登录方式");
+  checkContains("登录页：OAuth 选项", text, "账号登录 (OAuth)");
+  checkContains("登录页：API Key 选项", text, "API Key 登录");
+  checkContains("登录页 Footer", text, "↑↓ 选择 | enter 确认 | esc 返回");
 
+  // ↓ 选中 API Key 登录 → Enter → pi-ai 的 prompt
+  terminal.send("\x1b[B");
   terminal.send("\r");
-  await settle(10);
+  await settle(50);
   text = screenText(app);
-  checkContains("进入 Base URL 步骤", text, "Base URL: http://127.0.0.1:1/v1");
-  checkContains("Base URL 步骤：提示保存", text, "enter 保存 | esc 返回编辑 API Key");
+  checkContains("进入 API Key 提示（pi-ai prompt）", text, "Enter Anthropic API key");
 
-  terminal.send("\x1b");
-  await settle(10);
-  checkContains("Base URL 步骤按 esc 回到 API Key 步骤", screenText(app), "enter 下一步 | ESC 返回");
+  terminal.send("sk-ant-test");
+  await settle(20);
+  terminal.send("\r");
+  await settle(80);
 
-  // 再次进入 Base URL 步骤并保存（写回配置字段）
-  terminal.send("\r");
-  await settle(10);
-  terminal.send("\r");
-  await settle(10);
   check(
-    "保存后写回 llm.provider/model/api_key",
-    app.config.config.llm.provider === "openai-compatible" &&
-      app.config.config.llm.model === "gpt-4o-mini" &&
-      app.config.config.llm.api_key === "sk-test",
-    JSON.stringify(app.config.config.llm),
+    "登录后写回 llm.provider/model",
+    app.config.config.llm.provider === "anthropic" &&
+      app.config.config.llm.model === "claude-sonnet-4-5",
+    JSON.stringify({ provider: app.config.config.llm.provider, model: app.config.config.llm.model }),
   );
+  check(
+    "凭据写入 ~/.zread/auth.json",
+    await (async () => {
+      const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
+        string,
+        { type?: string; key?: string }
+      >;
+      return raw.anthropic?.type === "api_key" && raw.anthropic.key === "sk-ant-test";
+    })(),
+    "auth.json anthropic",
+  );
+  check("旧扁平 api_key 被清空（凭据已迁移）", app.config.config.llm.api_key === null);
+  check(
+    "记住该 Provider 上次选择的模型",
+    app.config.getProviderConfig("anthropic").model === "claude-sonnet-4-5",
+  );
+
+  app.exit();
+}
+
+// --- 用例 7b：同时配置多个提供商（openai 追加登录，不覆盖 anthropic）---
+{
+  const { app, terminal } = createApp(["/config/provider/openai/model/gpt-4o"]);
+  await app.start();
+  await settle();
+
+  let text = screenText(app);
+  checkContains("仅 API Key 的 Provider 直接进入输入", text, "Enter OpenAI API key");
+  terminal.send("sk-openai-test");
+  await settle(20);
+  terminal.send("\r");
+  await settle(80);
+
+  const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
+    string,
+    { key?: string }
+  >;
+  check(
+    "auth.json 同时保存两个 Provider",
+    raw.anthropic?.key === "sk-ant-test" && raw.openai?.key === "sk-openai-test",
+    Object.keys(raw).join(","),
+  );
+  check(
+    "当前 provider 切换到 openai",
+    app.config.config.llm.provider === "openai" && app.config.config.llm.model === "gpt-4o",
+    JSON.stringify({ provider: app.config.config.llm.provider, model: app.config.config.llm.model }),
+  );
+
+  app.exit();
+}
+
+// --- 用例 7c：登录后 Provider 列表显示已配置 ---
+{
+  const { app, terminal } = createApp(["/config/provider"]);
+  await app.start();
+  await settle(60);
+  terminal.send("\x1b[H");
+  await settle(10);
+  const text = screenText(app);
+  checkContains("Provider 列表显示 anthropic 已配置", text, "Anthropic");
+  checkContains("Provider 列表显示 OAuth/API Key 状态", text, "已配置 API Key");
+  app.exit();
+}
+
+// --- 用例 7d：退出登录只删除目标 Provider 的凭据 ---
+{
+  const { app, terminal } = createApp(["/config/provider/anthropic/model/claude-sonnet-4-5"]);
+  await app.start();
+  await settle(60);
+
+  checkContains("已配置页面显示登录状态", screenText(app), "已配置");
+  terminal.send("d");
+  await settle(80);
+
+  const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<string, unknown>;
+  check("退出登录删除该 Provider 凭据", raw.anthropic === undefined, Object.keys(raw).join(","));
+  check("退出登录不影响其它 Provider", raw.openai !== undefined, Object.keys(raw).join(","));
+  const text = screenText(app);
+  checkContains("退出后显示已退出提示", text, "已退出登录");
+  checkContains("退出后可重新选择登录方式", text, "选择登录方式");
+
+  app.exit();
+}
+
+// --- 用例 7e：为指定 Provider 添加自定义模型 ---
+{
+  const { app, terminal } = createApp(["/config/provider/deepseek"]);
+  await app.start();
+  await settle();
+
+  let text = screenText(app);
+  checkContains("模型页：Provider 名与模型数", text, "DeepSeek");
+  checkContains("模型页 Footer", text, "r 刷新模型 | a 自定义模型");
+
+  terminal.send("a");
+  await settle();
+  text = screenText(app);
+  checkContains("自定义模型页：步骤 1/5", text, "步骤 1/5");
+  checkContains("自定义模型页：模型 ID", text, "模型 ID");
+
+  terminal.send("my-custom-model");
+  terminal.send("\r");
+  await settle(20);
+  terminal.send("\r"); // 跳过显示名称
+  await settle(20);
+  terminal.send("\r"); // 上下文窗口默认 128000
+  await settle(20);
+  terminal.send("\r"); // 最大输出默认 16384
+  await settle(20);
+  text = screenText(app);
+  checkContains("自定义模型页：能力开关", text, "支持思考");
+
+  terminal.send("t"); // 打开「支持思考」
+  await settle(20);
+  terminal.send("\r"); // 保存
+  await settle(40);
+
+  const customModels = app.config.getProviderConfig("deepseek").models ?? [];
+  check(
+    "自定义模型写入 config.llm.providers.deepseek.models",
+    customModels.some((model) => model.id === "my-custom-model" && model.reasoning === true),
+    JSON.stringify(customModels),
+  );
+  text = screenText(app);
+  checkContains("返回模型列表并显示自定义模型", text, "my-custom-model");
+  checkContains("自定义模型带标记", text, "[自定义]");
+
+  // 刷新模型列表（静态目录：给出说明且不报错）
+  terminal.send("r");
+  await settle(40);
+  checkContains("静态 Provider 刷新提示", screenText(app), "使用内置模型目录");
 
   app.exit();
 }
@@ -422,42 +518,49 @@ console.log("▶ TUI 冒烟测试");
   await app.start();
   await settle();
 
-  // providers.json 里 62 个 provider + “自定义 Provider” = 63 项，终端 40 行装不下
+  // pi-ai 内置 40 个 provider + 自定义选项 + 旧配置的 openai-compatible = 42 项
   let text = screenText(app);
+  const total = Number(/\((\d+)\/(\d+)\)/.exec(text)?.[2] ?? "0");
+  check("长列表：provider 总数 >= 40", total >= 40, `total=${total}`);
   check(
     "长列表：整页渲染不超过终端高度（不会把内容挤出屏幕）",
     app.tui.render(100).length <= terminal.rows,
     `lines=${app.tui.render(100).length} rows=${terminal.rows}`,
   );
-  checkContains("长列表：位置指示出现", text, "(2/63)");
-  checkContains("长列表：窗口内首项可见", text, "Provider 1 ");
-  check("长列表：只渲染可视窗口（不含远端项）", !text.includes("Provider 60"), indent(text));
-
-  // ↓ 30 次：选中项必须仍在可视窗口内
-  for (let i = 0; i < 30; i++) terminal.send("\x1b[B");
-  text = screenText(app);
-  checkContains("滚动后选中项仍在可视区", text, "│ Provider 29 ");
-  checkContains("滚动后位置指示更新", text, "(32/63)");
-
-  // End：末项
-  terminal.send("\x1b[F");
-  text = screenText(app);
-  checkContains("End 跳到末项", text, "│ Provider 60 ");
-  checkContains("末项位置指示", text, "(63/63)");
+  // 当前 provider（openai-compatible，排在最后一项）默认被选中
+  checkContains("长列表：位置指示出现", text, `(${total}/${total})`);
+  checkContains("长列表：当前 provider 可见", text, "openai-compatible");
+  check("长列表：只渲染可视窗口（不含远端项）", !text.includes("Amazon Bedrock"), indent(text));
 
   // Home：首项
   terminal.send("\x1b[H");
   text = screenText(app);
   checkContains("Home 跳到首项", text, "│ 自定义 Provider...");
-  checkContains("首项位置指示", text, "(1/63)");
+  checkContains("首项位置指示", text, `(1/${total})`);
+  check("Home 后远端项消失", !text.includes("│ openai-compatible"), indent(text));
+
+  // ↓ 30 次：选中项必须仍在可视窗口内
+  for (let i = 0; i < 30; i++) terminal.send("\x1b[B");
+  text = screenText(app);
+  const position = Number(/\((\d+)\/(\d+)\)/.exec(text)?.[1] ?? "0");
+  check("滚动后选中项仍在可视区", position === 31, `position=${position}`);
+  checkContains("滚动后位置指示更新", text, `(31/${total})`);
+
+  // End：末项
+  terminal.send("\x1b[F");
+  text = screenText(app);
+  checkContains("End 跳到末项", text, "│ openai-compatible");
+  checkContains("末项位置指示", text, `(${total}/${total})`);
 
   // PageDown / PageUp：整页跳转
-  const before = Number(/\((\d+)\/63\)/.exec(text)?.[1] ?? "0");
+  terminal.send("\x1b[H");
+  await settle(10);
+  const before = Number(/\((\d+)\/(\d+)\)/.exec(screenText(app))?.[1] ?? "0");
   terminal.send("\x1b[6~");
-  const afterDown = Number(/\((\d+)\/63\)/.exec(screenText(app))?.[1] ?? "0");
+  const afterDown = Number(/\((\d+)\/(\d+)\)/.exec(screenText(app))?.[1] ?? "0");
   check("PageDown 整页向下跳转", afterDown - before >= 5, `${before} -> ${afterDown}`);
   terminal.send("\x1b[5~");
-  const afterUp = Number(/\((\d+)\/63\)/.exec(screenText(app))?.[1] ?? "0");
+  const afterUp = Number(/\((\d+)\/(\d+)\)/.exec(screenText(app))?.[1] ?? "0");
   check("PageUp 整页向上跳转", afterDown - afterUp >= 5, `${afterDown} -> ${afterUp}`);
 
   app.exit();
@@ -473,8 +576,8 @@ console.log("▶ TUI 冒烟测试");
   const lines = app.tui.render(100);
   check("小终端：渲染行数不超过终端高度", lines.length <= 20, `lines=${lines.length}`);
   const text = screenText(app);
-  checkContains("小终端：选中项可见", text, "│ OpenAI Compatible");
-  checkContains("小终端：仍可翻页", text, "(2/63)");
+  checkContains("小终端：选中项可见", text, "│ openai-compatible");
+  checkContains("小终端：仍可翻页", text, `(${42}/${42})`);
 
   // 缩小到 14 行：仍不应把选中项挤出屏幕
   terminal.rows = 14;
@@ -482,7 +585,7 @@ console.log("▶ TUI 冒烟测试");
   await settle(30);
   const small = app.tui.render(100);
   check("14 行终端：渲染行数可控", small.length <= 16, `lines=${small.length}`);
-  checkContains("14 行终端：列表仍渲染选中项", screenText(app), "OpenAI Compatible");
+  checkContains("14 行终端：列表仍渲染选中项", screenText(app), "openai-compatible");
 
   app.exit();
 }

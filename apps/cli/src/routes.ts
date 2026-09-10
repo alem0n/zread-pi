@@ -6,8 +6,9 @@
 
 import type { RouteDefinition } from "./tui/router";
 import BrowsePage from "./views/browse";
-import ConfigApiKeyPage from "./views/config-apikey";
+import ConfigAuthPage from "./views/config-auth";
 import ConfigConcurrencyPage from "./views/config-concurrency";
+import ConfigCustomModelPage from "./views/config-custom-model";
 import ConfigCustomProviderPage from "./views/config-custom-provider";
 import ConfigDocLanguagePage from "./views/config-doc-language";
 import ConfigHomePage from "./views/config-home";
@@ -28,12 +29,14 @@ export const routes: RouteDefinition[] = [
   // 注意：具体路径要在参数化路径之前，否则 'custom' 会被当作 providerId
   { pattern: "/config/provider/custom", create: () => new ConfigCustomProviderPage() },
   { pattern: "/config/provider/:providerId", create: () => new ConfigModelPage() },
-  { pattern: "/config/provider/:providerId/model/:modelId", create: () => new ConfigApiKeyPage() },
-  { pattern: "/config/provider/:providerId/custom", create: () => new ConfigCustomProviderPage() },
+  { pattern: "/config/provider/:providerId/model-new", create: () => new ConfigCustomModelPage() },
+  { pattern: "/config/provider/:providerId/model/:modelId", create: () => new ConfigAuthPage() },
+  // 兼容旧路由：等同于「为该 Provider 添加自定义模型」
+  { pattern: "/config/provider/:providerId/custom", create: () => new ConfigCustomModelPage() },
   { pattern: "/config/concurrency", create: () => new ConfigConcurrencyPage() },
   { pattern: "/config/retry", create: () => new ConfigRetryPage() },
 
-  // ========== Wiki 模块路由 ==========
+  // ========== Wiki 模块路由 ===========
   { pattern: "/wiki", create: () => new WikiHomePage() },
   { pattern: "/wiki/generate", create: () => new WikiGeneratePage() },
   { pattern: "/wiki/sync", create: () => new WikiSyncPage() },

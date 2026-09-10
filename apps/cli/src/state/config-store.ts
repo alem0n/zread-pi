@@ -5,9 +5,11 @@
  * - setField 支持 "llm.provider" / "concurrency.max_concurrent" 形式的嵌套字段
  * - hasChanges 通过深拷贝基线比较（避免原地修改导致基线被同步改写）
  * - save() 写盘成功后把当前值记为新的基线
+ *
+ * 新增：per-provider 配置与自定义模型（同时配置多个 Provider）。
  */
 
-import type { AppConfig } from "@open-zread/types";
+import type { AppConfig, CustomModelConfig, LlmProviderConfig } from "@open-zread/types";
 import { DEFAULT_CONFIG, isFirstTimeConfig, loadConfig, saveConfig } from "@open-zread/utils";
 
 export class ConfigStore {
@@ -49,6 +51,65 @@ export class ConfigStore {
     if (key === "language" || key === "doc_language") {
       this.config[key] = value as string;
     }
+  }
+
+  // ==================== Provider / 模型 ====================
+
+  /** 读取某个 Provider 的配置（始终返回完整对象） */
+  getProviderConfig(providerId: string): LlmProviderConfig {
+    const existing = this.config.llm.providers?.[providerId];
+    return {
+      auth_type: existing?.auth_type ?? null,
+      base_url: existing?.base_url ?? null,
+      api: existing?.api ?? null,
+      model: existing?.model ?? null,
+      models: existing?.models ? [...existing.models] : [],
+    };
+  }
+
+  /** 局部更新某个 Provider 的配置 */
+  setProviderConfig(providerId: string, patch: Partial<LlmProviderConfig>): void {
+    const providers = { ...(this.config.llm.providers ?? {}) };
+    const current = this.getProviderConfig(providerId);
+    providers[providerId] = {
+      ...current,
+      ...patch,
+      models: patch.models ? [...patch.models] : current.models,
+    };
+    this.config.llm.providers = providers;
+  }
+
+  /** 为指定 Provider 添加/覆盖自定义模型（同 id 覆盖，与 pi models.json 语义一致） */
+  upsertCustomModel(providerId: string, model: CustomModelConfig): void {
+    const current = this.getProviderConfig(providerId);
+    const models = [...(current.models ?? [])];
+    const index = models.findIndex((entry) => entry.id === model.id);
+    if (index >= 0) models[index] = model;
+    else models.push(model);
+    this.setProviderConfig(providerId, { models });
+  }
+
+  /** 删除指定 Provider 的自定义模型 */
+  removeCustomModel(providerId: string, modelId: string): void {
+    const current = this.getProviderConfig(providerId);
+    const models = (current.models ?? []).filter((entry) => entry.id !== modelId);
+    this.setProviderConfig(providerId, { models });
+  }
+
+  /** 把某个模型设为当前生效模型（同时记住该 Provider 上次的选择） */
+  setActiveModel(providerId: string, modelId: string): void {
+    this.config.llm.provider = providerId;
+    this.config.llm.model = modelId;
+    this.setProviderConfig(providerId, { model: modelId });
+  }
+
+  /**
+   * 凭据已交给 ~/.zread/auth.json（pi CredentialStore），
+   * 清掉 config.yaml 里的旧扁平 api_key/base_url，避免旧值覆盖新登录结果。
+   */
+  clearLegacyCredentials(): void {
+    this.config.llm.api_key = null;
+    this.config.llm.base_url = null;
   }
 
   get hasChanges(): boolean {

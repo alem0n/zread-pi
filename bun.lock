@@ -42,6 +42,8 @@
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.85.1",
         "@earendil-works/pi-ai": "0.85.1",
+        "@open-zread/types": "workspace:*",
+        "@open-zread/utils": "workspace:*",
       },
     },
     "packages/orchestrator": {
