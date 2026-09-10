@@ -178,6 +178,7 @@ export const zhCN: TranslationKeys = {
   maxTurns: {
     set: '设置最大轮次',
     range: '范围: 1-100',
+    hint: '到达上限前会提示模型立即输出，并自动追加 1 轮收尾轮',
     invalid: '请输入 1-100 之间的整数',
     current: '当前值',
     footer: 'ESC 返回 | Enter 确认 | s 保存并返回',

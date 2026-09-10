@@ -387,6 +387,7 @@ console.log("▶ TUI 冒烟测试");
   const text = screenText(app);
   checkContains("最大轮次页：当前值（旧配置缺省为 30）", text, "当前值: 30");
   checkContains("最大轮次页：范围", text, "范围: 1-100");
+  checkContains("最大轮次页：宽限轮说明", text, "自动追加 1 轮收尾轮");
   checkContains("最大轮次页 Footer", text, "ESC 返回 | Enter 确认 | s 保存并返回");
 
   // 清空后输入 50 → Enter

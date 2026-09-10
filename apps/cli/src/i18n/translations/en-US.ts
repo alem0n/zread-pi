@@ -178,6 +178,7 @@ export const enUS: TranslationKeys = {
   maxTurns: {
     set: 'Set Max Turns',
     range: 'Range: 1-100',
+    hint: 'The model is told to finalize before the limit; 1 grace turn is added automatically',
     invalid: 'Please enter an integer between 1-100',
     current: 'Current',
     footer: 'ESC to go back | Enter to confirm | s to save and go back',

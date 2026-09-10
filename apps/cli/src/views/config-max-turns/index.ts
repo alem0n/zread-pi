@@ -71,6 +71,8 @@ export default class ConfigMaxTurnsPage extends Screen {
 
     // 范围提示（marginTop={1}）
     lines.push("", style(this.t("maxTurns.range"), { dim: true }));
+    // 语义提示：max_turns 是工作轮数，超出后自动追加收尾轮
+    lines.push(style(this.t("maxTurns.hint"), { dim: true }));
 
     // 错误提示
     if (this.error) {

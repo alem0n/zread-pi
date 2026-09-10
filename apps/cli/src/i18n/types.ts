@@ -180,6 +180,7 @@ export interface TranslationKeys {
   maxTurns: {
     set: string;
     range: string;
+    hint: string;
     invalid: string;
     current: string;
     footer: string;

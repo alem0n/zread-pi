@@ -34,7 +34,7 @@
 
 ```ts
 createAgent({ model, providerId, apiKey, baseURL, cwd, systemPrompt,
-              tools, maxTurns, thinkingLevel, compaction, hooks, retryConfig, includePartialMessages })
+              tools, maxTurns, thinkingLevel, compaction, finalization, hooks, retryConfig, includePartialMessages })
   -> { query(prompt): AsyncGenerator<SDKMessage>, close(): Promise<void>, abort() }
 
 createProvider(providerIdOrApiType, { apiKey, baseURL })
@@ -55,7 +55,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 思考深度 | 新增 `thinkingLevel` 选项（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，缺省 `off` = 旧行为）与 `config.llm.thinking_level`：pi 以 `options.reasoning` 下发，模型不支持时 pi-ai 在请求时自动 clamp。 |
 | 会话 | 旧实现的 `saveSession/loadSession/tag/rename/fork` 未迁移；wiki 生成是一次性 agent，不需要。若 CLI 后续要做"会话聊天"，需接 pi 的 JSONL 会话树。 |
 | 上下文窗口/定价 | 旧 `MODEL_PRICING` 表未迁移，`Model` 用保守默认（200k 窗口 / 8k 输出、cost=0）。pi 的 usage 记账照常工作，只是成本字段为 0。 |
-| 最大轮次 | 旧实现在 Orchestrator 硬编码 30；现由 `config.agent.max_turns`（默认 30）提供，`createAgent({ maxTurns })` 仍可显式覆盖。 |
+| 最大轮次 | 旧实现在 Orchestrator 硬编码 30；现由 `config.agent.max_turns`（默认 30）提供，`createAgent({ maxTurns })` 仍可显式覆盖。到达上限前会向模型注入收尾提示（steering user 消息），超限后默认允许 1 轮宽限（`finalization.graceTurns`，0 = 旧行为）；模型在最后一轮给出最终答复（无工具调用）时按 success 处理，不再误报 `error_max_turns`。 |
 | 上下文压缩 | 旧引擎的「自动压缩」语义由 pi 的 `transformContext` + `compaction` 对等实现：超阈值时摘要历史（发出 `system/compact_boundary`），摘要请求会额外消耗一次模型调用；压缩无法再腾出空间时在本轮边界优雅停止（`error_context_full`）。 |
 | 事件粒度 | `assistant` 事件在 `message_end` 产出（完整内容 + usage）；流式增量以 `partial_message` 产出（旧引擎同形）。 |
 
@@ -183,7 +183,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ```bash
 bun run typecheck
 bun run test:catalog    # 32/32
-bun run test            # 全部套件（含 test:context 18/18、TUI 150 + 路由 16 + 真实终端 9 + mock 全链路 19）
+bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路由 16 + 真实终端 9 + mock 全链路 19）
 ```
 
 ### 8.5 思考深度（pi thinking level，第四步）
@@ -208,6 +208,13 @@ bun run test            # 全部套件（含 test:context 18/18、TUI 150 + 路�
 - UI：配置首页「最大轮次」项 → `/config/max-turns`（`apps/cli/src/views/config-max-turns`）；
 - Orchestrator：`agents/create-agent.ts` 改为 `options.maxTurns ?? config.agent.max_turns ?? 30`，`wiki/generate-wiki.ts` 删除写死的 `maxTurns: 30`（`GenerateWikiOptions.maxTurns` 仍可显式覆盖）。
 
+**a2) 轮次收尾：提示 + 宽限轮（`finalization`）**
+
+- 适配层在 `shouldStopAfterTurn` 中倒数第 1 轮/每个宽限轮前通过 `agent.steer()` 注入一条 user 消息（`FinalizationOptions.notice`，缺省英文文案）；
+- Orchestrator 按 `doc_language` 下发本地化文案并点名输出工具（`write_page` / `generate_blueprint`）；
+- 宽限轮数 `graceTurns` 缺省 1（因此实际最多 `max_turns + 1` 轮），`0` 可回到旧行为；上下文将满时优先压缩/优雅停止，**不**发宽限轮；
+- 本轮无工具调用（模型已给出最终答复）时不受轮次/上下文预算影响，避免把「刚好在最后一轮完成」误判为失败。
+
 **b) 上下文压缩与优雅停止（pi `transformContext` + `compaction`）**
 
 - `packages/agent-runtime/src/agent.ts` 在每次请求前（`transformContext`）用 `estimateContextTokens` + `shouldCompact`
@@ -218,5 +225,6 @@ bun run test            # 全部套件（含 test:context 18/18、TUI 150 + 路�
   如果上下文将满且压缩已无法腾出空间（单个巨大 turn、可总结内容为空、摘要请求失败/关闭压缩），
   在轮次边界优雅停止并产出 `subtype: "error_context_full"`；
 - `convertToLlm` 改用 pi harness 版本，保证 `compactionSummary` 消息能转成模型可见的 user 消息；
-- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，18 项）覆盖
-  「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」「maxTurns → error_max_turns（可读错误文案）」。
+- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，35 项）覆盖
+  「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」
+  「最后一轮软提示 + 宽限轮提示 → success」「仍不收敛 → error_max_turns」「graceTurns=0 = 旧行为」「最后一轮完成不误报失败」。
