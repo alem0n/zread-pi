@@ -24,6 +24,7 @@
 | 未改动 | `orchestrator` 的 prompts / 三层 Repo Map 工具 / 并发与错误隔离 / wiki 契约；`repo-analyzer`；`utils`；`types`；`browse` 全部前端代码（`cli` 的 TUI 在第二步换成 pi-tui，见 §7） |
 | 依赖修正 | `apps/cli` 补 `@types/express`；`vendor/pi/packages/ai` 补 `@smithy/types` |
 | 配置界面（第三步） | `apps/cli` 的 Provider/模型页面改为 pi-ai 目录 + `Models.login`；Provider 详情页为「API Key 配置 + 模型选择」并列布局（只提供 API Key）；`agent-runtime` 新增 `src/pi/{provider-catalog,auth-store,models-store}.ts`；配置结构新增 `llm.providers`，凭据落 `~/.zread/auth.json`（详见 §8） |
+| 上下文与轮次（第五步） | `agent-runtime` 接入 pi compaction（`transformContext` + `prepareCompaction`/`compact`）与 `shouldStopAfterTurn` 优雅停止；配置结构新增 `agent.max_turns`，CLI 新增 `/config/max-turns`，Orchestrator 不再硬编码 30（详见 §8.6） |
 
 工具与类型的**原样复制**（非重写）：
 `packages/agent-runtime/src/types.ts`、`src/tools/{types,read,write,edit,glob,grep}.ts`、`src/providers/types.ts`
@@ -33,7 +34,7 @@
 
 ```ts
 createAgent({ model, providerId, apiKey, baseURL, cwd, systemPrompt,
-              tools, maxTurns, thinkingLevel, hooks, retryConfig, includePartialMessages })
+              tools, maxTurns, thinkingLevel, compaction, hooks, retryConfig, includePartialMessages })
   -> { query(prompt): AsyncGenerator<SDKMessage>, close(): Promise<void>, abort() }
 
 createProvider(providerIdOrApiType, { apiKey, baseURL })
@@ -41,7 +42,8 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ```
 
 `SDKMessage` 联合类型、`CatalogEvent` 触发时序（requesting → responding → tool_start → tool_result → complete）、
-`TokenUsage` 字段名、`BlueprintResult.durationMs/tokenUsage` 全部保持。
+`TokenUsage` 字段名、`BlueprintResult.durationMs/tokenUsage` 全部保持；
+`result.subtype` 新增 `error_context_full`（上下文将满优雅停止，见 §8.6），与 `error_max_turns` 同为「非成功但非异常」的停止原因。
 
 ## 4. 与旧实现的行为差异（有意为之，均已验证）
 
@@ -53,6 +55,8 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 思考深度 | 新增 `thinkingLevel` 选项（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，缺省 `off` = 旧行为）与 `config.llm.thinking_level`：pi 以 `options.reasoning` 下发，模型不支持时 pi-ai 在请求时自动 clamp。 |
 | 会话 | 旧实现的 `saveSession/loadSession/tag/rename/fork` 未迁移；wiki 生成是一次性 agent，不需要。若 CLI 后续要做"会话聊天"，需接 pi 的 JSONL 会话树。 |
 | 上下文窗口/定价 | 旧 `MODEL_PRICING` 表未迁移，`Model` 用保守默认（200k 窗口 / 8k 输出、cost=0）。pi 的 usage 记账照常工作，只是成本字段为 0。 |
+| 最大轮次 | 旧实现在 Orchestrator 硬编码 30；现由 `config.agent.max_turns`（默认 30）提供，`createAgent({ maxTurns })` 仍可显式覆盖。 |
+| 上下文压缩 | 旧引擎的「自动压缩」语义由 pi 的 `transformContext` + `compaction` 对等实现：超阈值时摘要历史（发出 `system/compact_boundary`），摘要请求会额外消耗一次模型调用；压缩无法再腾出空间时在本轮边界优雅停止（`error_context_full`）。 |
 | 事件粒度 | `assistant` 事件在 `message_end` 产出（完整内容 + usage）；流式增量以 `partial_message` 产出（旧引擎同形）。 |
 
 ## 5. 风险与未决项
@@ -63,11 +67,11 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
    CLI 换成 pi-tui 后已不再依赖 React，该风险降级为历史约束（browse 仍独立安装）。
 4. **pi 内核版本**：vendor 快照为 0.85.1（与 npm 发布版同版本号）。升级 pi 时需重跑 `bun run vendor:build` 与 `bun run test`。
    `ai` 包现在编译到 `providers/all.ts` + `auth/oauth/*` + `providers/data/*.json`（为了配置界面的 Provider 目录与 pi-ai 登录能力，见 §8）；升级后需同步更新 data JSON。
-5. **真机联调**：全部测试使用离线 faux / 本地 mock HTTP；**尚未用真实 API Key 跑过完整 wiki 生成**。建议首次验证：`bun run cli config` 配好 key → 在目标仓库执行 `bun run cli`，重点观察 retry 事件与长上下文（大仓库）下的 usage/压缩表现。
+5. **真机联调**：全部测试使用离线 faux / 本地 mock HTTP；**尚未用真实 API Key 跑过完整 wiki 生成**。建议首次验证：`bun run cli config` 配好 key → 在目标仓库执行 `bun run cli`，重点观察 retry 事件与长上下文（大仓库）下的 usage/压缩表现（压缩触发时会收到 `system/compact_boundary`）。
 
 ## 6. 后续可选路径
 
-1. **接入 pi 的压缩能力**：当前适配层每次 `query()` 新建 Agent，长任务（超大页面、超长文件）可挂 `transformContext` 或 pi 的 `compaction`（`pi-agent-core` 已导出 `shouldCompact/prepareCompaction/compact`），以获得旧 SDK 的"自动压缩"对等能力。
+1. **pi 的压缩能力已接入**（`transformContext` + `prepareCompaction`/`compact` + `shouldStopAfterTurn` 优雅停止，见 §8.6）；后续可把 `compaction.reserveTokens` / `keepRecentTokens` 也暴露到配置界面。
 2. **接入 pi 的用量与成本**：`Model.cost` 填真实定价后，`usage.cost` 可直接回传 UI（旧 `estimateCost` 的替代）。
 3. **会话化**：把 `cli` 的聊天类命令接到 pi 的 `JsonlStorage` 会话树，得到分支/压缩/恢复能力。
 4. **扩展点**：需要子代理/权限弹窗/计划模式时，优先用 pi 的扩展 API（`registerTool` / `tool_call` 事件 / `beforeToolCall` 阻断），而不是回填旧工具。
@@ -178,8 +182,8 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 ```bash
 bun run typecheck
-bun run test:catalog    # 31/31
-bun run test             # 全部套件（含 TUI 143 + 路由 15 + 真实终端 9 + mock 全链路 19）
+bun run test:catalog    # 32/32
+bun run test            # 全部套件（含 test:context 17/17、TUI 148 + 路由 16 + 真实终端 9 + mock 全链路 19）
 ```
 
 ### 8.5 思考深度（pi thinking level，第四步）
@@ -193,3 +197,26 @@ bun run test             # 全部套件（含 TUI 143 + 路由 15 + 真实终端
   `off` 不发送 reasoning，其余作为 `options.reasoning` 传给适配器（pi-ai 内部 clamp）；
 - Orchestrator 的 `create-agent.ts` 读取 `config.llm.thinking_level` 并随每次 Agent 创建下发；
 - 项目信息框新增「思考深度」一行，直接展示当前生效档位。
+
+### 8.6 最大轮次配置 + pi 上下文压缩（第五步）
+
+两个相关的运行时能力一起落地：
+
+**a) `agent.max_turns` 不再硬编码**
+
+- 配置：`AppConfig.agent.max_turns`（1-100，默认 30）；`validateConfig` 对旧 `config.yaml` 自动补齐；
+- UI：配置首页「最大轮次」项 → `/config/max-turns`（`apps/cli/src/views/config-max-turns`）；
+- Orchestrator：`agents/create-agent.ts` 改为 `options.maxTurns ?? config.agent.max_turns ?? 30`，`wiki/generate-wiki.ts` 删除写死的 `maxTurns: 30`（`GenerateWikiOptions.maxTurns` 仍可显式覆盖）。
+
+**b) 上下文压缩与优雅停止（pi `transformContext` + `compaction`）**
+
+- `packages/agent-runtime/src/agent.ts` 在每次请求前（`transformContext`）用 `estimateContextTokens` + `shouldCompact`
+  判定，超阈值时把消息转成 pi 的 `Entry[]` 调 `prepareCompaction` / `compact` 生成结构化摘要，
+  并以「`compactionSummary` + `retainedTail` + 压缩后新增的消息」作为后续请求的上下文；
+- 压缩成功向业务侧发 `system/compact_boundary`（`SDKCompactBoundaryMessage`，与旧 SDK 消息类型对齐）；
+- `shouldStopAfterTurn` 仍负责轮次计数（`maxTurns`），同时检查上下文用量：
+  如果上下文将满且压缩已无法腾出空间（单个巨大 turn、可总结内容为空、摘要请求失败/关闭压缩），
+  在轮次边界优雅停止并产出 `subtype: "error_context_full"`；
+- `convertToLlm` 改用 pi harness 版本，保证 `compactionSummary` 消息能转成模型可见的 user 消息；
+- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，17 项）覆盖
+  「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」「maxTurns → error_max_turns」。

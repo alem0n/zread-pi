@@ -39,6 +39,8 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 5 个文件工具**原样复制**而非改用 pi 内置工具 | 保持工具名/schema/提示文本不变，避免 LLM 行为漂移 |
 | 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
 | 思考深度（thinking level）直接沿用 pi 的 7 档 | 配置界面新增 `/config/thinking`（`llm.thinking_level`，默认 off）；受支持等级由 pi-ai `getSupportedThinkingLevels` 计算，模型不支持时分界清楚标注、请求时由 pi 自动 clamp；运行时 `createAgent({ thinkingLevel })` 透传为 `options.reasoning` |
+| 最大轮次进配置（不再硬编码） | 配置界面新增 `/config/max-turns`（`agent.max_turns`，1-100，默认 30）；Orchestrator 的 `create-agent.ts` 读配置下发，`generate-wiki` 不再写死 `maxTurns: 30` |
+| 上下文压缩用 pi 的 `transformContext` + `compaction` | 每次请求前按 `model.contextWindow - reserveTokens` 判定，超限时调用 pi 的 `prepareCompaction` / `compact` 生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；`shouldStopAfterTurn` 在压缩无法腾出空间时优雅停止（`error_context_full`），不让 provider 报上下文溢出 |
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
 | `apps/browse` 不进根 workspaces | React 19（browse）与 React 18（ink）混装会让 CLI 启动即崩，见 §6.3 |
@@ -47,17 +49,17 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 
 ```ts
 createAgent({ model, providerId, apiKey, baseURL, cwd, systemPrompt,
-              tools, maxTurns, thinkingLevel, hooks, retryConfig, includePartialMessages })
+              tools, maxTurns, thinkingLevel, compaction, hooks, retryConfig, includePartialMessages })
   -> { query(prompt): AsyncGenerator<SDKMessage>, close(), abort() }
 
 createProvider(providerIdOrApiType, { apiKey, baseURL })
   -> { apiType, createMessage({ model, maxTokens, system, messages }) }
 ```
 
-- `SDKMessage` 联合类型与 `CatalogEvent` 时序（`requesting → responding → tool_start → tool_result → complete`）
+- `SDKMessage` 联合类型与 `CatalogEvent` 时序（`requesting → responding → tool_start → tool_result → complete`）；`result.subtype` 新增 `error_context_full`（上下文将满时优雅停止）
 - `TokenUsage` 字段名、`BlueprintResult.durationMs / tokenUsage`
 - 工具名：`Read` / `Write` / `Edit` / `Glob` / `Grep` / `write_page` / `generate_blueprint`（提示词里写死了）
-- `AppConfig.llm` 的旧扁平字段（`provider/model/api_key/base_url`）仍可读；新增 `providers` 映射（`LlmProviderConfig`）与 `CustomModelConfig`。旧配置必须能直接启动（运行时自动迁移/回退）
+- `AppConfig.llm` 的旧扁平字段（`provider/model/api_key/base_url`）仍可读；新增 `providers` 映射（`LlmProviderConfig`）与 `CustomModelConfig`；新增 `agent.max_turns`（旧配置缺省 30）。旧配置必须能直接启动（运行时自动迁移/回退）
 
 ---
 
@@ -69,7 +71,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 bun install                # 安装依赖
 bun run vendor:build       # 构建 pi 内核产物（全新 clone 后必须执行一次）
 bun run typecheck          # tsc --noEmit（apps/cli/src + apps/cli/test + packages/*/src）
-bun run test               # typecheck + 8 个测试套件（离线，无需 API Key）
+bun run test               # typecheck + 9 个测试套件（离线，无需 API Key）
 bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终端启动 + mock LLM 生成/同步
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
 bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
@@ -77,14 +79,15 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 
 | 命令 | 覆盖内容 | 期望 |
 | --- | --- | --- |
-| `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、logout | 31/31 |
+| `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout | 32/32 |
 | `test:agent` | pi 循环、工具执行、钩子、流式事件、429 重试、usage、thinkingLevel 透传、maxTurns | 11/11 |
+| `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 上限 `error_max_turns` | 17/17 |
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/版本号与项目版本同步 143 项）、`render-all-routes.ts`（全部 15 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 143 + 15 + 9 + 19 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 148 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 148 + 16 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -257,10 +260,11 @@ Refs: MIGRATION.md §4
 它已被两处 `.gitignore` 覆盖，跑完测试或试跑后无需提交。
 
 ### 6.6 配置与凭据在 open_zread 侧
-- `~/.zread/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
+- `~/.zread/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
 - `~/.zread/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
 - `~/.zread/models-store.json`：动态 Provider 的模型目录缓存。
 - 适配层把这份配置翻译成 pi 的 Provider + Model（内置 Provider 直接用 `builtinProviders()`；未内置的用 `createProvider()` 动态注册；自定义模型按 pi models.json 语义合并）。
+- 上下文压缩阈值不在 `config.yaml`，而是由适配层按 `model.contextWindow` + pi 默认值（`reserveTokens=16384` / `keepRecentTokens=20000`）自动判定；测试可通过 `createAgent({ compaction })` 调参。
 - **未登记的 providerId 回退 OpenAI 兼容协议**（旧实现会抛 `Unsupported provider`）——这是有意的健壮性增强。
 
 ### 6.7 未完成事项（不要当成已完成）
@@ -277,7 +281,7 @@ Refs: MIGRATION.md §4
 
 ## 7. 后续方向（详见 MIGRATION.md §6）
 
-1. 接 pi 的压缩能力（`transformContext` / `compaction`）以对等旧的"自动压缩"。
+1. 已接入 pi 的压缩能力（`transformContext` + `prepareCompaction`/`compact`，见 §1.1 / `packages/agent-runtime/test/context-compaction.ts`）；后续可考虑把压缩阈值（`reserveTokens` / `keepRecentTokens`）也暴露到配置界面。
 2. 用 pi 的 usage ledger + 真实 `Model.cost` 替代旧 `estimateCost`。
 3. 需要聊天/会话时接 pi 的 `JsonlStorage` 会话树，而不是回填旧实现。
 4. 需要子代理/权限弹窗/计划模式时，走 pi 扩展 API（`registerTool` / `tool_call` 事件阻断）。
