@@ -3,6 +3,11 @@
 本文件是 AI 代理与人类开发者在本仓库工作的**唯一入口约定**：先读这里，再动手。
 与 `README.md`（怎么用）、`MIGRATION.md`（为什么这样迁移）配合使用；三者冲突时以本文件为准。
 
+> **总则：跨平台优先。** 本仓库必须在 Windows、Linux、macOS 三类平台上等价可用。
+> 任何新增或修改的内容——代码、脚本、命令、文档示例、路径约定——都必须考虑跨平台使用性（详见 §6.8）：
+> 不假设 POSIX Shell 独占（`&&`/引号/通配符写法需在 Git Bash 与 POSIX sh 下都成立）、
+> 不硬编码平台特定路径分隔符或家目录、不引入仅单平台可用的依赖。
+
 ---
 
 ## 1. 这个仓库是什么
@@ -63,6 +68,8 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ## 2. 环境与命令
 
 要求：Bun ≥ 1.3（验证用 1.3.14）、Node ≥ 22（pi 内核要求）、Python 3.x（仅夹具用）。
+以上依赖在 Windows / Linux / macOS 上均可安装；命令统一经由 `bun run`（跨平台脚本入口）执行，
+Windows 下推荐在 Git Bash 或 WSL 中操作（PowerShell/CMD 亦可跑 `bun run *`，但不要依赖 CMD 内建语法）。
 
 ```bash
 bun install                # 安装依赖
@@ -101,8 +108,8 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | 适配层 `packages/agent-runtime/**` | `bun run test`（全部 8 套）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
 | pi vendor 源码（`vendor/pi/**/src`） | `vendor:src` → 改 → `vendor:dist` → `vendor:build` → `bun run test` | 见 §6.1；**不要手改 `dist/`** |
 | 依赖变更 | `bun install` 后一并提交 `bun.lock`，并在 commit body 说明原因 | 不要把 `node_modules` 带进仓库 |
-| 文档（`*.md`） | 至少 `bun run typecheck` | 若文档描述了命令，需实际执行一遍确认命令可用 |
-| 新增脚本 / 夹具 | 登记到根 `package.json` 的 `scripts`，并在 `README.md` 写明用途 | `tools/` 脚本用相对路径 import 工作区源码 |
+| 文档（`*.md`） | 至少 `bun run typecheck` | 若文档描述了命令，需实际执行一遍确认命令可用；命令示例必须跨平台可复制（见 §6.8） |
+| 新增脚本 / 夹具 | 登记到根 `package.json` 的 `scripts`，并在 `README.md` 写明用途 | `tools/` 脚本用相对路径 import 工作区源码；`scripts` 一律用 `bun run xxx.ts` 形式，不写 `rm -rf` / `&&` 链等仅 POSIX 可用的 shell 逻辑（见 §6.8） |
 
 ---
 
@@ -215,6 +222,7 @@ Refs: MIGRATION.md §4
 - [ ] 与改动类型匹配的测试全绿（§3），且输出被真实记录
 - [ ] 新增/变更的行为有对应断言（不留"只改实现不补测试"的改动）
 - [ ] 文档同步：`README.md`（命令/用法）、`MIGRATION.md`（决策/行为差异/风险）
+- [ ] 跨平台检查：代码/脚本/命令示例均遵循 §6.8（路径分隔符、家目录、换行符、shell 兼容性）
 - [ ] 版本号已按 §4.4 升级（根 `package.json`），并在交付信息中写明"当前版本 → 目标版本"与依据
 - [ ] 分支已提请用户手动合并（`--no-ff`），分支名 / 验证结果 / 合并命令已交付
 - [ ] 用户合并后在 master 上复验通过、分支已删除（删除由用户执行，或经用户确认后由 AI 执行）
@@ -271,6 +279,18 @@ Refs: MIGRATION.md §4
   真机 IME 定位、Windows 终端下的 Shift+Enter、剪贴板等仍需人工确认。
 - **MCP / Skill / Task / Team / LSP / Cron 等能力未迁移**（原 `agent-sdk` 有，pi 文档无 MCP）。
 - **会话语义差异**：旧 `saveSession/loadSession/tag/fork` 未迁移；pi 侧是 JSONL 会话树 + SQLite。
+
+### 6.8 跨平台约束（Windows / Linux / macOS 等价可用）
+所有代码、脚本、命令示例与文档都必须跨平台成立，常见注意点：
+
+- **路径**：一律走 `node:path`（`join` / `resolve` / `sep`）或 POSIX 风格正斜杠；禁止手拼 `\` 或依赖 `path.sep` 字面量做判断。仓库内部约定：文件系统上接受两种分隔符，**落盘/比较前统一归一化为正斜杠**（参照 `tools/mock-wiki-run.ts` 的 `replace(/\\/g, "/")`）。
+- **家目录 / 用户配置**：写 `~/.zread/...` 只用于文档表述；代码中必须用 `os.homedir()`（或等价 API）展开，禁止假设 `C:\Users\...` 或 `/home/...`。
+- **临时目录**：用 `os.tmpdir()` + `fs.mkdtemp`（参照 `tools/mock-wiki-run.ts`），不要写死 `/tmp`。
+- **Shell 命令**：`package.json` 的 `scripts` 一律用 `bun run <file>.ts` 形式（跨平台安全），不要写 `rm -rf`、`cp -r`、`&&` 链、`$(...)` 等 CMD/PowerShell 不支持的写法；确需 shell 逻辑时放进 TS 脚本。文档中的 bash 示例假定在 Git Bash / WSL / POSIX shell 下执行。
+- **换行符与编码**：源码与文档统一 LF（UTF-8 无 BOM）；Windows 侧依赖 `core.autocrlf` 的只影响本地检出，不要在代码里对 `\r\n` 做硬编码假设，读取外部文件时注意 strip `\r`。
+- **大小写敏感**：Linux 文件系统大小写敏感，import 路径与文件名的大小写必须与磁盘完全一致，禁止依赖 Windows/macOS 的宽松匹配。
+- **平台特定 API**：涉及终端/进程/权限的操作（TUI、ProcessTerminal、符号链接、可执行位）必须显式处理 `process.platform` 分支，并在至少一个非开发主力平台上跑过对应测试（`test:tui` 的 real-run-check 已覆盖 Windows）。
+- **二进制/依赖**：不要引入仅单平台可用的依赖（如依赖 MSVC 的原生模块）；新增依赖时确认三平台均有预编译产物或可源码构建。
 
 ---
 
