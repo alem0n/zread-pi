@@ -23,7 +23,7 @@
 | 机械替换 import | 22 个文件：`@open-zread/agent-sdk` → `@open-zread/agent-runtime`（orchestrator 17、cli 3、tsconfig/package.json 等） |
 | 未改动 | `orchestrator` 的 prompts / 三层 Repo Map 工具 / 并发与错误隔离 / wiki 契约；`repo-analyzer`；`utils`；`types`；`browse` 全部前端代码（`cli` 的 TUI 在第二步换成 pi-tui，见 §7） |
 | 依赖修正 | `apps/cli` 补 `@types/express`；`vendor/pi/packages/ai` 补 `@smithy/types` |
-| 配置界面（第三步） | `apps/cli` 的 Provider/模型页面改为 pi-ai 目录 + `Models.login`；`agent-runtime` 新增 `src/pi/{provider-catalog,auth-store,models-store}.ts`；配置结构新增 `llm.providers`，凭据落 `~/.zread/auth.json`（详见 §8） |
+| 配置界面（第三步） | `apps/cli` 的 Provider/模型页面改为 pi-ai 目录 + `Models.login`；Provider 详情页为「API Key 配置 + 模型选择」并列布局（只提供 API Key）；`agent-runtime` 新增 `src/pi/{provider-catalog,auth-store,models-store}.ts`；配置结构新增 `llm.providers`，凭据落 `~/.zread/auth.json`（详见 §8） |
 
 工具与类型的**原样复制**（非重写）：
 `packages/agent-runtime/src/types.ts`、`src/tools/{types,read,write,edit,glob,grep}.ts`、`src/providers/types.ts`
@@ -61,7 +61,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 3. **React 18/19 混装**：原因为 Ink（React 18）与 browse（React 19）冲突，见 README §工程细节 1。
    CLI 换成 pi-tui 后已不再依赖 React，该风险降级为历史约束（browse 仍独立安装）。
 4. **pi 内核版本**：vendor 快照为 0.85.1（与 npm 发布版同版本号）。升级 pi 时需重跑 `bun run vendor:build` 与 `bun run test`。
-   `ai` 包现在编译到 `providers/all.ts` + `auth/oauth/*` + `providers/data/*.json`（为了配置界面的 Provider 目录与 OAuth 登录，见 §8）；升级后需同步更新 data JSON。
+   `ai` 包现在编译到 `providers/all.ts` + `auth/oauth/*` + `providers/data/*.json`（为了配置界面的 Provider 目录与 pi-ai 登录能力，见 §8）；升级后需同步更新 data JSON。
 5. **真机联调**：全部测试使用离线 faux / 本地 mock HTTP；**尚未用真实 API Key 跑过完整 wiki 生成**。建议首次验证：`bun run cli config` 配好 key → 在目标仓库执行 `bun run cli`，重点观察 retry 事件与长上下文（大仓库）下的 usage/压缩表现。
 
 ## 6. 后续可选路径
@@ -142,7 +142,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 要求把「配置界面 → 模型提供商」从自维护的 provider registry（LiteLLM 缓存）换成 **pi-ai 原生能力**：
 
-1. 使用 pi-ai 的内置 Provider 目录与 `Providers.login()`（API Key + OAuth 订阅）；
+1. 使用 pi-ai 的内置 Provider 目录与 `Providers.login()`（配置界面只提供 API Key；OAuth 能力保留在 catalog/运行时，可手写 `auth.json` 使用）；
 2. 同时配置多个 Provider；
 3. 按 Provider 刷新模型目录；
 4. 为指定 Provider 添加自定义模型。
@@ -152,13 +152,13 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 动作 | 对象 |
 |---|---|
 | vendor ai 构建扩容 | `tsconfig.app.json` include `providers/all.ts`、`bun-oauth.ts`、`auth/oauth/*`；补齐同版本 `src/providers/data/*.json`（0.6MB，来自 npm 0.85.1 发布包） |
-| 新增 | `packages/agent-runtime/src/pi/provider-catalog.ts`：`builtinProviders()` + 配置叠加 + 自定义模型 + 刷新 + 登录/登出 |
+| 新增 | `packages/agent-runtime/src/pi/provider-catalog.ts`：`builtinProviders()` + 配置叠加 + 自定义模型 + 刷新 + 登录（api_key）/登出 |
 | 新增 | `packages/agent-runtime/src/pi/auth-store.ts`（`~/.zread/auth.json` 的 CredentialStore）、`models-store.ts`（`~/.zread/models-store.json` 的 ModelsStore） |
 | 新增 | `packages/agent-runtime/test/provider-catalog-smoke.ts`（25 项，离线） |
 | 配置结构 | `LLMConfig` 新增 `providers: Record<string, LlmProviderConfig>`（base_url / api / auth_type / model / models）；`CustomModelConfig` 支持窗口/输出/推理/图片 |
 | 配置工具 | `packages/utils` 新增 `getZreadAuthPath()` / `getZreadModelsStorePath()` / `getProviderConfig()` / `normalizeProviderConfigs()`；`isFirstTimeConfig` 改为「provider+model 已选即已配置」 |
 | 运行时 | `createRuntimeModel()` 优先走 catalog（真实模型元数据 + OAuth 刷新 + 自定义模型），未命中回退单模型 Provider；`createAgent` 无 apiKey 时若 provider 在 catalog 中不再报错 |
-| CLI | `views/config-provider`、`views/config-model` 重写；新增 `views/config-auth`（登录页，替换 config-apikey）、`views/config-custom-model`（自定义模型表单）；`ConfigStore` 新增 per-provider 与自定义模型写入；`utils/llm-config.ts` 负责旧字段迁移 |
+| CLI | `views/config-provider`、`views/config-provider-detail`（API Key + 模型并列，替换 config-model + config-auth）；新增 `views/config-custom-model`（自定义模型表单）；`ConfigStore` 新增 per-provider 与自定义模型写入；`utils/llm-config.ts` 负责旧字段迁移 |
 | 旧路由兼容 | `/config/provider/:id/custom` 仍可用（等价 model-new） |
 
 ### 8.3 与旧实现的行为差异
@@ -166,10 +166,10 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 差异 | 说明 |
 |---|---|
 | Provider 列表来源 | 由 LiteLLM 在线目录（`~/.zread/providers.json`，24h 缓存）改为 pi-ai 内置目录（离线可用、40 个 Provider），未内置的已配置端点仍会列在末尾 |
-| 登录方式 | 新增 OAuth 订阅登录（Claude Pro/Max、ChatGPT Codex、GitHub Copilot、xAI、OpenRouter、Kimi、Radius）；API Key 改为写入 `auth.json`（同一 Provider 只保留一份凭据，重新登录覆盖） |
+| 登录方式 | 配置界面只提供 API Key（写入 `auth.json`，同一 Provider 只保留一份凭据）；Provider 详情页把「API Key 配置」与「模型选择」并列在同一页面（tab/Shift+Tab 或 ↑ 切换焦点，仅 `Models.login('api_key')`）；OAuth 订阅流程仍保留在 provider-catalog/运行时中（可手写 `auth.json` 使用），但界面不再提供 |
 | 多 Provider | `llm.providers.<id>` 保存每个 Provider 的端点/模型/自定义模型；`auth.json` 可同时保存多份凭据；provider 列表逐项显示登录状态 |
 | 自定义模型 | 新增独立表单（id / 名称 / 上下文窗口 / 最大输出 / 思考 / 图片），按 pi models.json 语义覆盖或追加 |
-| 模型刷新 | `r` 调用 pi-ai `Models.refresh()`（动态 Provider 请求远端目录并缓存到 `models-store.json`；静态目录提示「无需刷新」） |
+| 模型刷新 | 详情页 `r` 调用 pi-ai `Models.refresh()`（动态 Provider 请求远端目录并缓存到 `models-store.json`；静态目录提示「无需刷新」） |
 | 旧配置兼容 | 首次在新界面切换 Provider/模型时，`llm.api_key` → `auth.json`、`llm.base_url` → `llm.providers.<id>.base_url`，然后清空旧字段；未知 providerId 仍回退 OpenAI 兼容协议 |
 | 未内置 Provider | 仍可从零配置（自定义 Provider 流程：Base URL → 模型 → API Key），实现改为 pi `createProvider()` 动态注册 |
 
@@ -178,5 +178,5 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ```bash
 bun run typecheck
 bun run test:catalog    # 25/25
-bun run test             # 全部套件（含 TUI 120 + 路由 15 + 真实终端 9 + mock 全链路 19）
+bun run test             # 全部套件（含 TUI 124 + 路由 14 + 真实终端 9 + mock 全链路 19）
 ```

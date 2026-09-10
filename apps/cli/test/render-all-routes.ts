@@ -58,7 +58,6 @@ const paths = [
   "/config/provider",
   "/config/provider/custom",
   "/config/provider/anthropic",
-  "/config/provider/anthropic/model/claude-sonnet-4-5",
   "/config/provider/anthropic/model-new",
   "/config/provider/anthropic/custom",
   "/config/provider/openai-compatible",
