@@ -37,6 +37,10 @@ export {
   THINKING_LEVELS,
   isThinkingLevel,
   normalizeThinkingLevel,
+  DEFAULT_MAX_TURNS,
+  MIN_MAX_TURNS,
+  MAX_MAX_TURNS,
+  normalizeMaxTurns,
 } from './config/index.js';
 
 // Cache

@@ -11,6 +11,7 @@ import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { thinkingLevelLabel } from "../../utils/thinking";
+import { DEFAULT_MAX_TURNS } from "@open-zread/utils";
 
 interface ConfigItem {
   key: string;
@@ -54,6 +55,13 @@ const configItems: ConfigItem[] = [
     getValue: (config, t) => thinkingLevelLabel(config.llm.thinking_level, t),
     default: "off",
     route: "/config/thinking",
+  },
+  {
+    key: "agent.max_turns",
+    labelKey: "config.maxTurns",
+    getValue: (config, _t) => String(config.agent?.max_turns ?? DEFAULT_MAX_TURNS),
+    default: String(DEFAULT_MAX_TURNS),
+    route: "/config/max-turns",
   },
   {
     key: "concurrency.max_concurrent",

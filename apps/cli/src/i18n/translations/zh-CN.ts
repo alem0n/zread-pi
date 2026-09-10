@@ -26,6 +26,7 @@ export const zhCN: TranslationKeys = {
     docLanguage: '文档生成语言',
     llmProvider: 'LLM 提供商',
     thinkingLevel: '思考深度',
+    maxTurns: '最大轮次',
     maxConcurrency: '最大并发数',
     maxRetries: '最大重试次数',
     default: '(默认: {default})',
@@ -173,6 +174,13 @@ export const zhCN: TranslationKeys = {
       xhigh: '极高',
       max: '最高',
     },
+  },
+  maxTurns: {
+    set: '设置最大轮次',
+    range: '范围: 1-100',
+    invalid: '请输入 1-100 之间的整数',
+    current: '当前值',
+    footer: 'ESC 返回 | Enter 确认 | s 保存并返回',
   },
   common: {
     escBack: 'ESC 返回',

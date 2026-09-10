@@ -64,6 +64,7 @@ const paths = [
   "/config/concurrency",
   "/config/retry",
   "/config/thinking",
+  "/config/max-turns",
   "/wiki",
   "/wiki/generate?mode=manage",
   "/wiki/sync",

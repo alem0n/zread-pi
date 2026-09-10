@@ -22,7 +22,7 @@ export type { SymbolManifest, SymbolInfo } from './symbols.js'
 export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel, SyncPageStatus, SyncDiff } from './wiki.js'
 
 // Config types
-export type { AppConfig, LLMConfig, LlmProviderConfig, CustomModelConfig, LlmAuthType, ThinkingLevel } from './config.js'
+export type { AppConfig, AgentConfig, LLMConfig, LlmProviderConfig, CustomModelConfig, LlmAuthType, ThinkingLevel } from './config.js'
 
 // Cache types
 export type { CacheManifest } from './cache.js'

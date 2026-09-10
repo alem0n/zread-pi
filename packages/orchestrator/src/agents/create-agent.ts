@@ -54,6 +54,8 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   const config = await loadConfig();
   const docLanguage = config.doc_language as 'zh' | 'en';
   const maxRetries = config.concurrency.max_retries;
+  // 最大轮次：调用方显式传入 > config.agent.max_turns > 适配层兜底 30
+  const maxTurns = options.maxTurns ?? config.agent.max_turns ?? 30;
 
   // 提取 LLM 配置（null → undefined，SDK 不接受 null）
   const model = config.llm.model ?? undefined;
@@ -72,7 +74,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     throw new Error('LLM configuration incomplete. Please run `open-zread config` to configure.');
   }
 
-  logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, baseURL: ${baseURL}`);
+  logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, 最大轮次: ${maxTurns}, baseURL: ${baseURL}`);
 
   // Token 累积统计
   let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
@@ -138,7 +140,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     cwd: process.cwd(),
     tools: options.tools,
     systemPrompt: SYSTEM_PROMPTS[docLanguage],
-    maxTurns: options?.maxTurns ?? 30,
+    maxTurns,
     thinkingLevel,
     permissionMode: 'bypassPermissions',
     hooks,

@@ -238,6 +238,7 @@ console.log("▶ TUI 冒烟测试");
   checkContains("配置项：界面语言", configText, "界面语言");
   checkContains("配置项：LLM 提供商", configText, "LLM 提供商");
   checkContains("配置项：思考深度（含默认值）", configText, "思考深度 (默认: off)");
+  checkContains("配置项：最大轮次（含默认值）", configText, "最大轮次 (默认: 30)");
   checkContains("配置项：最大并发数（含默认值）", configText, "最大并发数 (默认: 1)");
   checkContains("配置项：最大重试次数", configText, "最大重试次数 (默认: 0)");
   checkContains("配置项值：provider · model", configText, "openai-compatible · gpt-4o-mini");
@@ -374,6 +375,32 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("\r");
   await settle(20);
   checkContains("Enter 进入思考深度页", screenText(app), "设置思考深度（pi thinking level）");
+  app.exit();
+}
+
+// --- 用例 4e：最大轮次配置页（agent.max_turns）---
+{
+  const { app, terminal } = createApp(["/config/max-turns"]);
+  await app.start();
+  await settle();
+
+  const text = screenText(app);
+  checkContains("最大轮次页：当前值（旧配置缺省为 30）", text, "当前值: 30");
+  checkContains("最大轮次页：范围", text, "范围: 1-100");
+  checkContains("最大轮次页 Footer", text, "ESC 返回 | Enter 确认 | s 保存并返回");
+
+  // 清空后输入 50 → Enter
+  terminal.send("\x7f");
+  terminal.send("\x7f");
+  terminal.send("50");
+  terminal.send("\r");
+  await settle();
+  check(
+    "Enter 写回配置 agent.max_turns=50",
+    app.config.config.agent.max_turns === 50,
+    `实际: ${app.config.config.agent.max_turns}`,
+  );
+
   app.exit();
 }
 
