@@ -37,7 +37,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 重试放在 `streamFn` 层，且只在"未产出内容"时重试 | pi 的 Agent 循环刻意不内置重试；这样失败尝试不会写进会话记录 |
 | 钩子映射到 pi 的 `beforeToolCall` / `afterToolCall` | 与旧 `PreToolUse` / `PostToolUse` 语义一一对应，UI 进度事件零改动 |
 | 5 个文件工具**原样复制**而非改用 pi 内置工具 | 保持工具名/schema/提示文本不变，避免 LLM 行为漂移 |
-| 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；OAuth 与 API Key 统一走 `Models.login()`，凭据落 `~/.zread/auth.json`，天然支持多 Provider；自定义模型按 pi models.json 合并语义叠加 |
+| 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
 | `apps/browse` 不进根 workspaces | React 19（browse）与 React 18（ink）混装会让 CLI 启动即崩，见 §6.3 |
@@ -83,7 +83,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 登录/多 Provider/自定义模型 120 项）、`render-all-routes.ts`（全部 15 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 120 + 15 + 9 + 19 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型 124 项）、`render-all-routes.ts`（全部 14 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 124 + 14 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -227,7 +227,7 @@ Refs: MIGRATION.md §4
 
 ### 6.6 配置与凭据在 open_zread 侧
 - `~/.zread/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
-- `~/.zread/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；OAuth 过期由 pi 自动刷新。
+- `~/.zread/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
 - `~/.zread/models-store.json`：动态 Provider 的模型目录缓存。
 - 适配层把这份配置翻译成 pi 的 Provider + Model（内置 Provider 直接用 `builtinProviders()`；未内置的用 `createProvider()` 动态注册；自定义模型按 pi models.json 语义合并）。
 - **未登记的 providerId 回退 OpenAI 兼容协议**（旧实现会抛 `Unsupported provider`）——这是有意的健壮性增强。
@@ -235,8 +235,8 @@ Refs: MIGRATION.md §4
 ### 6.7 未完成事项（不要当成已完成）
 - **尚未用真实 API Key 跑过完整 wiki 生成**：全部验证基于 faux / mock HTTP / 内置目录。
   首次真机验证：`bun run cli config` → 在目标仓库 `bun run cli`，重点看 retry 事件与长上下文下的 usage。
-- **OAuth 登录只验证了离线路径**：`test:catalog`/`test:tui` 覆盖了 API Key 登录与目录/自定义模型；
-  真实 OAuth 需要在真机走完浏览器/设备码授权（并确认打包后的 CLI 中 `registerBunOAuthFlows()` 已生效）。
+- **OAuth 登录界面已按需求移除**：配置界面只提供 API Key（Provider 详情页包含 API Key + 模型两块配置）；
+  catalog/运行时仍保留 OAuth 能力（手写 `auth.json` 可用），但未在真机验证过完整授权流程。
 - **CLI 的真机交互（键盘/鼠标/中文输入）仅做了自动化回归**：`test:tui` 用假终端注入按键 + 真实 ProcessTerminal 启动检查；
   真机 IME 定位、Windows 终端下的 Shift+Enter、剪贴板等仍需人工确认。
 - **MCP / Skill / Task / Team / LSP / Cron 等能力未迁移**（原 `agent-sdk` 有，pi 文档无 MCP）。

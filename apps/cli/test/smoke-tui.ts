@@ -345,70 +345,74 @@ console.log("▶ TUI 冒烟测试");
   app.exit();
 }
 
-// --- 用例 7：登录页（OAuth/API Key 选择 + pi-ai login 写 auth.json）---
+// --- 用例 7：Provider 详情页（API Key 配置 + 模型选择并列）---
 {
-  const { app, terminal } = createApp(["/config/provider/anthropic/model/claude-sonnet-4-5"]);
+  const { app, terminal } = createApp(["/config/provider/anthropic"]);
   await app.start();
   await settle();
 
   let text = screenText(app);
-  checkContains("登录页：显示提供商与模型", text, "Anthropic");
-  checkContains("登录页：未配置状态", text, "未配置");
-  checkContains("登录页：选择登录方式", text, "选择登录方式");
-  checkContains("登录页：OAuth 选项", text, "账号登录 (OAuth)");
-  checkContains("登录页：API Key 选项", text, "API Key 登录");
-  checkContains("登录页 Footer", text, "↑↓ 选择 | enter 确认 | esc 返回");
+  checkContains("详情页：API Key 配置区", text, "API Key 配置");
+  checkContains("详情页：模型区", text, "模型 ·");
+  checkContains("详情页：未配置状态", text, "未配置");
+  checkContains("详情页：未配置时聚焦 API Key", text, "enter 保存 API Key");
+  check(
+    "详情页：不再提供 OAuth/订阅选项",
+    !text.includes("OAuth") && !text.includes("订阅"),
+    indent(text),
+  );
 
-  // ↓ 选中 API Key 登录 → Enter → pi-ai 的 prompt
-  terminal.send("\x1b[B");
-  terminal.send("\r");
-  await settle(50);
-  text = screenText(app);
-  checkContains("进入 API Key 提示（pi-ai prompt）", text, "Enter Anthropic API key");
-
+  // 输入 API Key → Enter（pi-ai login 写 auth.json）
   terminal.send("sk-ant-test");
   await settle(20);
   terminal.send("\r");
   await settle(80);
+  text = screenText(app);
+  checkContains("保存后显示已配置", text, "已配置");
+  checkContains("保存后提示已保存", text, "API Key 已保存");
+  checkContains("保存后焦点移到模型列表", text, "enter 选择模型");
 
-  check(
-    "登录后写回 llm.provider/model",
-    app.config.config.llm.provider === "anthropic" &&
-      app.config.config.llm.model === "claude-sonnet-4-5",
-    JSON.stringify({ provider: app.config.config.llm.provider, model: app.config.config.llm.model }),
-  );
+  const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
+    string,
+    { type?: string; key?: string }
+  >;
   check(
     "凭据写入 ~/.zread/auth.json",
-    await (async () => {
-      const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
-        string,
-        { type?: string; key?: string }
-      >;
-      return raw.anthropic?.type === "api_key" && raw.anthropic.key === "sk-ant-test";
-    })(),
-    "auth.json anthropic",
+    raw.anthropic?.type === "api_key" && raw.anthropic.key === "sk-ant-test",
+    JSON.stringify(raw.anthropic),
+  );
+
+  // Enter 选中首个模型 → 设为当前模型
+  terminal.send("\r");
+  await settle(60);
+  check(
+    "选择模型后写回 llm.provider/model",
+    app.config.config.llm.provider === "anthropic" && typeof app.config.config.llm.model === "string",
+    JSON.stringify({ provider: app.config.config.llm.provider, model: app.config.config.llm.model }),
   );
   check("旧扁平 api_key 被清空（凭据已迁移）", app.config.config.llm.api_key === null);
   check(
     "记住该 Provider 上次选择的模型",
-    app.config.getProviderConfig("anthropic").model === "claude-sonnet-4-5",
+    app.config.getProviderConfig("anthropic").model === app.config.config.llm.model,
   );
+  checkContains("页面标记当前模型", screenText(app), "← 当前");
 
   app.exit();
 }
 
-// --- 用例 7b：同时配置多个提供商（openai 追加登录，不覆盖 anthropic）---
+// --- 用例 7b：同时配置多个提供商（openai 追加，不覆盖 anthropic）---
 {
-  const { app, terminal } = createApp(["/config/provider/openai/model/gpt-4o"]);
+  const { app, terminal } = createApp(["/config/provider/openai"]);
   await app.start();
   await settle();
 
-  let text = screenText(app);
-  checkContains("仅 API Key 的 Provider 直接进入输入", text, "Enter OpenAI API key");
+  checkContains("未配置时默认聚焦 API Key 输入", screenText(app), "enter 保存 API Key");
   terminal.send("sk-openai-test");
   await settle(20);
   terminal.send("\r");
   await settle(80);
+  terminal.send("\r");
+  await settle(60);
 
   const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
     string,
@@ -421,7 +425,7 @@ console.log("▶ TUI 冒烟测试");
   );
   check(
     "当前 provider 切换到 openai",
-    app.config.config.llm.provider === "openai" && app.config.config.llm.model === "gpt-4o",
+    app.config.config.llm.provider === "openai" && typeof app.config.config.llm.model === "string",
     JSON.stringify({ provider: app.config.config.llm.provider, model: app.config.config.llm.model }),
   );
 
@@ -437,26 +441,36 @@ console.log("▶ TUI 冒烟测试");
   await settle(10);
   const text = screenText(app);
   checkContains("Provider 列表显示 anthropic 已配置", text, "Anthropic");
-  checkContains("Provider 列表显示 OAuth/API Key 状态", text, "已配置 API Key");
+  checkContains("Provider 列表显示 API Key 状态", text, "已配置 API Key");
   app.exit();
 }
 
-// --- 用例 7d：退出登录只删除目标 Provider 的凭据 ---
+// --- 用例 7d：详情页焦点切换（tab）与当前页模型刷新 ---
 {
-  const { app, terminal } = createApp(["/config/provider/anthropic/model/claude-sonnet-4-5"]);
+  const { app, terminal } = createApp(["/config/provider/anthropic"]);
   await app.start();
   await settle(60);
 
-  checkContains("已配置页面显示登录状态", screenText(app), "已配置");
-  terminal.send("d");
-  await settle(80);
+  let text = screenText(app);
+  checkContains("已配置 Provider 默认聚焦模型区", text, "enter 选择模型");
+  checkContains("模型区显示已配置", text, "已配置");
 
-  const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<string, unknown>;
-  check("退出登录删除该 Provider 凭据", raw.anthropic === undefined, Object.keys(raw).join(","));
-  check("退出登录不影响其它 Provider", raw.openai !== undefined, Object.keys(raw).join(","));
-  const text = screenText(app);
-  checkContains("退出后显示已退出提示", text, "已退出登录");
-  checkContains("退出后可重新选择登录方式", text, "选择登录方式");
+  // 静态目录：刷新给出说明且不报错
+  terminal.send("r");
+  await settle(60);
+  checkContains("详情页刷新模型提示", screenText(app), "使用内置模型目录");
+
+  // tab 切换到 API Key 输入
+  terminal.send("\t");
+  await settle(20);
+  text = screenText(app);
+  checkContains("tab 切换到 API Key 区", text, "enter 保存 API Key");
+  checkContains("API Key 占位提示（已设置可覆盖）", text, "已设置");
+
+  // esc 先回模型区（不退出页面）
+  terminal.send("\x1b");
+  await settle(20);
+  checkContains("esc 回到模型区", screenText(app), "enter 选择模型");
 
   app.exit();
 }
@@ -468,9 +482,14 @@ console.log("▶ TUI 冒烟测试");
   await settle();
 
   let text = screenText(app);
-  checkContains("模型页：Provider 名与模型数", text, "DeepSeek");
-  checkContains("模型页 Footer", text, "r 刷新模型 | a 自定义模型");
+  checkContains("详情页：Provider 名与模型数", text, "DeepSeek");
+  checkContains("详情页：未配置时默认聚焦 API Key", text, "enter 保存 API Key");
 
+  // 未配置时默认聚焦 API Key，先 tab 到模型区再按 a
+  terminal.send("\t");
+  await settle(10);
+  text = screenText(app);
+  checkContains("详情页 Footer（模型区）", text, "r 刷新模型 | a 自定义模型");
   terminal.send("a");
   await settle();
   text = screenText(app);
@@ -501,10 +520,12 @@ console.log("▶ TUI 冒烟测试");
     JSON.stringify(customModels),
   );
   text = screenText(app);
-  checkContains("返回模型列表并显示自定义模型", text, "my-custom-model");
+  checkContains("返回详情页并显示自定义模型", text, "my-custom-model");
   checkContains("自定义模型带标记", text, "[自定义]");
 
-  // 刷新模型列表（静态目录：给出说明且不报错）
+  // 回到模型区后刷新（静态目录：给出说明且不报错）
+  terminal.send("\t");
+  await settle(10);
   terminal.send("r");
   await settle(40);
   checkContains("静态 Provider 刷新提示", screenText(app), "使用内置模型目录");

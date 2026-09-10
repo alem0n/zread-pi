@@ -98,28 +98,21 @@ export interface TranslationKeys {
     saved: string;
     saving: string;
   };
+  detail: {
+    apiKeyTitle: string;
+    modelsTitle: string;
+    keyPlaceholderConfigured: string;
+    keySaved: string;
+    keyFailed: string;
+    keyFirst: string;
+    oauthOnly: string;
+    ambient: string;
+    currentSet: string;
+    footer: string;
+    keyFooter: string;
+  };
   auth: {
-    chooseType: string;
-    useOAuth: string;
-    useApiKey: string;
-    apiKeyLabel: string;
-    oauthLabel: string;
-    oauthHint: string;
-    currentModel: string;
     loggingIn: string;
-    waiting: string;
-    openUrl: string;
-    deviceCode: string;
-    success: string;
-    failed: string;
-    login: string;
-    relogin: string;
-    logout: string;
-    loggedOut: string;
-    logoutFailed: string;
-    footerChoose: string;
-    footerApiKey: string;
-    footerConfigured: string;
   };
   customModel: {
     title: string;
