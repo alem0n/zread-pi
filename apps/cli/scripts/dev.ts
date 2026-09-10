@@ -16,7 +16,7 @@ mkdirSync(distDir, { recursive: true })
 // 注入 CLI_VERSION 常量（模拟 tsup 的 define 功能）
 const entryContent = `#!/usr/bin/env bun
 const CLI_VERSION = "${version}";
-import '../src/index.tsx';
+import '../src/index.ts';
 `
 
 writeFileSync(resolve(distDir, 'index.js'), entryContent)

@@ -22,6 +22,7 @@
   },
   "include": [
     "apps/cli/src/**/*",
+    "apps/cli/test/**/*",
     "packages/*/src/**/*"
   ],
   "exclude": [
