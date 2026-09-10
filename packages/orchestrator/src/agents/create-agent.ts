@@ -38,6 +38,21 @@ export interface AgentResult {
   tokenUsage?: TokenUsage;
 }
 
+/** 轮次收尾提示文案（按文档语言本地化，并点名最终的输出工具） */
+const FINALIZATION_NOTICES: Record<'zh' | 'en', (tool: string) => string> = {
+  zh: (tool) => `【系统提示】轮次即将用尽：请立即停止探索，直接调用 ${tool} 输出完整最终结果（不要只做文字总结），否则本次生成将以失败结束。`,
+  en: (tool) => `[System notice] Turn budget nearly exhausted: stop exploring and call ${tool} now to write the complete final result (do not merely summarize in text), otherwise this run will fail.`,
+};
+
+/** 输出工具名（蓝图/页面 Agent 的最终产物） */
+const OUTPUT_TOOL_NAMES = new Set(['generate_blueprint', 'write_page']);
+
+/** 根据工具集与文档语言构造收尾提示；没有输出工具时返回 undefined（关闭） */
+function buildFinalizationNotice(tools: ToolDefinition[], docLanguage: 'zh' | 'en'): string | undefined {
+  const outputTool = tools.find((tool) => OUTPUT_TOOL_NAMES.has(tool.name));
+  return outputTool ? FINALIZATION_NOTICES[docLanguage](outputTool.name) : undefined;
+}
+
 /**
  * 创建并执行 Blueprint Agent
  *
@@ -56,6 +71,8 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   const maxRetries = config.concurrency.max_retries;
   // 最大轮次：调用方显式传入 > config.agent.max_turns > 适配层兜底 30
   const maxTurns = options.maxTurns ?? config.agent.max_turns ?? 30;
+  // 轮次收尾提示：让模型在预算耗尽前直接调用输出工具（适配层默认再加 1 轮宽限）
+  const finalizationNotice = buildFinalizationNotice(options.tools, docLanguage);
 
   // 提取 LLM 配置（null → undefined，SDK 不接受 null）
   const model = config.llm.model ?? undefined;
@@ -141,6 +158,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     tools: options.tools,
     systemPrompt: SYSTEM_PROMPTS[docLanguage],
     maxTurns,
+    finalization: finalizationNotice ? { notice: finalizationNotice } : undefined,
     thinkingLevel,
     permissionMode: 'bypassPermissions',
     hooks,

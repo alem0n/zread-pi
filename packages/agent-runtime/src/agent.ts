@@ -100,6 +100,36 @@ export interface CompactionOptions {
 	keepRecentTokens?: number;
 }
 
+// ---------------------------------------------------------------------------
+// 轮次收尾（maxTurns 提示 + 宽限轮）
+// ---------------------------------------------------------------------------
+
+/** `finalization.notice` 的缺省文案（业务侧通常用 create-agent 下发本地化文案） */
+export const DEFAULT_FINALIZATION_NOTICE =
+	"[System notice] Turn budget will be exhausted soon. Stop exploring and produce the final result now: call the required output tool with the complete result in this turn, otherwise this run will be stopped and marked as failed.";
+
+/**
+ * 轮次用尽前的收尾策略。
+ *
+ * 行为（按 `shouldStopAfterTurn` 的轮次计数）：
+ * - 倒数第 1 轮（turnCount = maxTurns - 1）结束时注入一次提示；
+ * - 到达 maxTurns 后允许 `graceTurns` 轮宽限，并在每个宽限轮前再注入一次提示；
+ * - 宽限轮用完仍未收敛 → 优雅停止，结果 subtype = `error_max_turns`。
+ *
+ * 上下文将满时不会获得宽限轮（优先级高于轮次）。
+ */
+export interface FinalizationOptions {
+	/**
+	 * maxTurns 之后允许的收尾轮数（缺省 1；0 = 到达上限立即停止，即旧行为；负数按 0 处理）。
+	 */
+	graceTurns?: number;
+	/**
+	 * 收尾提示文案（在最后一轮与每个宽限轮前各注入一次，作为 steering user 消息）。
+	 * 缺省 `DEFAULT_FINALIZATION_NOTICE`；传空字符串关闭提示。
+	 */
+	notice?: string;
+}
+
 /** 单次运行内的压缩状态（摘要 + 保留段 + 压缩时的消息位置） */
 interface CompactionState {
 	summary: string;
@@ -214,6 +244,11 @@ export interface AgentOptions {
 	 * 并在无法继续压缩时由 `shouldStopAfterTurn` 优雅停止。
 	 */
 	compaction?: CompactionOptions;
+	/**
+	 * 轮次收尾策略（倒数第 1 轮提示 + 宽限轮），缺省启用：
+	 * 提示模型在预算耗尽前直接产出最终结果，避免“一直在探索、从不输出”的失败模式。
+	 */
+	finalization?: FinalizationOptions;
 	/**
 	 * 高级/测试用途：直接注入 pi 的 Model 与 streamFn（例如 pi-ai 的 faux provider），
 	 * 跳过 provider / baseURL / apiKey 的解析。业务代码不设置该选项。
@@ -559,6 +594,15 @@ class AgentRuntimeImpl implements AgentInstance {
 			reserveTokens: options.compaction?.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,
 			keepRecentTokens: options.compaction?.keepRecentTokens ?? DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
 		};
+		// 轮次收尾：提示文案 + 宽限轮数（每次 query 固定）
+		const graceTurns = Math.max(0, Math.floor(options.finalization?.graceTurns ?? 1));
+		const finalizationNotice = options.finalization?.notice ?? DEFAULT_FINALIZATION_NOTICE;
+		const finalizationNoticeEnabled = finalizationNotice.length > 0;
+		const createFinalizationNotice = (): AgentMessage => ({
+			role: "user",
+			content: [{ type: "text", text: finalizationNotice }],
+			timestamp: Date.now(),
+		});
 		const startedAt = Date.now();
 		let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 		let runAttempt = 0;
@@ -592,6 +636,8 @@ class AgentRuntimeImpl implements AgentInstance {
 
 			const streamFn = createRetryingStreamFn(streamBase, retryPolicy, this.abortController.signal);
 
+			// shouldStopAfterTurn 需要 agent 实例来入队收尾提示（pi 对外 API 是 agent.steer）
+			let agentRef: PiAgent | undefined;
 			const agent = new PiAgent({
 				initialState: {
 					systemPrompt,
@@ -715,45 +761,66 @@ class AgentRuntimeImpl implements AgentInstance {
 				shouldStopAfterTurn: (turnContext: ShouldStopAfterTurnContext) => {
 					turnCount += 1;
 					const maxTurns = options.maxTurns ?? 30;
-					if (turnCount >= maxTurns) {
-						stoppedByMaxTurns = true;
-						return true;
-					}
-					if (!(model.contextWindow > 0)) return false;
-					try {
-						const effective = buildEffectiveMessages(turnContext.context.messages, compactionState);
-						const tokens = estimateContextTokens(effective).tokens;
-						if (tokens < model.contextWindow - compactionSettings.reserveTokens) return false;
+					// 本轮已经给出最终答复（无工具调用）：循环会自然结束，不按预算/上下文记失败
+					const assistantRequestedTools = turnContext.message.content.some((block) => block.type === "toolCall");
+					if (!assistantRequestedTools) return false;
 
-						// 上下文将满：只有「压缩仍能腾出空间」时才继续下一轮；
-						// 否则在此优雅停止，不再向 provider 发一个必然溢出的请求。
-						if (compactionSettings.enabled && compactionModels && !compactionExhausted && !compactionFailed) {
-							const preparation = prepareCompaction(
-								toCompactionEntries(effective, compactionState),
-								compactionSettings,
-							);
-							if (
-								preparation.ok &&
-								preparation.value &&
-								(preparation.value.messagesToSummarize.length > 0 ||
-									preparation.value.turnPrefixMessages.length > 0)
-							) {
-								return false;
+					// ---- 1) 上下文保护（优先于轮次宽限：不为即将溢出的上下文追加请求）----
+					if (model.contextWindow > 0) {
+						try {
+							const effective = buildEffectiveMessages(turnContext.context.messages, compactionState);
+							const tokens = estimateContextTokens(effective).tokens;
+							if (tokens >= model.contextWindow - compactionSettings.reserveTokens) {
+								let canCompact = false;
+								if (
+									compactionSettings.enabled &&
+									compactionModels &&
+									!compactionExhausted &&
+									!compactionFailed
+								) {
+									const preparation = prepareCompaction(
+										toCompactionEntries(effective, compactionState),
+										compactionSettings,
+									);
+									canCompact =
+										preparation.ok &&
+										preparation.value !== undefined &&
+										(preparation.value.messagesToSummarize.length > 0 ||
+											preparation.value.turnPrefixMessages.length > 0);
+									if (!canCompact) compactionExhausted = true;
+								}
+								if (!canCompact) {
+									stoppedByContextFull = true;
+									contextFullInfo = { tokens, window: model.contextWindow };
+									return true;
+								}
 							}
-							compactionExhausted = true;
+						} catch {
+							stoppedByContextFull = true;
+							contextFullInfo = { tokens: 0, window: model.contextWindow };
+							return true;
 						}
-						stoppedByContextFull = true;
-						contextFullInfo = { tokens, window: model.contextWindow };
-						return true;
-					} catch {
-						stoppedByContextFull = true;
-						contextFullInfo = { tokens: 0, window: model.contextWindow };
-						return true;
 					}
+
+					// ---- 2) 轮次收尾：最后一轮软提示 → 宽限轮提示 → 停止 ----
+					if (turnCount < maxTurns) {
+						if (turnCount === maxTurns - 1 && finalizationNoticeEnabled) {
+							agentRef?.steer(createFinalizationNotice());
+						}
+						return false;
+					}
+					if (turnCount < maxTurns + graceTurns) {
+						// 宽限轮：再提示一次，仍允许模型调用工具完成收尾
+						if (finalizationNoticeEnabled) agentRef?.steer(createFinalizationNotice());
+						return false;
+					}
+					stoppedByMaxTurns = true;
+					return true;
 				},
 				sessionId: `open-zread-${Date.now()}`,
 				toolExecution: "parallel",
 			});
+			agentRef = agent;
 
 			const unsubscribe = agent.subscribe((event: AgentEvent) => {
 				switch (event.type) {
@@ -869,7 +936,7 @@ class AgentRuntimeImpl implements AgentInstance {
 						]
 					: stoppedByMaxTurns
 						? [
-								`Reached max turns (${options.maxTurns ?? 30}); stopped gracefully before completing the task.`,
+								`Reached max turns (${options.maxTurns ?? 30}${graceTurns > 0 ? ` + ${graceTurns} grace turn${graceTurns > 1 ? "s" : ""}` : ""}); stopped gracefully before completing the task.`,
 							]
 						: failure?.errorMessage
 							? [failure.errorMessage]
