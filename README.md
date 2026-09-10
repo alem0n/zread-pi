@@ -15,14 +15,17 @@ open-zread-pi/
 │  ├─ agent-runtime/     ← 新：pi 适配层（替代 agent-sdk）
 │  │  ├─ src/agent.ts             createAgent（pi Agent 循环 + 重试编排 + 事件/钩子映射）
 │  │  ├─ src/pi/runtime-model.ts  配置（provider/model/apiKey/baseURL）→ pi Provider + Model
+│  │  ├─ src/pi/provider-catalog.ts  pi-ai 内置 Provider 目录 + 登录 + 自定义模型
+│  │  ├─ src/pi/auth-store.ts     ~/.zread/auth.json 凭据存储（pi CredentialStore）
+│  │  ├─ src/pi/models-store.ts   动态模型目录缓存（pi ModelsStore）
 │  │  ├─ src/retry.ts             RetryConfig 契约 + pi-ai 错误分类/退避
 │  │  ├─ src/providers/           createProvider（pi-ai Models，供 browse-chat 使用）
 │  │  ├─ src/tools/               原样复用的 Read/Write/Edit/Glob/Grep + defineTool
-│  │  └─ test/                    冒烟测试（离线 faux + 本地 mock HTTP + provider）
+│  │  └─ test/                    冒烟测试（离线 faux + 本地 mock HTTP + provider + catalog）
 │  ├─ orchestrator/      ← 保留：编排层（工具/提示词/并发/同步，仅把 import 指向 agent-runtime）
 │  ├─ repo-analyzer/     ← 保留：Tree-sitter 分析（未改）
-│  ├─ utils/             ← 保留：配置/cache/wiki 落盘/版本快照/provider-registry（未改）
-│  └─ types/             ← 保留：共享类型（未改）
+│  ├─ utils/             ← 保留：配置/cache/wiki 落盘/版本快照（未改）
+│  └─ types/             ← 保留：共享类型（provider/model 配置结构有新增字段）
 ├─ apps/
 │  ├─ cli/               ← 保留：TUI（**pi-tui 实现**，不再依赖 Ink/React；仅 browse-chat 的 provider 改为 pi 实现）
 │  └─ browse/            ← 保留：React 19 + Vite 预览站（**独立安装**，见下方说明）
@@ -51,7 +54,9 @@ bun run test:tui
 bun run mock:wiki
 bun run mock:wiki path/to/any/repo   # 也可指定其它仓库
 
-# 4) 真机跑 CLI：先配置 LLM（写入 ~/.zread/config.yaml）
+# 4) 真机跑 CLI：先配置 LLM（config.yaml + auth.json）
+#    配置界面直接使用 pi-ai 的 Provider 目录与 login（API Key / OAuth），
+#    可以同时登录多个 Provider，并为任意 Provider 添加自定义模型。
 bun run cli config
 bun run cli            # 等价于 open-zread wiki
 
@@ -77,6 +82,7 @@ bun run browse:dev
 | 5 个文件工具（Read/Write/Edit/Glob/Grep） | 实现原样复用，仅包装成 pi 的 `AgentTool`（JSON Schema 直接作为 TypeBox `TSchema` 使用） |
 | `TokenUsage` | 由 pi `Usage` 映射（`cacheWrite`→`cache_creation_input_tokens`，`cacheRead`→`cache_read_input_tokens`） |
 | `createProvider()`（browse-chat） | pi-ai `Models.completeSimple()` |
+| 配置界面手工维护 provider 列表（LiteLLM 缓存） | pi-ai `builtinProviders()`（40 个内置 Provider）+ `Models.login()`（API Key / OAuth）+ `Models.refresh()`（模型目录刷新） |
 
 业务侧唯一改动：`import ... from '@open-zread/agent-sdk'` → `'@open-zread/agent-runtime'`（22 个文件，纯机械替换）。
 `Orchestrator` 的并发控制（p-limit）、错误隔离、三层 Repo Map 工具、prompt、`wiki.json` 契约、`WritePageTool` 的 Mermaid 校验**全部未改**。
@@ -87,13 +93,14 @@ bun run browse:dev
 
 | 测试 | 覆盖 | 结果 |
 |---|---|---|
+| `test:catalog` | **pi-ai Provider 目录**：内置 Provider 列表、api_key 登录写 `auth.json`、多 Provider 同时配置、自定义模型合并、未内置 Provider 注册、runtime model 元数据、logout 隔离 | 25/25 |
 | `test:agent` | pi Agent 循环、工具执行、钩子、流式事件、**429 重试**、usage 映射、maxTurns | 10/10 |
 | `test:agent:http` | 真实 HTTP/SSE 路径：baseURL + apiKey 注入、增量 tool_call 参数解析、第二轮请求 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径）、system 透传、usage | 5/5 |
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件 | 6/6 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截 | 6/6 |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页冒烟 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + mock LLM 的生成/同步全链路 | 89 + 13 + 9 + 19 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + Provider 登录/多 Provider/自定义模型冒烟 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + mock LLM 的生成/同步全链路 | 120 + 15 + 9 + 19 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
@@ -125,7 +132,18 @@ apps/cli/src/
 │  ├─ screen.ts      页面基类（render / handleKey / claimEsc）
 │  ├─ ansi.ts        ANSI 样式（对齐 Ink <Text> 的 color / dimColor / bold）
 │  └─ components/    Divider / RoundedBox / Select / StatusIcon / TextField
-└─ views/            11 个页面（wiki-home / wiki-generate / wiki-sync / browse / 7 个 config 页面）
+└─ views/            14 个页面（wiki-home / wiki-generate / wiki-sync / browse / 10 个 config 页面）
+```
+
+配置模块页面（`/config/provider` 系列）已改为 pi-ai 驱动的 Provider/模型/登录流程：
+
+```
+/config/provider                     Provider 列表（内置目录 + 已配置的自定义端点，带登录状态）
+/config/provider/:id                 模型列表（内置目录 + 自定义模型，r 刷新 / a 添加自定义模型）
+/config/provider/:id/model-new       为指定 Provider 添加自定义模型
+/config/provider/:id/model/:modelId  登录页（OAuth / API Key，走 pi-ai Models.login）
+/config/provider/custom              完全自定义端点（Base URL → 模型 → API Key）
+/config/provider/:id/custom          兼容旧路由 → 等同于 model-new
 ```
 
 对照关系与判定条件：
@@ -177,15 +195,32 @@ apps/cli/src/
 - **src 模式（免构建）**：`exports` 指向 `src/*.ts`，Bun 直接跑 TS，适合修改 pi 源码。
   切换：`bun run vendor:src`（免构建）/ `bun run vendor:dist`（需紧接 `vendor:build`）。
 
-`ai` 包用 `tsconfig.app.json` 构建（只编译 `index.ts` + 三个 api lazy 入口的闭包），
-因为 pi 上游的 `providers/*.models.ts` 依赖构建期生成的 `src/providers/data/*.json`（仓库快照里不存在）；本工程不需要模型目录，因为我们自己构造 `Model`。
+`ai` 包用 `tsconfig.app.json` 构建。历史上只编译 `index.ts` + 三个 api lazy 入口的闭包，因为 pi 上游的 `providers/*.models.ts` 依赖构建期生成的 `src/providers/data/*.json`（仓库快照里不存在）。
+现在为了把 pi-ai 的 **内置 Provider 目录 + OAuth 登录流程**接进配置界面：
+
+- `src/providers/data/*.json`（内含 `.manifest.json`）已从同版本（0.85.1）的 npm 发布包补齐并入库（0.6MB）；
+- `tsconfig.app.json` 额外 include：`src/providers/all.ts`（40 个 Provider + 模型目录）、`src/bun-oauth.ts`（静态注册 OAuth 流程，解决打包后动态 specifier 不可解析的问题）、`src/auth/oauth/*.ts`；
+- `packages/agent-runtime` 导入 `@earendil-works/pi-ai/providers/all` 与 `bun-oauth`，因此 `vendor:build` 产物必须包含这些文件（重建只需重新跑 `bun run vendor:build`）。
+
 另：`vendor/pi/packages/ai/package.json` 显式补了 `@smithy/types`（上游靠 aws-sdk 传递获得，孤岛安装模式下需显式声明）。
 `tui` 包的上游构建脚本是 `tsgo`；本仓库改用 `tsc`，因此其 `tsconfig.build.json` 把 `target/lib` 提到 `ES2024`（`utils.ts` 里用了 `v` 正则标志，`ES2022` 下 TS 会报 TS1501）。
 
-### 3. 配置与凭据仍在 open_zread 侧
-`~/.zread/config.yaml`（provider / model / api_key / base_url / concurrency）与 CLI 配置 UI 未改动；
-适配层把这份配置翻译成 pi 的 Provider + Model + ApiKeyAuth（`baseUrl` 经 `auth.resolve()` 注入，等价 pi 官方 provider 工厂的做法）。
-未登记过的 providerId 回退为 OpenAI 兼容协议（旧实现会直接抛 `Unsupported provider`）——这是有意的健壮性增强。
+### 3. 配置与凭据（config.yaml + auth.json）
+
+配置分两层，均归 open_zread 自己管理：
+
+- `~/.zread/config.yaml`：非敏感配置。`llm.provider` / `llm.model` 是当前生效的 Provider/模型；
+  `llm.providers.<providerId>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型（`models`）与上次选择的模型。
+  旧字段 `llm.api_key` / `llm.base_url` 仍然兼容读取，首次在新界面切换模型时会自动迁移到下面两个位置。
+- `~/.zread/auth.json`：pi-ai 格式的凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，
+  可同时保存多个 Provider 的 API Key / OAuth token；OAuth 过期由 pi 自动刷新。
+- `~/.zread/models-store.json`：动态 Provider 的模型目录缓存（pi `ModelsStore`）。
+
+`packages/agent-runtime/src/pi/provider-catalog.ts` 把这份配置翻译成 pi 的 Provider + Model：
+内置 Provider 直接用 pi-ai 的 `builtinProviders()`，未内置的（自定义端点 / 旧 `openai-compatible`）用 `createProvider()` 动态注册；
+配置里的自定义模型按 pi models.json 的合并语义（同 id 覆盖、否则追加）叠加到 `getModels()` 上。
+运行时（`createRuntimeModel`）优先走 catalog：模型元数据、OAuth 自动刷新、多 Provider 凭据全部生效；
+unknown providerId 仍然回退为 OpenAI 兼容协议（旧实现会直接抛 `Unsupported provider`）——这是有意的健壮性增强。
 
 ---
 
