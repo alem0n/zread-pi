@@ -12,19 +12,20 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun run typecheck && bun run test:agent && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages",
+    "test": "bun run typecheck && bun run test:agent && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:tui",
     "test:agent": "bun run packages/agent-runtime/test/smoke-agent.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
     "test:provider": "bun run packages/agent-runtime/test/provider-http-smoke.ts",
     "test:analyzer": "bun run packages/repo-analyzer/test/smoke-analyzer.ts",
     "test:pages": "bun run packages/orchestrator/test/e2e-page-generation.ts",
-    "cli": "bun run apps/cli/src/index.tsx",
+    "cli": "bun run apps/cli/src/index.ts",
     "vendor:src": "bun run tools/patch-vendor.ts",
     "vendor:dist": "bun run tools/patch-vendor-dist.ts",
-    "vendor:build": "bun run tsc -p vendor/pi/packages/telemetry/tsconfig.build.json && bun run tsc -p vendor/pi/packages/chord/tsconfig.build.json && bun run tsc -p vendor/pi/packages/ai/tsconfig.app.json && bun run tsc -p vendor/pi/packages/agent/tsconfig.build.json",
+    "vendor:build": "bun run tsc -p vendor/pi/packages/telemetry/tsconfig.build.json && bun run tsc -p vendor/pi/packages/chord/tsconfig.build.json && bun run tsc -p vendor/pi/packages/ai/tsconfig.app.json && bun run tsc -p vendor/pi/packages/agent/tsconfig.build.json && bun run tsc -p vendor/pi/packages/tui/tsconfig.build.json",
     "browse:install": "cd apps/browse && bun install",
     "browse:dev": "cd apps/browse && bun run dev",
     "test:blueprint": "bun run packages/orchestrator/test/e2e-blueprint.ts",
+    "test:tui": "bun run apps/cli/test/smoke-tui.ts && bun run apps/cli/test/render-all-routes.ts && bun run apps/cli/test/real-run-check.ts && bun run apps/cli/test/mock-generate.ts",
     "mock:wiki": "bun run tools/mock-wiki-run.ts"
   },
   "devDependencies": {
