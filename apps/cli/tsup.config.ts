@@ -52,6 +52,11 @@ export default defineConfig(() => {
       const browseTargetPath = join(cwd, 'dist/browse')
       if (existsSync(browseDistPath)) {
         await cp(browseDistPath, browseTargetPath, { recursive: true })
+      } else {
+        console.warn(
+          '[cli] 未找到 apps/browse/dist；打包产物将缺少「浏览文档」前端资源。' +
+            '请先运行 bun run browse:build（首次还需 bun run browse:install）。',
+        )
       }
 
       // 复制 WASM 文件（repo-analyzer 的 Tree-sitter 需要）

@@ -221,6 +221,7 @@ export const enUS: TranslationKeys = {
     url: 'URL',
     footer: 'ESC Stop server | ctrl+c Exit app',
     stopped: 'Server stopped',
+    startFailed: 'Failed to start server',
     noDocs: 'No documents yet, please generate first',
   },
   wikiGenerate: {
