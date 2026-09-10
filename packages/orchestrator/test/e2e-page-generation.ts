@@ -60,6 +60,15 @@ const badPage = {
 };
 const badPageContent = ["# 非法图表", "", "```mermaid", "flowchart TB", "  A[用户(输入)] --> B[结果]", "```", ""].join("\n");
 
+/** 故意不调用 write_page（只输出文字），用于验证「Agent 正常结束但页面未落盘」被计为失败 */
+const noWritePage = {
+	slug: "5-no-write",
+	title: "未落盘",
+	file: "5-no-write.md",
+	section: "参考",
+	level: "Beginner",
+};
+
 let requests = 0;
 const server = Bun.serve({
 	port: 0,
@@ -70,14 +79,22 @@ const server = Bun.serve({
 		const hasToolResult = messages.some((message) => message.role === "tool");
 		const promptText = JSON.stringify(messages.find((message) => message.role === "user")?.content ?? "");
 		const isBadPage = promptText.includes(badPage.slug);
+		const isNoWritePage = promptText.includes(noWritePage.slug);
 		const page =
-			(pages.find((candidate) => promptText.includes(candidate.slug)) ?? pages[0]) as (typeof pages)[number] | typeof badPage;
+			(pages.find((candidate) => promptText.includes(candidate.slug)) ?? pages[0]) as
+				| (typeof pages)[number]
+				| typeof badPage
+				| typeof noWritePage;
 
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const write = (text: string) => controller.enqueue(encoder.encode(text));
-				if (!hasToolResult) {
+				if (isNoWritePage) {
+					// 不调工具，直接给出最终答复（模拟模型忘记/放弃调用 write_page）
+					write(chunk(baseChunk({ role: "assistant", content: "未落盘 完成" }, null)));
+					write(chunk(baseChunk({}, "stop")));
+				} else if (!hasToolResult) {
 					write(chunk(baseChunk({ role: "assistant", content: "" }, null)));
 					write(
 						chunk(
@@ -152,10 +169,14 @@ process.chdir(repo);
 const { generateWikiContent } = await import("../src/wiki/generate-wiki.js");
 
 const progress: string[] = [];
+const events: string[] = [];
 console.log("▶ generateWikiContent({ maxConcurrent: 3 }) …");
 const result = await generateWikiContent({
-	pages: [...pages, badPage],
+	pages: [...pages, badPage, noWritePage],
 	maxConcurrent: 3,
+	onEvent: (event) => {
+		events.push(`${event.type}:${event.slug}`);
+	},
 	onProgress: (state) => {
 		progress.push(`${state.completed}/${state.total}`);
 	},
@@ -176,7 +197,11 @@ check(
 	contents.map((content) => content.slice(0, 18)).join(" | "),
 );
 check("frontmatter 标题被写入", contents[0].includes('title: "概览"'), contents[0].split("\n")[1] ?? "");
-check("并发任务全部成功", result.completed === 4 && result.failed === 0, `completed=${result.completed} failed=${result.failed}`);
+check(
+	"并发任务：3 页成功，2 页因未落盘被计为失败",
+	result.completed === 3 && result.failed === 2,
+	`completed=${result.completed} failed=${result.failed} (${result.results.map((entry) => `${entry.slug}:${entry.success}`).join(", ")})`,
+);
 check(
 	"非法 Mermaid 被 WritePageTool 拦截：页面未落盘，其它页面不受影响",
 	(await readFile(join(repo, ".open-zread", "wiki", "参考", "4-bad-mermaid.md"), "utf-8").catch(() => "")) === "" &&
@@ -184,6 +209,19 @@ check(
 	`badPageWritten=${(await readFile(join(repo, ".open-zread", "wiki", "参考", "4-bad-mermaid.md"), "utf-8").catch(() => "")) !== ""}`,
 );
 check("进度回调被触发", progress.length >= 1, progress.join(","));
+check(
+	"非法 Mermaid 页面发出 page_error 且带原因",
+	events.includes(`page_error:${badPage.slug}`) &&
+		result.results.some((entry) => entry.slug === badPage.slug && entry.success === false),
+	result.results.find((entry) => entry.slug === badPage.slug)?.error ?? "(无结果)",
+);
+check(
+	"未调用 write_page 的页面发出 page_error（不再误报完成）",
+	events.includes(`page_error:${noWritePage.slug}`) &&
+		events.includes(`page_start:${noWritePage.slug}`) &&
+		!events.includes(`page_complete:${noWritePage.slug}`),
+	result.results.find((entry) => entry.slug === noWritePage.slug)?.error ?? "(无结果)",
+);
 check("每个页面都发生了真实模型调用（>=8 次请求）", requests >= 8, `requests=${requests}`);
 
 process.chdir(join(repo, ".."));

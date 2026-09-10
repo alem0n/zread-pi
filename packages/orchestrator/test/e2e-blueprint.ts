@@ -70,6 +70,8 @@ function baseChunk(delta: Record<string, unknown>, finishReason: string | null):
 }
 
 let toolCallServed = false;
+/** 第二轮场景：模型不调用 generate_blueprint，只输出文字 */
+let mode: "ok" | "no-blueprint" = "ok";
 const server = Bun.serve({
 	port: 0,
 	async fetch(request) {
@@ -81,7 +83,7 @@ const server = Bun.serve({
 			start(controller) {
 				const write = (text: string) => controller.enqueue(encoder.encode(text));
 
-				if (!hasToolResult && !toolCallServed) {
+				if (mode === "ok" && !hasToolResult && !toolCallServed) {
 					toolCallServed = true;
 					write(chunk(baseChunk({ role: "assistant", content: "" }, null)));
 					write(
@@ -163,10 +165,8 @@ const result = await generateWikiCatalog((event) => {
 	catalogEvents.push(event.type);
 });
 
-server.stop(true);
-
 // ---------------------------------------------------------------------------
-// 4) 断言
+// 4) 断言（正向场景：模型调用 generate_blueprint 产出 wiki.json）
 // ---------------------------------------------------------------------------
 
 const wikiJsonPath = join(repo, ".open-zread", "wiki", "wiki.json");
@@ -192,6 +192,25 @@ check(
 );
 check("tokenUsage 已回传", result.tokenUsage !== undefined, JSON.stringify(result.tokenUsage));
 check("durationMs 已回传", typeof result.durationMs === "number" && result.durationMs >= 0, String(result.durationMs));
+
+// ---------------------------------------------------------------------------
+// 5) 反向场景：模型不产出 wiki.json 时必须报错（不能假装目录完成）
+// ---------------------------------------------------------------------------
+
+mode = "no-blueprint";
+await rm(wikiJsonPath, { force: true });
+console.log("\n▶ generateWikiCatalog()（模型不调用 generate_blueprint）…");
+const blueprintFailure = await generateWikiCatalog().then(
+	() => null,
+	(err: unknown) => (err instanceof Error ? err.message : String(err)),
+);
+check(
+	"未产出有效 wiki.json 时报错而不是假装完成",
+	typeof blueprintFailure === "string" && blueprintFailure.includes("wiki.json"),
+	blueprintFailure ?? "(未报错)",
+);
+
+server.stop(true);
 
 process.chdir(join(repo, ".."));
 await rm(repo, { recursive: true, force: true });

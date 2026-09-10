@@ -5,6 +5,7 @@
  */
 
 import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@open-zread/agent-runtime';
+import { loadWikiBlueprint } from '@open-zread/utils';
 import { createAgent } from './agents/create-agent';
 import GenerateCatalog from './prompts/generate-catalog';
 import { GenerateBlueprintTool, ValidateBlueprintTool } from './tools/output-tools.js';
@@ -45,6 +46,15 @@ export async function generateWikiCatalog(
     prompts: GenerateCatalog as string,
     onEvent,
   });
+
+  // Agent 正常结束 ≠ 蓝图已落盘/有效：模型可能只输出文字，或写出非法 JSON。
+  // 校验 wiki.json 可加载，避免生成界面显示目录完成、而首页按文件检查判定「无目录」。
+  try {
+    await loadWikiBlueprint();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`目录生成未产出有效 wiki.json：${message}`);
+  }
 
   return {
     pagesCount: 0,

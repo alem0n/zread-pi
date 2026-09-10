@@ -11,9 +11,9 @@
  */
 
 import pLimit from 'p-limit';
-import { loadWikiBlueprint, logger } from '@open-zread/utils';
+import { fileExists, getWikiDir, joinPath, loadWikiBlueprint, logger } from '@open-zread/utils';
 import { createAgent } from '../agents/create-agent.js';
-import { FileEditTool, FileReadTool, GlobTool, GrepTool } from '@open-zread/agent-runtime';
+import { FileEditTool, FileReadTool, GlobTool, GrepTool, type ToolDefinition } from '@open-zread/agent-runtime';
 import { WritePageTool } from '../tools/page-tools.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import type { WikiPage } from '@open-zread/types';
@@ -53,6 +53,27 @@ ${associatedFilesList}
 输出文件将写入: \`.open-zread/wiki/${page.section}/${page.file}\`
 
 请按照三步工作流执行，最后使用 write_page 输出文档（务必传入完整的 file 和 section 参数）。`;
+}
+
+/**
+ * 从 write_page 的错误结果里取一条短原因（TUI 单行展示，过长会被截断）。
+ * write_page 的返回是 JSON（如 {"success":false,"error":"Mermaid validation failed.\n..."}），
+ * 优先取其中的 error 首行；非 JSON 时退回原文首行。
+ */
+function summarizeWriteError(content: unknown): string {
+  if (typeof content !== 'string') return 'write_page 执行失败';
+
+  let text = content;
+  try {
+    const parsed = JSON.parse(content) as { error?: unknown };
+    if (typeof parsed.error === 'string' && parsed.error.length > 0) {
+      text = parsed.error;
+    }
+  } catch {
+    // 非 JSON 内容，直接用原文
+  }
+
+  return text.split('\n')[0].slice(0, 160);
 }
 
 /**
@@ -106,6 +127,23 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
       progress.pending--;
       options?.onProgress?.(progress);
 
+      // 跟踪 write_page 是否真正成功（模型可能从未调用，或被 Mermaid 校验拦截）
+      let wrotePage = false;
+      let lastWriteError: string | undefined;
+      const writePageTool: ToolDefinition = {
+        ...WritePageTool,
+        async call(input, context) {
+          const toolResult = await WritePageTool.call(input, context);
+          if (toolResult.is_error) {
+            lastWriteError = summarizeWriteError(toolResult.content);
+          } else {
+            wrotePage = true;
+            lastWriteError = undefined;
+          }
+          return toolResult;
+        },
+      };
+
       try {
 
         // 使用 createAgent，通过 onEvent 回调发射细粒度事件
@@ -115,7 +153,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             FileEditTool,
             GlobTool,
             GrepTool,
-            WritePageTool
+            writePageTool
           ],
           prompts: buildPagePrompt(page),
           // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
@@ -171,6 +209,19 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             });
           },
         });
+
+        // Agent 正常结束 ≠ 页面已落盘：模型可能只输出文字、写到错误路径，
+        // 或被 Mermaid 校验拦截后放弃。以 wiki.json 约定的输出文件存在为准，
+        // 避免生成界面显示完成、而首页按文件检查仍显示未完成。
+        const outputFile = joinPath(getWikiDir(), page.section, page.file);
+        if (!(await fileExists(outputFile))) {
+          const reason = wrotePage
+            ? 'write_page 写入路径与 wiki.json 不一致'
+            : lastWriteError
+              ? `write_page 失败：${lastWriteError}`
+              : '模型未调用 write_page';
+          throw new Error(`页面文件未生成（${reason}）`);
+        }
 
         // Success
         progress.completed++;
