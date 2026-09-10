@@ -72,7 +72,11 @@ export default class WikiSyncPage extends Screen {
         this.selectedSlug = item.slug;
       },
     });
+  }
 
+  override async onEnter(): Promise<void> {
+    // 直接进入该路由时（未经 wiki 首页）也要先加载 wiki.json，再开始同步
+    await this.app.wiki.load();
     this.controller.init();
   }
 
@@ -103,6 +107,15 @@ export default class WikiSyncPage extends Screen {
     const lines: string[] = [];
     lines.push(...this.renderCatalogRow(catalog, width));
 
+    // 底部导航（marginTop={1}）
+    const footer = [
+      "",
+      style(
+        `↑/↓: ${this.t("wikiGenerate.navigate")} | r: ${this.t("wikiGenerate.retry")} | ctrl+c: ${this.t("wikiGenerate.exit")} | ESC: 返回`,
+        { dim: true },
+      ),
+    ];
+
     if (catalog.status === "completed" && syncPages.length > 0) {
       this.select.setItems(
         syncPages.map((page) => ({
@@ -112,23 +125,14 @@ export default class WikiSyncPage extends Screen {
           status: page.status,
         })),
       );
-      lines.push(...this.renderArticlesList(width));
+      lines.push(...this.renderArticlesList(width, lines.length, footer.length));
     }
 
     if (catalog.status === "completed" && syncPages.length === 0) {
       lines.push("", style("无变更", { color: theme.muted }));
     }
 
-    // 底部导航（marginTop={1}）
-    lines.push(
-      "",
-      style(
-        `↑/↓: ${this.t("wikiGenerate.navigate")} | r: ${this.t("wikiGenerate.retry")} | ctrl+c: ${this.t("wikiGenerate.exit")} | ESC: 返回`,
-        { dim: true },
-      ),
-    );
-
-    return lines;
+    return [...lines, ...footer];
   }
 
   // ==================== 目录段 ====================
@@ -182,12 +186,17 @@ export default class WikiSyncPage extends Screen {
 
   // ==================== 文章段 ====================
 
-  private renderArticlesList(width: number): string[] {
+  private renderArticlesList(width: number, preLines: number, postLines: number): string[] {
     const { articles, syncPages } = this.controller.state;
     const articlesTitle = this.t("wikiGenerate.articlesTitle", {
       current: articles.completedCount,
       total: syncPages.length,
     });
+
+    // 分页：列表可用行数 = 页面高度 - 上方内容 - 下方内容 - 本区块的 3 行（分割线 2 + 空行 1）
+    this.select.setViewportRows(
+      Math.max(3, this.app.availableRows - preLines - postLines - 3),
+    );
 
     return [
       ...new Divider(articlesTitle).render(width),

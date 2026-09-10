@@ -77,7 +77,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框 56 项）、`render-all-routes.ts`（全部 13 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 56 + 13 + 9 + 19 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/console 接管 82 项）、`render-all-routes.ts`（全部 13 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 82 + 13 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -90,7 +90,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | 改动 | 必做 | 说明 |
 | --- | --- | --- |
 | 业务层（orchestrator / repo-analyzer / utils / types / browse） | `bun run typecheck` + `bun run test` | 若触及 wiki 产物结构，额外跑 `bun run mock:wiki` 并核对 `wiki.json` 与页面文件 |
-| CLI TUI（`apps/cli/src/**`） | `bun run typecheck` + `bun run test:tui` | 布局/快捷键/文案改动必须同步 `smoke-tui.ts` 的断言 |
+| CLI TUI（`apps/cli/src/**`） | `bun run typecheck` + `bun run test:tui` | 布局/快捷键/文案改动必须同步 `smoke-tui.ts` 的断言；列表分页行为（窗口/位置指示/PageUp·PageDown·Home·End）也归该套断言覆盖 |
 | 适配层 `packages/agent-runtime/**` | `bun run test`（全部 7 套）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
 | pi vendor 源码（`vendor/pi/**/src`） | `vendor:src` → 改 → `vendor:dist` → `vendor:build` → `bun run test` | 见 §6.1；**不要手改 `dist/`** |
 | 依赖变更 | `bun install` 后一并提交 `bun.lock`，并在 commit body 说明原因 | 不要把 `node_modules` 带进仓库 |

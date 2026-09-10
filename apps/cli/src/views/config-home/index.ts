@@ -112,14 +112,14 @@ export default class ConfigHomePage extends Screen {
       );
     }
 
-    // 配置项选择列表（marginTop={1}）
-    lines.push("");
-    lines.push(...this.select.render(width));
+    // 配置项选择列表（marginTop={1}）+ Footer（marginTop={1}）
+    const pre = [...lines];
+    const post = ["", style(t("config.footer"), { dim: true })];
+    this.select.setViewportRows(
+      Math.max(3, this.app.availableRows - pre.length - 1 - post.length),
+    );
 
-    // Footer（marginTop={1}）
-    lines.push("", style(t("config.footer"), { dim: true }));
-
-    return lines;
+    return [...pre, "", ...this.select.render(width), ...post];
   }
 
   private startSave(): void {
