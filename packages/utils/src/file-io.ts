@@ -1,0 +1,65 @@
+import { readFile, writeFile, mkdir, rm, stat } from 'fs/promises';
+import { dirname, join } from 'path';
+
+export async function ensureDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+}
+
+export async function removeDir(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true });
+}
+
+export async function readTextFile(path: string): Promise<string> {
+  return readFile(path, 'utf-8');
+}
+
+export async function writeTextFile(path: string, content: string): Promise<void> {
+  await ensureDir(dirname(path));
+  await writeFile(path, content, 'utf-8');
+}
+
+export async function writeJsonFile(path: string, data: unknown): Promise<void> {
+  const content = JSON.stringify(data, null, 2);
+  await writeTextFile(path, content);
+}
+
+export async function readJsonFile<T>(path: string): Promise<T> {
+  const content = await readTextFile(path);
+  return JSON.parse(content) as T;
+}
+
+/**
+ * 检查文件是否存在
+ */
+export async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function joinPath(...parts: string[]): string {
+  return join(...parts);
+}
+
+export function getProjectRoot(): string {
+  return process.cwd();
+}
+
+export function getOutputDir(): string {
+  return join(getProjectRoot(), '.open-zread');
+}
+
+export function getCacheDir(): string {
+  return join(getOutputDir(), 'cache');
+}
+
+export function getWikiDir(): string {
+  return join(getOutputDir(), 'wiki');
+}
+
+export function getWikiJsonPath(): string {
+  return join(getWikiDir(), 'wiki.json');
+}

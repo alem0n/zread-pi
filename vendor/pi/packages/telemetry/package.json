@@ -1,0 +1,23 @@
+{
+	"name": "@earendil-works/pi-telemetry",
+	"version": "0.85.1",
+	"description": "Vendor-neutral telemetry contracts and typed schema utilities for pi",
+	"type": "module",
+	"private": true,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./testing": {
+			"types": "./dist/testing/index.d.ts",
+			"import": "./dist/testing/index.js"
+		}
+	},
+	"dependencies": {},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}

@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "paths": {
+      "@open-zread/types": ["../types/src/index.ts"],
+      "@open-zread/utils": ["../utils/src/index.ts"],
+      "@open-zread/repo-analyzer": ["../repo-analyzer/src/index.ts"],
+      "@open-zread/agent-runtime": ["../agent-runtime/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

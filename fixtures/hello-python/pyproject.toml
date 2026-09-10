@@ -1,0 +1,5 @@
+[project]
+name = "hello-python"
+version = "0.1.0"
+description = "极简 Python Hello World，用于文档生成测试"
+requires-python = ">=3.9"

@@ -1,0 +1,74 @@
+{
+  "name": "@open-zread/cli",
+  "version": "1.2.2",
+  "description": "一行命令，把整个项目变成高质量的 Wiki 文档库。AI 帮你读代码、理逻辑、写文档。",
+  "keywords": [
+    "wiki",
+    "documentation",
+    "ai",
+    "agent",
+    "llm",
+    "claude",
+    "code-analysis",
+    "tree-sitter",
+    "markdown",
+    "cli"
+  ],
+  "author": "bb-boy680",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bb-boy680/open-zread.git"
+  },
+  "homepage": "https://github.com/bb-boy680/open-zread#readme",
+  "bugs": {
+    "url": "https://github.com/bb-boy680/open-zread/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "open-zread": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "cross-env NODE_ENV=production tsup",
+    "dev": "bun run scripts/dev.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "express": "^5.1.0",
+    "fullscreen-ink": "^0.1.0",
+    "get-port": "^7.1.0",
+    "ink": "^4.4.0",
+    "ink-select-input": "^5.0.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^5.0.0",
+    "open": "^10.1.2",
+    "react": "^18.0.0",
+    "react-router": "^7.14.2",
+    "use-immer": "^0.11.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@open-zread/agent-runtime": "workspace:*",
+    "@open-zread/orchestrator": "workspace:*",
+    "@open-zread/repo-analyzer": "workspace:*",
+    "@open-zread/types": "workspace:*",
+    "@open-zread/utils": "workspace:*",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^5.0.0",
+    "@types/express": "^5.0.6"
+  }
+}

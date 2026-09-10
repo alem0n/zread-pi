@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext"
+	},
+	"include": [
+		"src/index.ts",
+		"src/api/anthropic-messages.lazy.ts",
+		"src/api/openai-completions.lazy.ts",
+		"src/api/openai-responses.lazy.ts"
+	],
+	"exclude": ["node_modules", "dist", "**/*.d.ts", "src/**/*.d.ts"]
+}

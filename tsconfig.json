@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "declaration": false,
+    "types": ["node", "bun-types"],
+    "paths": {
+      "@open-zread/types": ["./packages/types/src/index.ts"],
+      "@open-zread/utils": ["./packages/utils/src/index.ts"],
+      "@open-zread/repo-analyzer": ["./packages/repo-analyzer/src/index.ts"],
+      "@open-zread/orchestrator": ["./packages/orchestrator/src/index.ts"],
+      "@open-zread/agent-runtime": ["./packages/agent-runtime/src/index.ts"]
+    }
+  },
+  "include": [
+    "apps/cli/src/**/*",
+    "packages/*/src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "vendor",
+    "dist",
+    "archive"
+  ]
+}

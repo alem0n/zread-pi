@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist",
+    "types": ["node", "bun-types"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@open-zread/types": ["../../packages/types/src/index.ts"],
+      "@open-zread/utils": ["../../packages/utils/src/index.ts"],
+      "@open-zread/repo-analyzer": ["../../packages/repo-analyzer/src/index.ts"],
+      "@open-zread/orchestrator": ["../../packages/orchestrator/src/index.ts"],
+      "@open-zread/agent-runtime": ["../../packages/agent-runtime/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "src/**/*.d.ts", "tsup.config.ts"]
+}
