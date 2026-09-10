@@ -183,7 +183,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ```bash
 bun run typecheck
 bun run test:catalog    # 32/32
-bun run test            # 全部套件（含 test:context 17/17、TUI 148 + 路由 16 + 真实终端 9 + mock 全链路 19）
+bun run test            # 全部套件（含 test:context 17/17、TUI 150 + 路由 16 + 真实终端 9 + mock 全链路 19）
 ```
 
 ### 8.5 思考深度（pi thinking level，第四步）

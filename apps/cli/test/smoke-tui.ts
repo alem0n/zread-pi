@@ -401,6 +401,13 @@ console.log("▶ TUI 冒烟测试");
     `实际: ${app.config.config.agent.max_turns}`,
   );
 
+  // s：保存到 config.yaml（新增 agent 段）
+  terminal.send("s");
+  await settle(120);
+  checkContains("最大轮次页：s 保存后提示已保存", screenText(app), "配置已保存");
+  const yaml = await readFile(join(home, ".zread", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 agent.max_turns: 50", yaml, "max_turns: 50");
+
   app.exit();
 }
 
