@@ -42,6 +42,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 重试放在 `streamFn` 层，且只在"未产出内容"时重试 | pi 的 Agent 循环刻意不内置重试；这样失败尝试不会写进会话记录 |
 | 钩子映射到 pi 的 `beforeToolCall` / `afterToolCall` | 与旧 `PreToolUse` / `PostToolUse` 语义一一对应，UI 进度事件零改动 |
 | 5 个文件工具**原样复制**而非改用 pi 内置工具 | 保持工具名/schema/提示文本不变，避免 LLM 行为漂移 |
+| 生成“完成”以落盘为准 | Agent 正常结束 ≠ 产出：`generateWikiCatalog()` 强制校验 `wiki.json` 可加载，`generateWikiContent()` 校验 `.open-zread/wiki/<section>/<file>` 存在，否则记失败（抛错 → `page_error`）；避免生成界面显示完成、退出后首页按文件检查仍显示未完成 |
 | 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
 | 思考深度（thinking level）直接沿用 pi 的 7 档 | 配置界面新增 `/config/thinking`（`llm.thinking_level`，默认 off）；受支持等级由 pi-ai `getSupportedThinkingLevels` 计算，模型不支持时分界清楚标注、请求时由 pi 自动 clamp；运行时 `createAgent({ thinkingLevel })` 透传为 `options.reasoning` |
 | 最大轮次进配置（不再硬编码） | 配置界面新增 `/config/max-turns`（`agent.max_turns`，1-100，默认 30）；Orchestrator 的 `create-agent.ts` 读配置下发，`generate-wiki` 不再写死 `maxTurns: 30` |
@@ -93,8 +94,8 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
-| `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
-| `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
+| `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json`；模型不产出蓝图时必须报错（不再假装目录完成） | 7/7 |
+| `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验；页面未落盘（未调用 `write_page` / 写入路径不符 / Mermaid 拦截）必须记失败并发出 `page_error` | 8/8 |
 | `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 151 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 151 + 16 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
