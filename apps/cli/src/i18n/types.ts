@@ -237,6 +237,7 @@ export interface TranslationKeys {
     url: string;
     footer: string;
     stopped: string;
+    startFailed: string;
     noDocs: string;
   };
 }

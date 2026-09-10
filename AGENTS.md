@@ -49,6 +49,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 上下文压缩用 pi 的 `transformContext` + `compaction` | 每次请求前按 `model.contextWindow - reserveTokens` 判定，超限时调用 pi 的 `prepareCompaction` / `compact` 生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；`shouldStopAfterTurn` 在压缩无法腾出空间时优雅停止（`error_context_full`），不让 provider 报上下文溢出 |
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
+| 浏览文档：服务端返回的 URL 必须真实可访问 | 有构建产物（打包 `dist/browse` / 源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码运行且未构建时进程内启动 Vite dev server（`/api` 代理到 API 端口）。不再依赖用户另起 `browse:dev`，也不再返回没人监听的 5173；启动失败在 TUI 显示原因（`OPEN_ZREAD_BROWSE_DIST` / `OPEN_ZREAD_BROWSE_NO_OPEN` 供自定义与测试） |
 | `apps/browse` 不进根 workspaces | React 19（browse）与 React 18（ink）混装会让 CLI 启动即崩，见 §6.3 |
 
 ### 1.2 契约冻结点（破坏即需同步改业务层）
@@ -82,6 +83,8 @@ bun run typecheck          # tsc --noEmit（apps/cli/src + apps/cli/test + packa
 bun run test               # typecheck + 9 个测试套件（离线，无需 API Key）
 bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终端启动 + 目标目录参数 + mock LLM 生成/同步
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
+bun run browse:install     # 预览站依赖（apps/browse 独立安装）
+bun run browse:build       # 预览站静态产物（打包 CLI / 免 Vite 预览）
 bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=当前目录）
 ```
@@ -96,7 +99,8 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json`；模型不产出蓝图时必须报错（不再假装目录完成） | 7/7 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验；页面未落盘（未调用 `write_page` / 写入路径不符 / Mermaid 拦截）必须记失败并发出 `page_error` | 8/8 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 151 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 151 + 16 + 9 + 25 + 19 |
+| `test:browse` | 「浏览文档」服务器 + pi-tui 浏览页：静态资源/API 同端口、SPA fallback、未知 API 404、`close()` 后可连性；页面显示真实地址、ESC 停止；源码无产物时进程内 Vite 兜底；无效资源目录报错 | 28/28（有 `apps/browse/dist` 时兜底 4 项自动跳过） |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 151 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项）、`browse-server.ts`（浏览文档服务 + 页面，28 项） | 151 + 16 + 9 + 25 + 19 + 28 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。

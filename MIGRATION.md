@@ -59,6 +59,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 上下文压缩 | 旧引擎的「自动压缩」语义由 pi 的 `transformContext` + `compaction` 对等实现：超阈值时摘要历史（发出 `system/compact_boundary`），摘要请求会额外消耗一次模型调用；压缩无法再腾出空间时在本轮边界优雅停止（`error_context_full`）。 |
 | 事件粒度 | `assistant` 事件在 `message_end` 产出（完整内容 + usage）；流式增量以 `partial_message` 产出（旧引擎同形）。 |
 | 成功判定以落盘为准 | `generateWikiCatalog()` 在 Agent 正常结束后校验 `wiki.json` 可加载；`generateWikiContent()` 校验 `.open-zread/wiki/<section>/<file>` 真实存在，否则记为失败（抛错/`page_error`）。旧实现把「Agent 循环正常结束」当作完成，模型只输出文字、写到错误路径或被 Mermaid 校验拦截时会显示完成，但首页按文件检查仍显示未完成；现以磁盘产物为唯一判定依据。 |
+| 浏览文档服务器 | 旧实现源码运行（非打包）时固定返回 `http://localhost:5173`（外部 Vite dev server 的地址），未另起 Vite 时浏览器 ERR_CONNECTION_REFUSED。现返回的一定是真实监听地址：有构建产物（打包 `dist/browse` 或源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码且未构建时进程内启动 Vite dev server，并把 `/api` 代理到 API 端口；启动失败（端口占用/资源缺失）在 TUI 直接显示原因。 |
 
 ## 5. 风险与未决项
 
@@ -98,7 +99,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 删除 | `App.tsx`、`index.tsx`、`layout/*.tsx`、`provider/**`、`components/*.tsx`、`i18n/useI18n.ts`、`views/wiki-generate/{components,hooks}`、`views/wiki-sync/hooks` |
 | 依赖变更 | `apps/cli` 新增 `@earendil-works/pi-tui`；移除 `ink`、`ink-*`、`fullscreen-ink`、`react`、`react-router`、`zustand`、`use-immer`、`@types/react`、`ink-testing-library` |
 | 构建 | `tsup` 入口 `src/index.tsx` → `src/index.ts`，去掉 ink 的 react-devtools mock 与 yoga.wasm 拷贝；`scripts/dev.ts` 同步 |
-| 验证 | 新增 `bun run test:tui`（151 + 16 + 9 + 25 + 19 项），并纳入根 `bun run test` |
+| 验证 | 新增 `bun run test:tui`（151 + 16 + 9 + 25 + 19 + 28 项），并纳入根 `bun run test` |
 | 可用性补强 | 列表窗口化分页（`computeItemWindow` / `scrollIndicator`）、PageUp·PageDown·Home·End、终端高度自适应、console 接管（`console-guard.ts`） |
 | 新增全局选项 | `-d, --dir <path>`：入口切一次 `process.cwd()`（业务层零改动），TUI 头部显示实际目标；目录不存在/不是目录时不进入 TUI，单行错误 + 退出码 1。实现 `apps/cli/src/utils/target-dir.ts`，回归 `apps/cli/test/cli-target-dir.ts` |
 

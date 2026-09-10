@@ -66,10 +66,16 @@ bun run cli -d /path/to/repo                     # 绝对路径
 bun run cli wiki --dir /path/to/repo             # 显式 wiki 子命令写法
 bun run cli browse --dir /path/to/repo           # 预览站也看该目录的产物
 # 目录无效（不存在/不是目录）时不进入 TUI：单行错误 + 退出码 1
+#
+# 「浏览文档」返回的地址一定真实可访问，并自动打开浏览器：
+#   有构建产物（apps/browse/dist 或打包后的 dist/browse）→ API + 静态资源同端口；
+#   源码运行且未构建 → 进程内自动启动 Vite dev server（/api 代理到 API 端口）。
+#   启动失败（端口占用/资源缺失）时页面直接显示原因，不再静默显示一个打不开的地址。
 
-# 5) 预览站（独立 React 19 环境）
-bun run browse:install
-bun run browse:dev
+# 5) 预览站（独立 React 19 环境，见「工程细节 1」）
+bun run browse:install      # 首次：安装 apps/browse 依赖
+bun run browse:build        # 可选：构建静态产物（打包 CLI / 免 Vite 预览）
+bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 ```
 
 要求：Bun ≥ 1.3（本仓库用 1.3.14 验证）、Node ≥ 22（pi 内核文档要求）。
@@ -110,7 +116,8 @@ bun run browse:dev
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件；模型不产出蓝图时报错 | 7/7 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截；页面未落盘时必须记失败并发出 `page_error`（不再误报完成） | 8/8 |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 | 151 + 16 + 9 + 25 + 19 |
+| `test:browse` | **「浏览文档」服务器 + pi-tui 浏览页**：静态资源与 API 同端口、SPA fallback、未知 API 404、`close()` 后端口不可连；页面显示「服务器已启动」+ 真实访问地址、ESC 停止；源码无产物时进程内 Vite 兜底（`/api` 代理）；无效 `OPEN_ZREAD_BROWSE_DIST` 直接报错 | 28/28（apps/browse 有 dist 时兜底 4 项自动跳过） |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 151 + 16 + 9 + 25 + 19 + 28 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 

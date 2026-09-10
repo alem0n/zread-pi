@@ -221,6 +221,7 @@ export const zhCN: TranslationKeys = {
     url: '访问地址',
     footer: 'ESC 退出服务器 | ctrl+c 退出应用',
     stopped: '服务器已停止',
+    startFailed: '启动服务器失败',
     noDocs: '暂无文档，请先生成',
   },
   wikiGenerate: {

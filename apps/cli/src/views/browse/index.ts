@@ -8,11 +8,12 @@
 import { matchesKey } from "@earendil-works/pi-tui";
 import { startWikiBrowseServer, hasWikiCatalog } from "../../commands/browse-server";
 import { Divider } from "../../tui/components/divider";
+import { wrapStyled } from "../../tui/text-layout";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { theme } from "../../theme";
 
-type BrowseStatus = "checking" | "no-docs" | "starting" | "running" | "stopped";
+type BrowseStatus = "checking" | "no-docs" | "starting" | "running" | "stopped" | "error";
 
 // ink-spinner 的 dots 动画帧
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -21,7 +22,8 @@ const SPINNER_INTERVAL_MS = 80;
 export default class BrowsePage extends Screen {
   private status: BrowseStatus = "checking";
   private url = "";
-  private server: { close: () => void } | null = null;
+  private errorMessage = "";
+  private server: { close: () => void | Promise<void> } | null = null;
   private spinnerFrame = 0;
   private spinnerTimer?: ReturnType<typeof setInterval>;
   private navigateTimer?: ReturnType<typeof setTimeout>;
@@ -45,8 +47,9 @@ export default class BrowsePage extends Screen {
         this.stopSpinner();
         this.refresh();
       })
-      .catch(() => {
-        this.status = "stopped";
+      .catch((error: unknown) => {
+        this.errorMessage = error instanceof Error ? error.message : String(error);
+        this.status = "error";
         this.stopSpinner();
         this.refresh();
       });
@@ -55,8 +58,10 @@ export default class BrowsePage extends Screen {
   override handleKey(data: string): boolean {
     if (matchesKey(data, "escape")) {
       if (this.server) {
-        this.server.close();
+        const server = this.server;
         this.server = null;
+        // close() 可能返回 Promise（Vite dev server），失败也不应阻塞退出
+        void Promise.resolve(server.close()).catch(() => {});
       }
       this.status = "stopped";
       this.stopSpinner();
@@ -98,6 +103,20 @@ export default class BrowsePage extends Screen {
     // 已停止
     if (this.status === "stopped") {
       return [...new Divider(this.t("browse.stopped")).render(width)];
+    }
+
+    // 启动失败：展示具体原因（端口占用 / 缺少前端资源等）
+    if (this.status === "error") {
+      const messageLines = this.errorMessage
+        .split(/\r?\n/)
+        .flatMap((line) => wrapStyled(line, Math.max(1, width)));
+      return [
+        ...new Divider(this.t("browse.startFailed"), "red").render(width),
+        "",
+        ...messageLines.map((line) => style(line, { color: theme.warning })),
+        "",
+        style(this.t("common.escBack"), { dim: true }),
+      ];
     }
 
     // 正在运行
