@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 export { createAgent } from "./agent.js";
-export type { AgentInstance, AgentOptions, HookConfig } from "./agent.js";
+export type { AgentInstance, AgentOptions, CompactionOptions, HookConfig } from "./agent.js";
 
 // ---------------------------------------------------------------------------
 // LLM 提供商

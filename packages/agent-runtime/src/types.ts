@@ -119,7 +119,7 @@ export interface SDKToolResultMessage {
 
 export interface SDKResultMessage {
   type: 'result'
-  subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'error_max_budget_usd' | string
+  subtype: 'success' | 'error_max_turns' | 'error_context_full' | 'error_during_execution' | 'error_max_budget_usd' | string
   uuid?: string
   session_id?: string
   is_error?: boolean
