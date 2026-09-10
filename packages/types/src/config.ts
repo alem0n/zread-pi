@@ -12,6 +12,18 @@
 export type LlmAuthType = 'api_key' | 'oauth';
 
 /**
+ * ThinkingLevel - pi 的思考深度等级（thinking level）
+ *
+ * 与 pi-ai 的 ModelThinkingLevel 一致：
+ * - off：关闭扩展思考（不发送 reasoning 参数）
+ * - minimal / low / medium / high：由浅到深
+ * - xhigh / max：仅部分模型支持（需模型显式在 thinkingLevelMap 中声明）
+ *
+ * pi 在请求时会按模型能力自动调整（clamp）到最近的受支持等级。
+ */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/**
  * CustomModelConfig - 用户为某个 Provider 追加的自定义模型
  *
  * 与 pi 的 models.json 语义一致：id 与内置模型相同则覆盖，否则新增。
@@ -65,6 +77,13 @@ export interface LLMConfig {
   model: string | null;
   api_key: string | null;
   base_url: string | null;
+  /**
+   * pi 的思考深度（thinking level）。
+   *
+   * 作为全局默认值传给运行时；模型不支持时会由 pi 自动调整。
+   * 旧配置缺省时按 'off' 处理（validateConfig 会补齐）。
+   */
+  thinking_level: ThinkingLevel;
   providers: Record<string, LlmProviderConfig>;
 }
 
