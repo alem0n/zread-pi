@@ -40,10 +40,10 @@ const configItems: ConfigItem[] = [
     key: "llm.provider",
     labelKey: "config.llmProvider",
     getValue: (config, t) => {
-      if (config.llm.provider === null || config.llm.model === null) {
+      if (!config.llm.provider) {
         return t("config.notConfigured");
       }
-      return `${config.llm.provider} · ${config.llm.model}`;
+      return config.llm.model ? `${config.llm.provider} · ${config.llm.model}` : config.llm.provider;
     },
     route: "/config/provider",
   },

@@ -63,6 +63,13 @@ export interface TranslationKeys {
     current: string;
     footer: string;
     error: string;
+    configured: string;
+    notConfigured: string;
+    models: string;
+    authApiKey: string;
+    authOauth: string;
+    source: string;
+    customBadge: string;
   };
   model: {
     select: string;
@@ -73,6 +80,14 @@ export interface TranslationKeys {
     footer: string;
     noModels: string;
     customInput: string;
+    count: string;
+    customBadge: string;
+    reasoning: string;
+    vision: string;
+    refreshing: string;
+    refreshDone: string;
+    refreshUnsupported: string;
+    refreshFailed: string;
   };
   apikey: {
     input: string;
@@ -82,6 +97,48 @@ export interface TranslationKeys {
     footer: string;
     saved: string;
     saving: string;
+  };
+  auth: {
+    chooseType: string;
+    useOAuth: string;
+    useApiKey: string;
+    apiKeyLabel: string;
+    oauthLabel: string;
+    oauthHint: string;
+    currentModel: string;
+    loggingIn: string;
+    waiting: string;
+    openUrl: string;
+    deviceCode: string;
+    success: string;
+    failed: string;
+    login: string;
+    relogin: string;
+    logout: string;
+    loggedOut: string;
+    logoutFailed: string;
+    footerChoose: string;
+    footerApiKey: string;
+    footerConfigured: string;
+  };
+  customModel: {
+    title: string;
+    id: string;
+    idPlaceholder: string;
+    name: string;
+    namePlaceholder: string;
+    contextWindow: string;
+    contextPlaceholder: string;
+    maxTokens: string;
+    maxTokensPlaceholder: string;
+    reasoning: string;
+    vision: string;
+    toggleHint: string;
+    api: string;
+    idRequired: string;
+    invalidNumber: string;
+    footer: string;
+    saved: string;
   };
   customProvider: {
     title: string;

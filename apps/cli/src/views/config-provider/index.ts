@@ -1,36 +1,35 @@
 /**
- * Config Provider Page - LLM 提供商选择（pi-tui 版）
+ * Config Provider Page - pi-ai 提供商选择（pi-tui 版）
+ *
+ * 数据来源：@open-zread/agent-runtime 的 listZreadProviders()
+ *   = pi-ai 的 40 个内置 Provider（含 OAuth/API Key 登录方式）
+ *   + ~/.zread/config.yaml 里配置过的自定义 Provider
  *
  * 功能:
- * - 动态加载 Provider 列表（从 ProviderRegistry）
+ * - 列出所有 Provider 及其凭据状态（OAuth / API Key / 未配置），支持同时配置多个
  * - 自定义 Provider 选项放在最前面
  * - 搜索功能（/ 键激活）
- * - 键盘导航（↑↓ / j k）
- * - 刷新列表（r 键）
- * - 选择后跳转 Model 选择页
+ * - 键盘导航（↑↓ / j k）、刷新列表（r 键）
+ * - 选择后跳转模型列表页
  */
 
-import { matchesKey } from "@earendil-works/pi-tui";
-import { getProviderRegistry } from "@open-zread/utils";
-import type { ProviderInfo } from "@open-zread/utils";
+import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import { listZreadProviders, type ZreadProviderSummary } from "@open-zread/agent-runtime";
 import { barIndicator, computeItemWindow, scrollIndicator } from "../../tui/components/select";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { clampLine, padRight } from "../../tui/text-layout";
-import { visibleWidth } from "@earendil-works/pi-tui";
 
-// 自定义 Provider 选项（固定放在第一位）
-const CUSTOM_PROVIDER_OPTION: ProviderInfo = {
-  id: "custom",
-  name: "自定义 Provider...",
-  npm: "",
-  base_url: "",
-  models: {},
-};
+/** 列表项：自定义 Provider 入口 + pi-ai Provider 摘要 */
+type ProviderListItem =
+  | { kind: "custom" }
+  | { kind: "provider"; summary: ZreadProviderSummary };
+
+const CUSTOM_PROVIDER_OPTION: ProviderListItem = { kind: "custom" };
 
 export default class ConfigProviderPage extends Screen {
-  private providers: ProviderInfo[] = [];
+  private providers: ZreadProviderSummary[] = [];
   private selectedIndex = 0;
   private searchQuery = "";
   private isSearchMode = false;
@@ -46,7 +45,7 @@ export default class ConfigProviderPage extends Screen {
       this.refresh();
     };
     this.searchField.onSubmit = () => this.handleSearchSubmit();
-    void this.loadProviders(false);
+    void this.loadProviders();
   }
 
   override handleKey(data: string): boolean {
@@ -107,8 +106,12 @@ export default class ConfigProviderPage extends Screen {
       return true;
     }
     if (matchesKey(data, "return") && currentList[this.selectedIndex]) {
-      const selectedProvider = currentList[this.selectedIndex];
-      this.app.navigate(`/config/provider/${selectedProvider.id}`);
+      const selected = currentList[this.selectedIndex];
+      if (selected.kind === "custom") {
+        this.app.navigate("/config/provider/custom");
+      } else {
+        this.app.navigate(`/config/provider/${selected.summary.id}`);
+      }
       return true;
     }
     if (data === "/") {
@@ -120,7 +123,7 @@ export default class ConfigProviderPage extends Screen {
       return true;
     }
     if (data === "r") {
-      void this.loadProviders(true);
+      void this.loadProviders();
       return true;
     }
 
@@ -178,15 +181,31 @@ export default class ConfigProviderPage extends Screen {
       );
       this.lastVisibleCount = Math.max(1, end - start);
       for (let index = start; index < end; index++) {
-        const provider = items[index];
+        const item = items[index];
         const isSelected = index === this.selectedIndex;
         let row = barIndicator(isSelected);
-        row += style(provider.name, isSelected ? { bold: true, color: "white" } : { color: "gray" });
-        if (provider.id === config.llm.provider) {
-          row += style(` ← ${this.t("provider.current")}`, { color: "green", dim: true });
-        }
-        if (provider.id !== "custom" && provider.npm) {
-          row += style(` (${provider.npm})`, { dim: true, color: "gray" });
+        if (item.kind === "custom") {
+          row += style(this.t("provider.custom"), isSelected ? { bold: true, color: "white" } : { color: "gray" });
+        } else {
+          const { summary } = item;
+          row += style(summary.name, isSelected ? { bold: true, color: "white" } : { color: "gray" });
+          if (!summary.builtin) {
+            row += style(` [${this.t("provider.customBadge")}]`, { dim: true, color: "magenta" });
+          }
+          row += style(` (${summary.id})`, { dim: true, color: "gray" });
+          row += style(` ${this.t("provider.models", { count: summary.modelCount })}`, { dim: true });
+          if (summary.configured) {
+            const authLabel =
+              summary.authType === "oauth"
+                ? this.t("provider.authOauth")
+                : this.t("provider.authApiKey");
+            row += style(` ✓ ${this.t("provider.configured")} ${authLabel}`, { color: "green", dim: true });
+          } else {
+            row += style(` ○ ${this.t("provider.notConfigured")}`, { color: "yellow", dim: true });
+          }
+          if (summary.id === config.llm.provider) {
+            row += style(` ← ${this.t("provider.current")}`, { color: "green", dim: true });
+          }
         }
         body.push(padRight(clampLine(row, width), width));
       }
@@ -200,20 +219,29 @@ export default class ConfigProviderPage extends Screen {
 
   // ==================== 内部实现 ====================
 
-  /** 显示列表：自定义选项 + 已有 Provider（排除 registry 中的 custom） */
-  private get displayProviders(): ProviderInfo[] {
-    return [CUSTOM_PROVIDER_OPTION, ...this.providers.filter((p) => p.id !== "custom")];
+  /** 显示列表：自定义选项 + 已有 Provider（自定义 Provider 放在内置之后） */
+  private get displayProviders(): ProviderListItem[] {
+    const builtin = this.providers.filter((provider) => provider.builtin);
+    const custom = this.providers.filter((provider) => !provider.builtin);
+    return [
+      CUSTOM_PROVIDER_OPTION,
+      ...builtin.map((summary) => ({ kind: "provider" as const, summary })),
+      ...custom.map((summary) => ({ kind: "provider" as const, summary })),
+    ];
   }
 
   /** 搜索过滤（不包括自定义选项） */
-  private get filteredProviders(): ProviderInfo[] {
-    return this.searchQuery
-      ? this.providers.filter(
-          (p) =>
-            p.id.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-            p.name.toLowerCase().includes(this.searchQuery.toLowerCase()),
-        )
-      : this.providers;
+  private get filteredProviders(): ProviderListItem[] {
+    if (!this.searchQuery) {
+      return this.providers.map((summary) => ({ kind: "provider" as const, summary }));
+    }
+    const query = this.searchQuery.toLowerCase();
+    return this.providers
+      .filter(
+        (provider) =>
+          provider.id.toLowerCase().includes(query) || provider.name.toLowerCase().includes(query),
+      )
+      .map((summary) => ({ kind: "provider" as const, summary }));
   }
 
   private handleSearchSubmit(): void {
@@ -226,27 +254,20 @@ export default class ConfigProviderPage extends Screen {
     this.refresh();
   }
 
-  private async loadProviders(forceRefresh: boolean): Promise<void> {
+  private async loadProviders(): Promise<void> {
     this.loading = true;
     this.error = null;
     this.refresh();
 
     try {
-      const registry = await getProviderRegistry(forceRefresh);
-      const list = registry.getAllProviders();
+      const list = await listZreadProviders();
       this.providers = list;
-      // 如果当前是自定义 provider，选中第一位
-      if (this.app.config.config.llm.provider === "custom") {
-        this.selectedIndex = 0;
-      } else {
-        // 否则找到当前 provider（索引需要 +1，因为第一位是自定义选项）
-        const currentIndex = list.findIndex(
-          (p) => p.id === this.app.config.config.llm.provider,
-        );
-        if (currentIndex >= 0) {
-          this.selectedIndex = currentIndex + 1;
-        }
-      }
+
+      // 选中当前 provider（索引需要 +1，因为第一位是自定义选项）
+      const currentIndex = list.findIndex(
+        (provider) => provider.id === this.app.config.config.llm.provider,
+      );
+      this.selectedIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
     } catch (err) {
       this.error = err instanceof Error ? err.message : this.t("provider.error");
     } finally {
