@@ -33,7 +33,7 @@
 
 ```ts
 createAgent({ model, providerId, apiKey, baseURL, cwd, systemPrompt,
-              tools, maxTurns, hooks, retryConfig, includePartialMessages })
+              tools, maxTurns, thinkingLevel, hooks, retryConfig, includePartialMessages })
   -> { query(prompt): AsyncGenerator<SDKMessage>, close(): Promise<void>, abort() }
 
 createProvider(providerIdOrApiType, { apiKey, baseURL })
@@ -50,6 +50,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 重试位置 | pi 的 Agent 循环**不内置**重试（避免污染会话）；本适配层在 `streamFn` 层实现"未产出内容即可重试"，并额外提供可选 `retryScope: "stream+run"`（整轮重跑，默认关闭）。旧实现是 API 级重试，语义等价且更干净。 |
 | 重试判定 | 复用 pi-ai 的错误分类器，同时保留旧 `retryableStatusCodes` 白名单（错误文本包含状态码即视为可重试）。 |
 | 未登记 providerId | 旧实现抛 `Unsupported provider`；新实现回退 OpenAI 兼容协议（健壮性增强）。 |
+| 思考深度 | 新增 `thinkingLevel` 选项（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，缺省 `off` = 旧行为）与 `config.llm.thinking_level`：pi 以 `options.reasoning` 下发，模型不支持时 pi-ai 在请求时自动 clamp。 |
 | 会话 | 旧实现的 `saveSession/loadSession/tag/rename/fork` 未迁移；wiki 生成是一次性 agent，不需要。若 CLI 后续要做"会话聊天"，需接 pi 的 JSONL 会话树。 |
 | 上下文窗口/定价 | 旧 `MODEL_PRICING` 表未迁移，`Model` 用保守默认（200k 窗口 / 8k 输出、cost=0）。pi 的 usage 记账照常工作，只是成本字段为 0。 |
 | 事件粒度 | `assistant` 事件在 `message_end` 产出（完整内容 + usage）；流式增量以 `partial_message` 产出（旧引擎同形）。 |
@@ -177,6 +178,18 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 ```bash
 bun run typecheck
-bun run test:catalog    # 25/25
-bun run test             # 全部套件（含 TUI 124 + 路由 14 + 真实终端 9 + mock 全链路 19）
+bun run test:catalog    # 31/31
+bun run test             # 全部套件（含 TUI 143 + 路由 15 + 真实终端 9 + mock 全链路 19）
 ```
+
+### 8.5 思考深度（pi thinking level，第四步）
+
+配置界面新增 `/config/thinking`（配置首页「思考深度」项），把 pi 的 7 个等级暴露出来：
+
+- 配置字段：`LLMConfig.thinking_level`（`ThinkingLevel`），旧 `config.yaml` 缺少该字段时 `validateConfig` 归一化为 `off`；
+- UI：`apps/cli/src/views/config-thinking` 列出全部等级；已选模型时用 `getZreadThinkingLevels(provider, model)`
+  （内部为 pi-ai `getSupportedThinkingLevels`）标注「当前模型不支持，请求时自动调整」；
+- 运行时：`createAgent({ thinkingLevel })` → pi `Agent` 的 `initialState.thinkingLevel`，
+  `off` 不发送 reasoning，其余作为 `options.reasoning` 传给适配器（pi-ai 内部 clamp）；
+- Orchestrator 的 `create-agent.ts` 读取 `config.llm.thinking_level` 并随每次 Agent 创建下发；
+- 项目信息框新增「思考深度」一行，直接展示当前生效档位。
