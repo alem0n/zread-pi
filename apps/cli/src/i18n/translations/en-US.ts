@@ -18,7 +18,6 @@ export const enUS: TranslationKeys = {
     baseUrl: 'Base URL',
     directory: 'Directory',
     intro: 'Transform your local codebase into readable Wiki docs.',
-    github: 'Open source: {url}',
   },
   config: {
     title: 'Zread — Edit Configuration',

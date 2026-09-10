@@ -20,7 +20,6 @@ export interface TranslationKeys {
     baseUrl: string;
     directory: string;
     intro: string;
-    github: string;
   };
   config: {
     title: string;

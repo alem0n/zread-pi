@@ -16,7 +16,6 @@ import { clampLine } from "./text-layout";
 import { getVersion } from "../utils/display";
 
 const PROJECT_NAME = "open-zread";
-const GITHUB_URL = "https://github.com/bb-boy680/open-zread";
 
 /** 获取简短路径 */
 function getShortPath(path: string): string {
@@ -101,9 +100,6 @@ export class Layout implements Component {
 
   private buildIntro(width: number): string[] {
     const t = this.app.t.bind(this.app);
-    return [
-      clampLine(t("layout.intro"), width),
-      clampLine(style(t("layout.github", { url: GITHUB_URL }), { dim: true }), width),
-    ];
+    return [clampLine(t("layout.intro"), width)];
   }
 }

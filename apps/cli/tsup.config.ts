@@ -22,7 +22,8 @@ function findFileRecursively(dir: string, target: string): string | null {
 }
 
 export default defineConfig(() => {
-  const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as { version: string }
+  // 版本号以仓库根 package.json 为准（AGENTS.md §4.4），确保界面显示的项目版本一致
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf-8")) as { version: string }
 
   return {
     entry: ['src/index.ts'],

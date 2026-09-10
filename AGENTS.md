@@ -83,7 +83,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型 124 项）、`render-all-routes.ts`（全部 14 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 124 + 14 + 9 + 19 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/版本号与项目版本同步 126 项）、`render-all-routes.ts`（全部 14 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 126 + 14 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -106,15 +106,17 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 
 ---
 
-## 4. Git 工作流（强制）
+## 4. Git 工作流（强制：手动合并 + 版本号管理）
 
 ### 4.0 铁律
 
 1. **`master` 只接受合并，不接受直接提交。**
-2. **每次改动都必须新建分支**，完成后走"验证 → 合并 → 删除分支"。
-3. 只有**验证完全通过**（§2 对应命令全绿）才允许合并。
-4. 禁止：`git push --force`、`git commit --no-verify`、`git reset --hard` 丢弃他人改动。
-5. 禁止提交生成物：`node_modules/`、`dist/`、`.open-zread/`、`__pycache__/`（已在 `.gitignore`）。
+2. **每次改动都必须新建分支**，完成后走"验证 → 提请用户手动合并 → 用户合并后在 master 复验 → 删除分支"。
+3. 只有**验证完全通过**（§2 对应命令全绿）才允许提请合并。
+4. **合并 `master` 一律由用户手动执行**：AI 不得自行执行 `git checkout master` / `git merge`，只能把分支、验证结果、版本升级建议与合并命令准备好，交用户执行。
+5. **每次合并都要按 §4.4 处理版本号**（主版本由用户定义），版本升级随分支提交。
+6. 禁止：`git push --force`、`git commit --no-verify`、`git reset --hard` 丢弃他人改动。
+7. 禁止提交生成物：`node_modules/`、`dist/`、`.open-zread/`、`__pycache__/`（已在 `.gitignore`）。
 
 ### 4.1 标准流程
 
@@ -137,15 +139,20 @@ git commit                         # 见 §4.2 消息规范
 # 3) 验证（改动类型对应 §3 的命令，必须真实执行）
 bun run test
 
-# 4) 合并回 master（保留分支脉络，不使用 fast-forward）
-git checkout master
-git merge --no-ff docs/agents-md -m "docs: add AGENTS.md with context and git workflow"
+# 4) 分支上完成版本升级（§4.4），建议独立提交
+git add package.json && git commit -m "chore(version): 0.1.0 -> 0.2.0（新增 xxx 能力）"
 
-# 5) 合并后再次验证（防止合并引入偏差）
-bun run test
+# 5) 交付前复核：只包含预期改动
+git log master..HEAD --oneline     # 提交清单
+git diff master --stat             # 改动范围
 
-# 6) 清理分支
-git branch -d docs/agents-md
+# 6) 提请用户手动合并（AI 到此为止，不得自行 checkout / merge）
+#    交付给用户的信息：分支名 / 验证结果 / 当前版本 → 目标版本 / 升级依据
+#    用户在 master 上手动执行（保留分支脉络，不使用 fast-forward）：
+#      git checkout master
+#      git merge --no-ff docs/agents-md -m "merge: 补充 AGENTS.md 手动合并与版本号规则"
+#      bun run test                 # 合并后复验（防止合并引入偏差）
+#      git branch -d docs/agents-md # 复验通过后清理分支
 ```
 
 ### 4.2 Commit 消息规范
@@ -176,6 +183,27 @@ Refs: MIGRATION.md §4
 | 分支方向错了 | 切回 master，`git branch -D <branch>` 丢弃，不污染 master |
 | 已合并但发现问题 | 在 master 上新建 `fix/...` 分支，用 `git revert <merge-commit>` 或前向修复，禁止改写历史 |
 | 合并冲突 | 只解决自己改动涉及的文件；冲突落在无关文件时停下询问，不要强推 |
+| 用户未合并 / 打回 | 分支保留，继续修或补充说明后再次提请；不得自行合并 |
+| 版本号冲突（多分支并行） | 以已合并进 master 的版本为基线重新计算，追加一次 `chore(version)` 提交，禁止改写历史 |
+
+### 4.4 版本号管理
+
+**格式：`主版本.次版本.修复版本`**（三段均为非负整数，如 `1.4.2`）。
+唯一来源是根 `package.json` 的 `version` 字段（当前 `0.1.0`）；子包均为 `private: true`，不单独发版。
+
+| 触发 | 版本变化 | 说明 |
+| --- | --- | --- |
+| 新增功能 / 能力 | 次版本 +1，修复版本归 0 | `feat/*` 分支默认按此处理 |
+| 修复 bug | 修复版本 +1 | `fix/*` 分支默认按此处理 |
+| 文档 / 重构 / 测试 / 依赖等无行为变化 | 修复版本 +1 | 避免版本停滞；用户明确要求时可不动版本 |
+| 主版本 | **由用户定义** | AI 不得自行变更；用户要求升主版本时，次版本与修复版本归 0 |
+
+执行要求：
+
+- 合并进 `master` 之前，必须在分支上完成版本升级（只改根 `package.json`），建议独立提交：`chore(version): 0.1.0 -> 0.2.0（新增 xxx 能力）`。
+- 提请手动合并时，必须报告"当前版本 → 目标版本"与升级依据（feat / fix / 用户指定）；主版本号与是否升版本由用户最终决定。
+- 版本号只增不减，禁止回退或复用已用过的版本号。
+- 多分支并行发生版本号冲突时，以先合并进 `master` 的版本为基线重新计算并追加提交，不做历史改写。
 
 ---
 
@@ -187,7 +215,9 @@ Refs: MIGRATION.md §4
 - [ ] 与改动类型匹配的测试全绿（§3），且输出被真实记录
 - [ ] 新增/变更的行为有对应断言（不留"只改实现不补测试"的改动）
 - [ ] 文档同步：`README.md`（命令/用法）、`MIGRATION.md`（决策/行为差异/风险）
-- [ ] 分支已合并（`--no-ff`）、master 上复验通过、分支已删除
+- [ ] 版本号已按 §4.4 升级（根 `package.json`），并在交付信息中写明"当前版本 → 目标版本"与依据
+- [ ] 分支已提请用户手动合并（`--no-ff`），分支名 / 验证结果 / 合并命令已交付
+- [ ] 用户合并后在 master 上复验通过、分支已删除（删除由用户执行，或经用户确认后由 AI 执行）
 - [ ] 工作区干净：`git status --short` 为空
 
 ---
@@ -259,7 +289,7 @@ Refs: MIGRATION.md §4
 | --- | --- |
 | `README.md` | 用法、目录、验证矩阵、三个工程细节（browse 隔离 / vendor 模式 / 配置归属） |
 | `MIGRATION.md` | 迁移决策、改动清单、契约冻结点、与旧实现的行为差异、风险与后续路径 |
-| `AGENTS.md` | 本文件：上下文总结 + 开发与 Git 流程（唯一入口约定） |
+| `AGENTS.md` | 本文件：上下文总结 + 开发 / Git（手动合并）/ 版本号流程（唯一入口约定） |
 | `fixtures/hello-python/README.md` | 夹具说明与三种测试用法 |
 
 <!-- gitnexus:start -->
