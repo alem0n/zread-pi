@@ -24,10 +24,10 @@ open-zread-pi/
 │  ├─ utils/             ← 保留：配置/cache/wiki 落盘/版本快照/provider-registry（未改）
 │  └─ types/             ← 保留：共享类型（未改）
 ├─ apps/
-│  ├─ cli/               ← 保留：Ink TUI（仅 browse-chat 的 provider 改为 pi 实现）
+│  ├─ cli/               ← 保留：TUI（**pi-tui 实现**，不再依赖 Ink/React；仅 browse-chat 的 provider 改为 pi 实现）
 │  └─ browse/            ← 保留：React 19 + Vite 预览站（**独立安装**，见下方说明）
 ├─ fixtures/hello-python/ ← 测试夹具：极简 Python 项目（离线全链路试跑的目标）
-├─ vendor/pi/packages/   ← pi 内核源码（ai / agent / telemetry / chord，上游零改动）
+├─ vendor/pi/packages/   ← pi 内核源码（ai / agent / telemetry / chord / tui，上游零改动）
 └─ tools/                ← vendor 管理模式切换脚本
 ```
 
@@ -42,6 +42,9 @@ bun run vendor:build
 
 # 1) 类型检查 + 全部冒烟测试（离线，不需要任何 API Key）
 bun run test
+
+# 2) TUI 专项回归（pi-tui 迁移：布局/快捷键/生成与同步全链路，离线）
+bun run test:tui
 
 # 3) 离线全链路试跑：用 mock LLM 对任意仓库跑「扫描 -> 蓝图 -> 并行页面」
 #    默认目标是内置夹具 fixtures/hello-python
@@ -90,6 +93,7 @@ bun run browse:dev
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件 | 6/6 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截 | 6/6 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框冒烟 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + mock LLM 的生成/同步全链路 | 56 + 13 + 9 + 19 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
@@ -103,24 +107,67 @@ bun run browse:dev
 
 ---
 
+## TUI 迁移（Ink → pi-tui）
+
+`apps/cli` 的终端界面已从 **Ink 4 + React 18 + react-router** 换成 **pi-tui**（`vendor/pi/packages/tui`），
+**布局、快捷键、文案、业务逻辑保持不变**，只替换渲染与输入底座。
+
+```
+apps/cli/src/
+├─ index.ts          CLI 入口（commander，同迁移前）
+├─ app.ts            应用启动（对应迁移前的 App.tsx）
+├─ routes.ts         路由表（对应 <Routes> 声明，含 /config/provider/custom 优先等顺序约束）
+├─ state/            ConfigStore / I18nStore / WikiStore（替代 ConfigProvider / I18nProvider / WikiProvider）
+├─ tui/
+│  ├─ app.ts         App：路由栈、onEnter/onDestroy、全局按键（ctrl+c 退出、ESC 返回/退出）
+│  ├─ layout.ts      项目信息框 + 介绍文字 + 页面插槽（对应 layout/layout.tsx）
+│  ├─ router.ts      内存路由（navigate(path) / navigate(-1) / replace）
+│  ├─ screen.ts      页面基类（render / handleKey / claimEsc）
+│  ├─ ansi.ts        ANSI 样式（对齐 Ink <Text> 的 color / dimColor / bold）
+│  └─ components/    Divider / RoundedBox / Select / StatusIcon / TextField
+└─ views/            11 个页面（wiki-home / wiki-generate / wiki-sync / browse / 7 个 config 页面）
+```
+
+对照关系与判定条件：
+
+| 迁移前 | 迁移后 |
+|---|---|
+| `withFullScreen(<App/>)`（备用屏幕） | `TuiAltScreen` + `tui.setLayoutRoot(layout)` |
+| `<Box borderStyle="round">` 项目信息框 | `tui/components/rounded-box.ts`（撑满宽度、`╭─╮` 边框） |
+| `ink-select-input` | `tui/components/select.ts`（↑↓/k/j 回绕、值变化重置选中项、onHighlight） |
+| `ink-text-input` | `tui/components/text-field.ts`（包 pi-tui `Input`：↑↓/Tab 忽略、Delete=向前删、光标置尾） |
+| `ink-spinner` | Browse 页 80ms 帧定时器（`⠋⠙⠹…`） |
+| `useInput` 全局 ESC（由 Layout 统一处理） | `App.handleGlobalEscape()`（`key==="default"` 时根页面退出，否则 `navigate(-1)`） |
+| `EscHandlerProvider.claimEsc()`（搜索/多步骤页面抢占 ESC） | `App.claimEsc()/releaseEsc()` + `Screen.handleKey()` 返回 `true` |
+| react-router `navigate(-1)` / `replace` | `tui/router.ts` 的路由栈（首条目 key = `default`） |
+| `useImmer` + Context | 普通 store 类 + `requestRender()`（pi-tui 每帧重新 `render(width)`） |
+
+业务逻辑（Orchestrator 调用、并发、落盘、提示词、文案）零改动；
+原先的 `views/*/mapper.ts`、`state.ts`、`types.ts`（纯函数）原样保留并继续被 `__tests__` 覆盖。
+
+---
+
 ## 需要知道的三个工程细节
 
-### 1. `apps/browse` 独立安装（React 18/19 隔离）
-`apps/cli`（Ink 4 + React 18）与 `apps/browse`（React 19 + Vite）混装时，bun 会为 `ink` 的 `react-reconciler` 选到 React 19 变体，导致 CLI 启动即崩：
+### 1. `apps/browse` 独立安装（历史原因：React 18/19 隔离）
+迁移到 pi-tui 之前，`apps/cli`（Ink 4 + React 18）与 `apps/browse`（React 19 + Vite）混装时，bun 会为 `ink` 的 `react-reconciler` 选到 React 19 变体，导致 CLI 启动即崩：
 `TypeError: undefined is not an object (evaluating 'ReactSharedInternals.ReactCurrentOwner')`。
 因此 **`apps/browse` 不列入根 workspaces**，单独 `bun install`（`bun run browse:install`）。它不引用任何 `@open-zread/*` 包，隔离无副作用。
+
+> 现状：CLI 已不再依赖 React/Ink，该冲突不再存在；但本次迁移刻意不改动 browse 的安装方式（保持零风险）。如后续要合并，只需把它加回根 `workspaces` 并验证 CLI 启动。
 
 ### 2. vendor 管理模式（src ⇄ dist）
 `vendor/pi/packages/*` 是 pi 上游源码快照，两种消费方式：
 
 - **dist 模式（默认）**：`exports` 指向已构建的 `dist/*.js|.d.ts`；类型检查走 `.d.ts`，速度快。
-  `dist/` **不入库**，因此全新 clone 后必须先跑一次：`bun run vendor:build`（顺序：telemetry → chord → ai → agent）。
+  `dist/` **不入库**，因此全新 clone 后必须先跑一次：`bun run vendor:build`（顺序：telemetry → chord → ai → agent → tui）。
 - **src 模式（免构建）**：`exports` 指向 `src/*.ts`，Bun 直接跑 TS，适合修改 pi 源码。
   切换：`bun run vendor:src`（免构建）/ `bun run vendor:dist`（需紧接 `vendor:build`）。
 
 `ai` 包用 `tsconfig.app.json` 构建（只编译 `index.ts` + 三个 api lazy 入口的闭包），
 因为 pi 上游的 `providers/*.models.ts` 依赖构建期生成的 `src/providers/data/*.json`（仓库快照里不存在）；本工程不需要模型目录，因为我们自己构造 `Model`。
 另：`vendor/pi/packages/ai/package.json` 显式补了 `@smithy/types`（上游靠 aws-sdk 传递获得，孤岛安装模式下需显式声明）。
+`tui` 包的上游构建脚本是 `tsgo`；本仓库改用 `tsc`，因此其 `tsconfig.build.json` 把 `target/lib` 提到 `ES2024`（`utils.ts` 里用了 `v` 正则标志，`ES2022` 下 TS 会报 TS1501）。
 
 ### 3. 配置与凭据仍在 open_zread 侧
 `~/.zread/config.yaml`（provider / model / api_key / base_url / concurrency）与 CLI 配置 UI 未改动；

@@ -12,7 +12,7 @@
 内部改由 `@earendil-works/pi-ai` + `@earendil-works/pi-agent-core` 驱动，**对外契约不变，业务逻辑零改动**。
 
 ```
-apps/cli            Ink 4 + React 18 TUI（保留；仅 browse-chat 的 provider 换成 pi 实现）
+apps/cli            pi-tui 全屏 TUI（不再依赖 Ink/React；布局与快捷键与迁移前一致）
 apps/browse         React 19 + Vite 预览站（保留；独立安装，见 §6.3）
 packages/
   agent-runtime     ★ 适配层：createAgent / createProvider / 5 个文件工具 / SDKMessage 等类型
@@ -21,7 +21,7 @@ packages/
   utils             ★ 配置 / cache / wiki 落盘 / 版本快照 / provider-registry（未改）
   types             ★ 共享类型（未改）
 fixtures/hello-python  测试夹具：极简 Python 项目，离线全链路试跑的目标
-vendor/pi/packages/    pi 内核源码（ai / agent / telemetry / chord，上游零改动）
+vendor/pi/packages/    pi 内核源码（ai / agent / telemetry / chord / tui，上游零改动）
 tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 ```
 
@@ -30,6 +30,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 决策 | 原因 |
 | --- | --- |
 | 只替换运行时内核，不动业务层 | 业务层（编排/并发/落盘/提示词）已验证可用；换底座是为了健壮性 |
+| CLI 从 Ink 换成 pi-tui，**布局/快捷键/文案不变** | 与内核同一生态，去掉 React 18/Ink 依赖；业务逻辑在 `views/*/mapper.ts`、`state.ts` 等纯函数层原样保留 |
 | 适配层保持 `agent-sdk` 的**同名同签名**契约 | 业务侧 22 处 import 机械替换即可，行为可回退对比 |
 | 重试放在 `streamFn` 层，且只在"未产出内容"时重试 | pi 的 Agent 循环刻意不内置重试；这样失败尝试不会写进会话记录 |
 | 钩子映射到 pi 的 `beforeToolCall` / `afterToolCall` | 与旧 `PreToolUse` / `PostToolUse` 语义一一对应，UI 进度事件零改动 |
@@ -61,8 +62,9 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 ```bash
 bun install                # 安装依赖
 bun run vendor:build       # 构建 pi 内核产物（全新 clone 后必须执行一次）
-bun run typecheck          # tsc --noEmit（apps/cli/src + packages/*/src）
-bun run test               # typecheck + 6 个测试套件（离线，无需 API Key）
+bun run typecheck          # tsc --noEmit（apps/cli/src + apps/cli/test + packages/*/src）
+bun run test               # typecheck + 7 个测试套件（离线，无需 API Key）
+bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终端启动 + mock LLM 生成/同步
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
 bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 ```
@@ -75,6 +77,7 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框 56 项）、`render-all-routes.ts`（全部 13 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 56 + 13 + 9 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -86,8 +89,9 @@ bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
 
 | 改动 | 必做 | 说明 |
 | --- | --- | --- |
-| 业务层（orchestrator / repo-analyzer / utils / types / cli / browse） | `bun run typecheck` + `bun run test` | 若触及 wiki 产物结构，额外跑 `bun run mock:wiki` 并核对 `wiki.json` 与页面文件 |
-| 适配层 `packages/agent-runtime/**` | `bun run test`（全部 6 套）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
+| 业务层（orchestrator / repo-analyzer / utils / types / browse） | `bun run typecheck` + `bun run test` | 若触及 wiki 产物结构，额外跑 `bun run mock:wiki` 并核对 `wiki.json` 与页面文件 |
+| CLI TUI（`apps/cli/src/**`） | `bun run typecheck` + `bun run test:tui` | 布局/快捷键/文案改动必须同步 `smoke-tui.ts` 的断言 |
+| 适配层 `packages/agent-runtime/**` | `bun run test`（全部 7 套）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
 | pi vendor 源码（`vendor/pi/**/src`） | `vendor:src` → 改 → `vendor:dist` → `vendor:build` → `bun run test` | 见 §6.1；**不要手改 `dist/`** |
 | 依赖变更 | `bun install` 后一并提交 `bun.lock`，并在 commit body 说明原因 | 不要把 `node_modules` 带进仓库 |
 | 文档（`*.md`） | 至少 `bun run typecheck` | 若文档描述了命令，需实际执行一遍确认命令可用 |
@@ -185,21 +189,24 @@ Refs: MIGRATION.md §4
 
 ### 6.1 vendor 是"源码 + 产物"双模式，产物不入库
 - `vendor/pi/packages/*/package.json` 的 `exports` 指向 `dist/*.js|.d.ts`；`dist/` 被 gitignore。
-- 全新 clone：`bun install && bun run vendor:build`（顺序 telemetry → chord → ai → agent）。
+- 全新 clone：`bun install && bun run vendor:build`（顺序 telemetry → chord → ai → agent → tui）。
 - 要改 pi 源码：`bun run vendor:src`（免构建，Bun 直接跑 TS）→ 改 `src/` → `bun run vendor:dist` → `bun run vendor:build`。
 - **不要手改 `dist/`**：会被下次 `vendor:build` 覆盖。
 - `ai` 包用 `tsconfig.app.json` 只编译入口闭包：因为上游 `providers/*.models.ts` 依赖构建期生成的 `src/providers/data/*.json`（快照中不存在），而本工程自己构造 `Model`，不需要模型目录。
+- `tui` 包上游用 `tsgo` 构建；本仓库用 `tsc`，因此它的 `tsconfig.build.json` 将 `target/lib` 提到 `ES2024`（`utils.ts` 用了 `v` 正则标志，`ES2022` 会报 TS1501）。
 - `vendor/pi/packages/ai/package.json` 显式声明了 `@smithy/types`（上游靠 aws-sdk 传递获得；孤岛安装模式下必须显式写）。
 
 ### 6.2 业务工具的 schema 是"JSON Schema 直接当 TypeBox 用"
 `ToolDefinition.inputSchema` 原样传给 pi 的 `AgentTool.parameters`，pi 用 TypeBox 的编译/校验器处理这类纯 JSON Schema 是可行的（已验证）。新增工具时按旧风格写 `inputSchema` 即可，不要引入 TypeBox DSL。
 
-### 6.3 React 18 / 19 不能混装
-`apps/cli`（Ink 4 + React 18）与 `apps/browse`（React 19）若在同一次 install 中解析，
+### 6.3 React 18 / 19 不能混装（历史约束，现已缓解）
+`apps/cli` 在迁移到 pi-tui 之前使用 Ink 4 + React 18，与 `apps/browse`（React 19）在同一次 install 中解析时，
 `ink` 的 `react-reconciler` 会拿到 React 19 变体，CLI 启动即崩：
 `TypeError: undefined is not an object (evaluating 'ReactSharedInternals.ReactCurrentOwner')`。
 因此 `apps/browse` **不在根 workspaces 内**，用 `bun run browse:install` / `bun run browse:dev` 独立处理。
-不要"顺手"把 browse 加回 workspaces。
+
+> CLI 已换成 pi-tui（零 React 依赖），该冲突不再存在；但保持现状不动（本次迁移不碰 browse）。
+> 若日后要合并：把 browse 加回 workspaces 后重跑 `bun run test:tui`（含真实 ProcessTerminal 启动检查）验证。
 
 ### 6.4 RepoAnalyzer 依赖 cwd
 `parseFiles()` 以 `process.cwd()` 为根解析相对路径，`scanFiles()` 返回相对路径。
@@ -218,6 +225,8 @@ Refs: MIGRATION.md §4
 ### 6.7 未完成事项（不要当成已完成）
 - **尚未用真实 API Key 跑过完整 wiki 生成**：全部验证基于 faux / mock HTTP。
   首次真机验证：`bun run cli config` → 在目标仓库 `bun run cli`，重点看 retry 事件与长上下文下的 usage。
+- **CLI 的真机交互（键盘/鼠标/中文输入）仅做了自动化回归**：`test:tui` 用假终端注入按键 + 真实 ProcessTerminal 启动检查；
+  真机 IME 定位、Windows 终端下的 Shift+Enter、剪贴板等仍需人工确认。
 - **MCP / Skill / Task / Team / LSP / Cron 等能力未迁移**（原 `agent-sdk` 有，pi 文档无 MCP）。
 - **会话语义差异**：旧 `saveSession/loadSession/tag/fork` 未迁移；pi 侧是 JSONL 会话树 + SQLite。
 
