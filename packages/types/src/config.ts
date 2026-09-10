@@ -88,12 +88,29 @@ export interface LLMConfig {
 }
 
 /**
+ * AgentConfig - Agent 运行时配置
+ *
+ * 与 LLM 解析无关的运行时旋钮，由 Orchestrator 在每次创建 Agent 时读取。
+ */
+export interface AgentConfig {
+  /**
+   * 每次 Agent 运行（单个页面/蓝图）的最大轮次（turn）。
+   *
+   * pi 侧由 `shouldStopAfterTurn` 计数，达到上限后优雅停止并产出
+   * `subtype: "error_max_turns"`；缺省 30（旧实现硬编码值）。
+   */
+  max_turns: number;
+}
+
+/**
  * AppConfig - Configuration
  */
 export interface AppConfig {
   language: string;
   doc_language: string;
   llm: LLMConfig;
+  /** Agent 运行时配置（旧 config.yaml 缺少该段时由 validateConfig 补齐默认值） */
+  agent: AgentConfig;
   concurrency: {
     max_concurrent: number;
     max_retries: number;

@@ -15,6 +15,7 @@
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadConfig } from "@open-zread/utils";
 import {
 	createRuntimeModel,
 	getZreadModel,
@@ -64,6 +65,13 @@ await writeFile(
 
 try {
 	// ---- 1) 内置 Provider 列表 ----
+	const loadedConfig = await loadConfig();
+	check(
+		"旧 config.yaml（缺 agent 段）补默认 max_turns=30",
+		loadedConfig.agent.max_turns === 30,
+		JSON.stringify(loadedConfig.agent),
+	);
+
 	const providers = await listZreadProviders();
 	const anthropic = providers.find((provider) => provider.id === "anthropic");
 	check("内置 Provider 数量 >= 30", providers.length >= 30, `count=${providers.length}`);
@@ -147,6 +155,7 @@ try {
 				},
 			},
 		},
+		agent: { max_turns: 30 },
 		concurrency: { max_concurrent: 1, max_retries: 0 },
 	};
 	setZreadCatalogConfig(baseConfig);

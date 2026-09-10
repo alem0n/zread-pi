@@ -1,6 +1,6 @@
 {
   "name": "open-zread-pi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
@@ -12,9 +12,10 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:tui",
+    "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:context && bun run test:tui",
     "test:catalog": "bun run packages/agent-runtime/test/provider-catalog-smoke.ts",
     "test:agent": "bun run packages/agent-runtime/test/smoke-agent.ts",
+    "test:context": "bun run packages/agent-runtime/test/context-compaction.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
     "test:provider": "bun run packages/agent-runtime/test/provider-http-smoke.ts",
     "test:analyzer": "bun run packages/repo-analyzer/test/smoke-analyzer.ts",

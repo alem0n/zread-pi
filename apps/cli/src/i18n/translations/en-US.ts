@@ -26,6 +26,7 @@ export const enUS: TranslationKeys = {
     docLanguage: 'Document Language',
     llmProvider: 'LLM Provider',
     thinkingLevel: 'Thinking Level',
+    maxTurns: 'Max Turns',
     maxConcurrency: 'Max Concurrency',
     maxRetries: 'Max Retries',
     default: '(default: {default})',
@@ -173,6 +174,14 @@ export const enUS: TranslationKeys = {
       xhigh: 'Extra High',
       max: 'Max',
     },
+  },
+  maxTurns: {
+    set: 'Set Max Turns',
+    range: 'Range: 1-100',
+    hint: 'The model is told to finalize before the limit; 1 grace turn is added automatically',
+    invalid: 'Please enter an integer between 1-100',
+    current: 'Current',
+    footer: 'ESC to go back | Enter to confirm | s to save and go back',
   },
   common: {
     escBack: 'ESC to go back',

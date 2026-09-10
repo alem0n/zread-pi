@@ -118,7 +118,8 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             WritePageTool
           ],
           prompts: buildPagePrompt(page),
-          maxTurns: 30,
+          // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
+          maxTurns: options?.maxTurns,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
             // 将 CatalogEvent 转换为 ArticleEventPayload

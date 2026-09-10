@@ -15,8 +15,8 @@
 // Agent 入口
 // ---------------------------------------------------------------------------
 
-export { createAgent } from "./agent.js";
-export type { AgentInstance, AgentOptions, HookConfig } from "./agent.js";
+export { createAgent, DEFAULT_FINALIZATION_NOTICE } from "./agent.js";
+export type { AgentInstance, AgentOptions, CompactionOptions, FinalizationOptions, HookConfig } from "./agent.js";
 
 // ---------------------------------------------------------------------------
 // LLM 提供商

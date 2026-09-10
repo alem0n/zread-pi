@@ -28,6 +28,7 @@ export interface TranslationKeys {
     docLanguage: string;
     llmProvider: string;
     thinkingLevel: string;
+    maxTurns: string;
     maxConcurrency: string;
     maxRetries: string;
     default: string;
@@ -175,6 +176,14 @@ export interface TranslationKeys {
       xhigh: string;
       max: string;
     };
+  };
+  maxTurns: {
+    set: string;
+    range: string;
+    hint: string;
+    invalid: string;
+    current: string;
+    footer: string;
   };
   common: {
     escBack: string;

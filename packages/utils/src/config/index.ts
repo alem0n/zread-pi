@@ -7,6 +7,25 @@ import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, Thin
 import { ensureDir } from '../file-io';
 
 /**
+ * Agent 每次运行的最大轮次（turn）配置
+ *
+ * 旧实现硬编码 30；现在由 `agent.max_turns` 控制，配置界面 /config/max-turns 维护。
+ */
+export const DEFAULT_MAX_TURNS = 30;
+export const MIN_MAX_TURNS = 1;
+export const MAX_MAX_TURNS = 100;
+
+/** 归一化最大轮次：非法/缺省值回退默认 30 */
+export function normalizeMaxTurns(value: unknown): number {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= MIN_MAX_TURNS) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isInteger(parsed) && parsed >= MIN_MAX_TURNS) return parsed;
+  }
+  return DEFAULT_MAX_TURNS;
+}
+
+/**
  * pi 支持的思考深度等级（与 pi-ai 的 ModelThinkingLevel 对齐，按由浅到深排序）
  *
  * off = 关闭扩展思考；xhigh / max 仅部分模型支持。
@@ -69,6 +88,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     base_url: null,
     thinking_level: 'off',
     providers: {},
+  },
+  agent: {
+    max_turns: DEFAULT_MAX_TURNS,
   },
   concurrency: {
     max_concurrent: 1,
@@ -218,6 +240,9 @@ export function validateConfig(raw: unknown): AppConfig {
     base_url: null,
   };
 
+  // agent 字段验证（旧配置没有该段：归一化为默认 30 轮）
+  const agent = (config.agent as Record<string, unknown>) || {};
+
   return {
     language: config.language as string,
     doc_language: config.doc_language as string,
@@ -229,6 +254,9 @@ export function validateConfig(raw: unknown): AppConfig {
       // 旧配置没有 thinking_level：归一化为 'off'，保证旧 config.yaml 可直接启动
       thinking_level: normalizeThinkingLevel(llm.thinking_level),
       providers: normalizeProviderConfigs(llm.providers),
+    },
+    agent: {
+      max_turns: normalizeMaxTurns(agent.max_turns),
     },
     concurrency: {
       max_concurrent: concurrency.max_concurrent as number,
