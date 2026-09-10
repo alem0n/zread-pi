@@ -60,6 +60,8 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   const apiKey = config.llm.api_key ?? undefined;
   const baseURL = config.llm.base_url ?? undefined;
   const providerId = config.llm.provider ?? undefined;
+  // pi 的思考深度（旧配置缺省 off）；模型不支持时由 pi 在请求时自动调整
+  const thinkingLevel = config.llm.thinking_level ?? 'off';
 
   // 验证必需配置：
   // - model 必须显式选择；
@@ -70,7 +72,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     throw new Error('LLM configuration incomplete. Please run `open-zread config` to configure.');
   }
 
-  logger.info(`模型: ${model}, baseURL: ${baseURL}`);
+  logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, baseURL: ${baseURL}`);
 
   // Token 累积统计
   let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
@@ -137,6 +139,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     tools: options.tools,
     systemPrompt: SYSTEM_PROMPTS[docLanguage],
     maxTurns: options?.maxTurns ?? 30,
+    thinkingLevel,
     permissionMode: 'bypassPermissions',
     hooks,
     includePartialMessages: true,

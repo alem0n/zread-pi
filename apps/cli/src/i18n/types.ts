@@ -18,6 +18,7 @@ export interface TranslationKeys {
     provider: string;
     model: string;
     baseUrl: string;
+    thinking: string;
     directory: string;
     intro: string;
   };
@@ -26,6 +27,7 @@ export interface TranslationKeys {
     selectLanguage: string;
     docLanguage: string;
     llmProvider: string;
+    thinkingLevel: string;
     maxConcurrency: string;
     maxRetries: string;
     default: string;
@@ -156,6 +158,23 @@ export interface TranslationKeys {
     invalid: string;
     current: string;
     footer: string;
+  };
+  thinking: {
+    title: string;
+    current: string;
+    modelUnset: string;
+    supported: string;
+    unsupportedLevel: string;
+    footer: string;
+    levels: {
+      off: string;
+      minimal: string;
+      low: string;
+      medium: string;
+      high: string;
+      xhigh: string;
+      max: string;
+    };
   };
   common: {
     escBack: string;

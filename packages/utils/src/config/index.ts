@@ -3,8 +3,33 @@ import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig } from '@open-zread/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel } from '@open-zread/types';
 import { ensureDir } from '../file-io';
+
+/**
+ * pi 支持的思考深度等级（与 pi-ai 的 ModelThinkingLevel 对齐，按由浅到深排序）
+ *
+ * off = 关闭扩展思考；xhigh / max 仅部分模型支持。
+ */
+export const THINKING_LEVELS: ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/** 判断任意值是否是合法的思考深度等级 */
+export function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === 'string' && (THINKING_LEVELS as string[]).includes(value);
+}
+
+/** 归一化思考深度：非法/缺省值回退 'off' */
+export function normalizeThinkingLevel(value: unknown): ThinkingLevel {
+  return isThinkingLevel(value) ? value : 'off';
+}
 
 /** ~/.zread 目录（延迟计算，测试可以覆盖 HOME/USERPROFILE） */
 export function getZreadDir(): string {
@@ -42,6 +67,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     model: null,
     api_key: null,
     base_url: null,
+    thinking_level: 'off',
     providers: {},
   },
   concurrency: {
@@ -200,6 +226,8 @@ export function validateConfig(raw: unknown): AppConfig {
       model: llm.model as string | null,
       api_key: llm.api_key as string | null,
       base_url: llm.base_url as string | null,
+      // 旧配置没有 thinking_level：归一化为 'off'，保证旧 config.yaml 可直接启动
+      thinking_level: normalizeThinkingLevel(llm.thinking_level),
       providers: normalizeProviderConfigs(llm.providers),
     },
     concurrency: {

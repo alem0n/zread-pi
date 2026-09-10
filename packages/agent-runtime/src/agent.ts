@@ -26,6 +26,7 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-s
 import { createRuntimeModel, inferProviderId, type RuntimeModel } from "./pi/runtime-model.js";
 import { hasZreadProvider } from "./pi/provider-catalog.js";
 import { computeBackoff, isRetryableMessage, sleep, type RetryConfig } from "./retry.js";
+import type { ThinkingLevel } from "@open-zread/types";
 import type {
 	ContentBlock,
 	PermissionMode,
@@ -90,6 +91,13 @@ export interface AgentOptions {
 	retryScope?: "stream" | "stream+run";
 	/** 模型上下文窗口（用于 pi 的上下文记账，缺省 200k） */
 	contextWindow?: number;
+	/**
+	 * pi 的思考深度（thinking level）：off / minimal / low / medium / high / xhigh / max。
+	 *
+	 * 缺省 "off"（与迁移前行为一致，不发送 reasoning 参数）；
+	 * 模型不支持所选等级时由 pi-ai 在请求时自动调整到最近的受支持等级。
+	 */
+	thinkingLevel?: ThinkingLevel;
 	/**
 	 * 高级/测试用途：直接注入 pi 的 Model 与 streamFn（例如 pi-ai 的 faux provider），
 	 * 跳过 provider / baseURL / apiKey 的解析。业务代码不设置该选项。
@@ -453,7 +461,7 @@ class AgentRuntimeImpl implements AgentInstance {
 				initialState: {
 					systemPrompt,
 					model,
-					thinkingLevel: "off",
+					thinkingLevel: options.thinkingLevel ?? "off",
 					tools,
 					messages: [],
 				},

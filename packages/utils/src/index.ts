@@ -34,6 +34,9 @@ export {
   normalizeProviderConfigs,
   isFirstTimeConfig,
   DEFAULT_CONFIG,
+  THINKING_LEVELS,
+  isThinkingLevel,
+  normalizeThinkingLevel,
 } from './config/index.js';
 
 // Cache

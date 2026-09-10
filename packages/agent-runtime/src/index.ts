@@ -47,6 +47,7 @@ export {
 	getZreadProvider,
 	getZreadProviderModels,
 	getZreadModel,
+	getZreadThinkingLevels,
 	listZreadProviders,
 	refreshZreadProviderModels,
 	loginZreadProvider,

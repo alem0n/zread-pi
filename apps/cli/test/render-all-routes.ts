@@ -63,6 +63,7 @@ const paths = [
   "/config/provider/openai-compatible",
   "/config/concurrency",
   "/config/retry",
+  "/config/thinking",
   "/wiki",
   "/wiki/generate?mode=manage",
   "/wiki/sync",

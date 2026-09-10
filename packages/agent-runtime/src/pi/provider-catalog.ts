@@ -17,6 +17,7 @@
 import {
   createModels,
   createProvider,
+  getSupportedThinkingLevels,
   type Api,
   type AssistantMessage,
   type AuthInteraction,
@@ -37,8 +38,8 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
-import type { CustomModelConfig, LlmProviderConfig, AppConfig } from '@open-zread/types';
-import { DEFAULT_CONFIG, loadConfigSync } from '@open-zread/utils';
+import type { CustomModelConfig, LlmProviderConfig, AppConfig, ThinkingLevel } from '@open-zread/types';
+import { DEFAULT_CONFIG, loadConfigSync, THINKING_LEVELS } from '@open-zread/utils';
 import { FileCredentialStore } from './auth-store.js';
 import { FileModelsStore } from './models-store.js';
 
@@ -337,6 +338,24 @@ export function getZreadProviderModels(providerId: string): readonly Model<Api>[
 /** 取单个模型，包含用户在配置里自定义的模型 */
 export function getZreadModel(providerId: string, modelId: string): Model<Api> | undefined {
   return getZreadProviderModels(providerId).find((model) => model.id === modelId);
+}
+
+/**
+ * 取当前模型支持的思考深度等级（pi thinking level 语义）。
+ *
+ * - 未选择模型 / 模型不在目录中：返回全部 7 个等级（请求时由 pi 按模型能力调整）；
+ * - 模型不支持思考（reasoning=false）：返回 ['off']；
+ * - 其余情况：与 pi-ai getSupportedThinkingLevels 一致（例如部分模型不提供 off，
+ *   部分模型的 xhigh / max 需要 thinkingLevelMap 显式声明）。
+ */
+export function getZreadThinkingLevels(
+  providerId?: string | null,
+  modelId?: string | null,
+): ThinkingLevel[] {
+  if (!providerId || !modelId) return [...THINKING_LEVELS];
+  const model = getZreadModel(providerId, modelId);
+  if (!model) return [...THINKING_LEVELS];
+  return getSupportedThinkingLevels(model) as ThinkingLevel[];
 }
 
 export interface ZreadProviderSummary {

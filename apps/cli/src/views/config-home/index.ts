@@ -10,6 +10,7 @@ import { Divider } from "../../tui/components/divider";
 import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
+import { thinkingLevelLabel } from "../../utils/thinking";
 
 interface ConfigItem {
   key: string;
@@ -46,6 +47,13 @@ const configItems: ConfigItem[] = [
       return config.llm.model ? `${config.llm.provider} · ${config.llm.model}` : config.llm.provider;
     },
     route: "/config/provider",
+  },
+  {
+    key: "llm.thinking_level",
+    labelKey: "config.thinkingLevel",
+    getValue: (config, t) => thinkingLevelLabel(config.llm.thinking_level, t),
+    default: "off",
+    route: "/config/thinking",
   },
   {
     key: "concurrency.max_concurrent",
