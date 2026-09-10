@@ -31,7 +31,7 @@ import { migrateLegacyCredentials } from "../../utils/llm-config";
 
 type AuthType = "api_key" | "oauth";
 
-type PageState = "loading" | "choose" | "apiKeyChoice" | "prompt" | "running" | "configured" | "error";
+type PageState = "loading" | "choose" | "prompt" | "running" | "configured" | "error";
 
 interface AuthPromptLike {
   type: "text" | "secret" | "select" | "manual_code";
@@ -66,6 +66,7 @@ export default class ConfigAuthPage extends Screen {
   private error: string | null = null;
   private infoLines: string[] = [];
   private promptMessage = "";
+  private promptType: AuthPromptLike["type"] = "text";
   private promptField = new TextField();
   private promptResolve: ((value: string) => void) | null = null;
   private promptReject: ((error: Error) => void) | null = null;
@@ -89,7 +90,7 @@ export default class ConfigAuthPage extends Screen {
       return true;
     }
 
-    if (this.state === "choose" || this.state === "apiKeyChoice") {
+    if (this.state === "choose") {
       return this.handleChoiceKey(data);
     }
 
@@ -174,7 +175,7 @@ export default class ConfigAuthPage extends Screen {
       return lines;
     }
 
-    if (this.state === "choose" || this.state === "apiKeyChoice") {
+    if (this.state === "choose") {
       lines.push("", style(this.t("auth.chooseType"), { bold: true }));
       const options = this.choiceOptions();
       for (let index = 0; index < options.length; index++) {
@@ -200,7 +201,10 @@ export default class ConfigAuthPage extends Screen {
           lines.push(clampLine(row, width));
         }
       } else {
-        const label = style(`${this.t("auth.apiKeyLabel")}: `, { color: "cyan" });
+        // secret → 显示 API Key 标签；其它（text/manual_code）用通用行首标记
+        const label = this.promptType === "secret"
+          ? style(`${this.t("auth.apiKeyLabel")}: `, { color: "cyan" })
+          : style("> ", { color: "cyan" });
         const labelWidth = visibleWidth(label);
         const inputLine = this.promptField.render(Math.max(1, width - labelWidth))[0] ?? "";
         lines.push(clampLine(label + inputLine, width));
@@ -244,7 +248,6 @@ export default class ConfigAuthPage extends Screen {
       case "prompt":
         return this.isSelectPrompt ? this.t("auth.footerChoose") : this.t("auth.footerApiKey");
       case "choose":
-      case "apiKeyChoice":
         return this.t("auth.footerChoose");
       default:
         return this.t("common.escBack");
@@ -424,6 +427,7 @@ export default class ConfigAuthPage extends Screen {
   private handlePrompt(prompt: AuthPromptLike): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       this.promptMessage = prompt.message;
+      this.promptType = prompt.type;
       this.promptSelectOptions =
         prompt.type === "select" && Array.isArray(prompt.options) ? prompt.options : [];
       this.selectedIndex = 0;
