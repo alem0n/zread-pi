@@ -335,14 +335,24 @@ const canonicalTarget = await canonical(targetRepo);
       pages: Array<{ file: string; section: string }>;
     };
     check("wiki.json 含 2 个页面", catalog.pages.length === 2, `实际 ${catalog.pages.length}`);
-    for (const page of PAGES) {
-      const file = join(targetRepo, ".open-zread", "wiki", page.section, page.file);
-      check(`页面文件已生成：${page.section}/${page.file}`, await exists(file));
-    }
   }
 
-  const allDone = await waitFor(() => run.text().includes("文章 2/2"), 30000, "页面生成完成");
+  const allDone = await waitFor(() => run.text().includes("文章 2/2"), 40000, "页面生成完成");
   check("生成完成后界面显示「文章 2/2」", allDone);
+
+  // 页面文件由并行 Agent 逐个 write_page 落盘，必须在「文章 2/2」之后再判定
+  const pageFiles = PAGES.map((page) =>
+    join(targetRepo, ".open-zread", "wiki", page.section, page.file),
+  );
+  const pagesWritten = await waitFor(
+    async () => (await Promise.all(pageFiles.map((file) => exists(file)))).every(Boolean),
+    40000,
+    "页面文件全部落盘",
+  );
+  for (const [index, page] of PAGES.entries()) {
+    check(`页面文件已生成：${page.section}/${page.file}`, await exists(pageFiles[index]));
+  }
+  check("全部页面文件在超时前落盘", pagesWritten);
   check("调用目录未被写入 .open-zread", !(await exists(join(workspace, ".open-zread"))));
   check("发生了真实的 mock LLM 请求", requestCount >= 4, `requests=${requestCount}`);
 

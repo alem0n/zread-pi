@@ -96,7 +96,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json` | 6/6 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验 | 6/6 |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 151 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 24 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 151 + 16 + 9 + 24 + 19 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 151 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项） | 151 + 16 + 9 + 25 + 19 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
