@@ -16,6 +16,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createAgent, FileReadTool, FileWriteTool, type SDKMessage } from "../src/index.js";
 
@@ -48,6 +49,7 @@ const events: string[] = [];
 let assistantTexts: string[] = [];
 let finalUsage: { input_tokens: number; output_tokens: number } | undefined;
 let resultSubtype: string | undefined;
+let capturedReasoning: SimpleStreamOptions["reasoning"];
 
 const agent = createAgent({
 	model: String(model.id),
@@ -56,7 +58,15 @@ const agent = createAgent({
 	maxTurns: 5,
 	tools: [FileWriteTool, FileReadTool],
 	includePartialMessages: true,
-	runtimeOverride: { model, streamFn: (m, c, o) => models.streamSimple(m, c, o) },
+	// pi 思考深度：应作为 reasoning 传到 streamFn（pi-ai 在适配器内按模型能力 clamp）
+	thinkingLevel: "high",
+	runtimeOverride: {
+		model,
+		streamFn: (m, c, o) => {
+			capturedReasoning = o?.reasoning;
+			return models.streamSimple(m, c, o);
+		},
+	},
 	hooks: {
 		PreToolUse: [
 			{
@@ -117,6 +127,7 @@ check("PostToolUse 钩子被触发", hookLog.includes("post:Write"), hookLog.joi
 check("流级重试被触发（429）", retryLog.length === 1, retryLog.join(","));
 check("最终结果为 success", resultSubtype === "success", String(resultSubtype));
 check("usage 已从 pi 映射回 TokenUsage", finalUsage !== undefined, JSON.stringify(finalUsage));
+check("thinkingLevel 作为 reasoning 传入 streamFn", capturedReasoning === "high", String(capturedReasoning));
 check("模型答复文本可见", assistantTexts.some((text) => text.includes("已写入")), assistantTexts.join("|"));
 
 let fileContent = "";

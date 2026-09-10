@@ -19,6 +19,7 @@ import {
 	createRuntimeModel,
 	getZreadModel,
 	getZreadProviderModels,
+	getZreadThinkingLevels,
 	hasZreadProvider,
 	listZreadProviders,
 	loginZreadProvider,
@@ -126,6 +127,7 @@ try {
 			model: null as string | null,
 			api_key: null as string | null,
 			base_url: null as string | null,
+			thinking_level: "off" as const,
 			providers: {
 				anthropic: {
 					auth_type: "api_key" as const,
@@ -205,6 +207,40 @@ try {
 		"内置模型带真实成本表",
 		realRuntime.model.cost.input >= 0 && typeof realRuntime.model.cost.input === "number",
 		JSON.stringify(realRuntime.model.cost),
+	);
+
+	// ---- 6b) 思考深度（pi thinking level）的受支持等级 ----
+	check(
+		"未选择模型时返回 pi 的全部思考等级",
+		getZreadThinkingLevels(null, null).join(",") === "off,minimal,low,medium,high,xhigh,max",
+		getZreadThinkingLevels(null, null).join(","),
+	);
+	check(
+		"目录外的模型按全部等级处理（由 pi 在请求时调整）",
+		getZreadThinkingLevels("anthropic", "not-in-catalog").length === 7,
+		getZreadThinkingLevels("anthropic", "not-in-catalog").join(","),
+	);
+	check(
+		"不支持思考的模型仅提供 off",
+		getZreadThinkingLevels("my-endpoint", "m1").join(",") === "off",
+		getZreadThinkingLevels("my-endpoint", "m1").join(","),
+	);
+	const sonnetLevels = getZreadThinkingLevels("anthropic", "claude-sonnet-4-5");
+	check(
+		"内置模型返回 pi 声明的等级（无 xhigh/max）",
+		sonnetLevels.join(",") === "off,minimal,low,medium,high",
+		sonnetLevels.join(","),
+	);
+	const opusLevels = getZreadThinkingLevels("anthropic", "claude-opus-4-6");
+	check(
+		"thinkingLevelMap 声明的 max 出现在支持列表",
+		opusLevels.includes("max"),
+		opusLevels.join(","),
+	);
+	check(
+		"自定义思考模型（未声明 xhigh/max）返回 off..high",
+		getZreadThinkingLevels("anthropic", "my-local-model").join(",") === "off,minimal,low,medium,high",
+		getZreadThinkingLevels("anthropic", "my-local-model").join(","),
 	);
 
 	// 静态 Provider 刷新不报错（pi 会跳过静态目录）
