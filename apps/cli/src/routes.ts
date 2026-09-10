@@ -15,6 +15,7 @@ import ConfigLanguagePage from "./views/config-language";
 import ConfigProviderDetailPage from "./views/config-provider-detail";
 import ConfigProviderPage from "./views/config-provider";
 import ConfigRetryPage from "./views/config-retry";
+import ConfigThinkingPage from "./views/config-thinking";
 import WikiGeneratePage from "./views/wiki-generate";
 import WikiHomePage from "./views/wiki-home";
 import WikiSyncPage from "./views/wiki-sync";
@@ -33,6 +34,7 @@ export const routes: RouteDefinition[] = [
   { pattern: "/config/provider/:providerId/custom", create: () => new ConfigCustomModelPage() },
   { pattern: "/config/concurrency", create: () => new ConfigConcurrencyPage() },
   { pattern: "/config/retry", create: () => new ConfigRetryPage() },
+  { pattern: "/config/thinking", create: () => new ConfigThinkingPage() },
 
   // ========== Wiki 模块路由 ===========
   { pattern: "/wiki", create: () => new WikiHomePage() },

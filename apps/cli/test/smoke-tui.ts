@@ -88,6 +88,7 @@ const { App } = await import("../src/tui/app");
 const { routes } = await import("../src/routes");
 const { ProcessTerminal } = await import("@earendil-works/pi-tui");
 const { getVersion } = await import("../src/utils/display");
+const { setZreadCatalogConfig } = await import("@open-zread/agent-runtime");
 
 // 项目版本（仓库根 package.json，AGENTS.md §4.4 唯一来源）
 const projectVersion = (
@@ -192,6 +193,7 @@ console.log("▶ TUI 冒烟测试");
   checkContains("标题行包含项目名与版本", text, `open-zread ${projectVersion}`);
   checkContains("标题行包含提供商", text, "提供商: openai-compatible");
   checkContains("标题行包含模型", text, "模型: gpt-4o-mini");
+  checkContains("标题行包含思考深度", text, "思考深度: 关闭 (off)");
   checkContains("标题行包含 Base URL", text, "Base URL: http://127.0.0.1:1/v1");
   checkContains("标题行包含目录", text, "目录: ");
   checkContains("包含介绍文字", text, "将本地代码库转化为可读的 Wiki 文档。");
@@ -235,6 +237,7 @@ console.log("▶ TUI 冒烟测试");
   checkContains("进入配置首页：标题分割线", configText, "── Zread — 编辑配置 · ~/.zread/config.yaml ─");
   checkContains("配置项：界面语言", configText, "界面语言");
   checkContains("配置项：LLM 提供商", configText, "LLM 提供商");
+  checkContains("配置项：思考深度（含默认值）", configText, "思考深度 (默认: off)");
   checkContains("配置项：最大并发数（含默认值）", configText, "最大并发数 (默认: 1)");
   checkContains("配置项：最大重试次数", configText, "最大重试次数 (默认: 0)");
   checkContains("配置项值：provider · model", configText, "openai-compatible · gpt-4o-mini");
@@ -302,6 +305,117 @@ console.log("▶ TUI 冒烟测试");
   );
 
   app.exit();
+}
+
+// --- 用例 4b：思考深度配置页（pi thinking level）---
+{
+  const { app, terminal } = createApp(["/config/thinking"]);
+  await app.start();
+  await settle();
+
+  let text = screenText(app);
+  checkContains("思考深度页：标题", text, "设置思考深度（pi thinking level）");
+  checkContains("思考深度页：当前值（旧配置缺省为 off）", text, "当前值: 关闭 (off)");
+  checkContains("思考深度页：当前模型", text, "模型: openai-compatible · gpt-4o-mini");
+  checkContains(
+    "思考深度页：当前模型支持的全部等级",
+    text,
+    "当前模型支持: off / minimal / low / medium / high / xhigh / max",
+  );
+  checkContains("思考深度页：默认选中 off", text, "❯ 关闭 (off)");
+  checkContains("思考深度页 Footer", text, "ESC 返回 | ↑↓ 选择 | Enter 确认并返回 | s 保存并返回");
+  check(
+    "思考深度页：渲染 pi 的全部 7 个等级",
+    ["关闭 (off)", "最低 (minimal)", "低 (low)", "中 (medium)", "高 (high)", "极高 (xhigh)", "最高 (max)"].every(
+      (label) => text.includes(label),
+    ),
+    indent(text),
+  );
+
+  // ↓ 3 次 → 中 (medium)
+  terminal.send("\x1b[B");
+  terminal.send("\x1b[B");
+  terminal.send("\x1b[B");
+  await settle(20);
+  checkContains("光标移到「中」", screenText(app), "❯ 中 (medium)");
+
+  // Enter：写回内存配置（本页是初始条目，navigate(-1) 不改变页面）
+  terminal.send("\r");
+  await settle(20);
+  check(
+    "Enter 写回 llm.thinking_level=medium",
+    app.config.config.llm.thinking_level === "medium",
+    String(app.config.config.llm.thinking_level),
+  );
+
+  // s：保存到 config.yaml
+  terminal.send("s");
+  await settle(120);
+  checkContains("s 保存后提示已保存", screenText(app), "配置已保存");
+  const yaml = await readFile(join(home, ".zread", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 thinking_level: medium", yaml, "thinking_level: medium");
+
+  app.exit();
+}
+
+// --- 用例 4c：从配置首页进入思考深度页 ---
+{
+  const { app, terminal } = createApp(["/config"]);
+  await app.start();
+  await settle();
+
+  // 配置项顺序：语言 / 文档语言 / LLM 提供商 / 思考深度
+  terminal.send("j");
+  terminal.send("j");
+  terminal.send("j");
+  await settle(20);
+  checkContains("配置首页：思考深度项被选中", screenText(app), "│ 思考深度");
+
+  terminal.send("\r");
+  await settle(20);
+  checkContains("Enter 进入思考深度页", screenText(app), "设置思考深度（pi thinking level）");
+  app.exit();
+}
+
+// --- 用例 4d：未选择模型时展示「全部等级可选」提示 ---
+{
+  const bareHome = await mkdtemp(join(tmpdir(), "open-zread-tui-bare-"));
+  await mkdir(join(bareHome, ".zread"), { recursive: true });
+  await writeFile(
+    join(bareHome, ".zread", "config.yaml"),
+    [
+      "language: zh",
+      "doc_language: zh",
+      "llm:",
+      "  provider: null",
+      "  model: null",
+      "  api_key: null",
+      "  base_url: null",
+      "concurrency:",
+      "  max_concurrent: 1",
+      "  max_retries: 0",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  const prevHome = process.env.HOME;
+  const prevProfile = process.env.USERPROFILE;
+  process.env.HOME = bareHome;
+  process.env.USERPROFILE = bareHome;
+
+  const { app } = createApp(["/config/thinking"]);
+  await app.start();
+  await settle();
+  const text = screenText(app);
+  checkContains("未选模型：提示全部等级可选", text, "尚未选择模型：全部等级可选，请求时按模型能力自动调整");
+  checkContains("未选模型：仍列出全部 7 个等级", text, "最高 (max)");
+  app.exit();
+
+  process.env.HOME = prevHome;
+  process.env.USERPROFILE = prevProfile;
+  // 本用例用临时 HOME 重建过 catalog：恢复 HOME 后重置 override，避免污染后续用例
+  setZreadCatalogConfig(undefined);
+  await rm(bareHome, { recursive: true, force: true });
 }
 
 // --- 用例 5：config provider 列表（pi-ai 内置目录 + 登录状态 + Enter 进入模型页）---

@@ -14,6 +14,7 @@ import { style } from "./ansi";
 import { RoundedBox } from "./components/rounded-box";
 import { clampLine } from "./text-layout";
 import { getVersion } from "../utils/display";
+import { thinkingLevelLabel } from "../utils/thinking";
 
 const PROJECT_NAME = "open-zread";
 
@@ -93,6 +94,8 @@ export class Layout implements Component {
       "",
       style(`${t("layout.provider")}: `, { dim: true }) + style(llmProvider, { color: "cyan" }),
       style(`${t("layout.model")}: `, { dim: true }) + llmModel,
+      style(`${t("layout.thinking")}: `, { dim: true }) +
+        thinkingLevelLabel(config.llm.thinking_level, (key) => t(key)),
       style(`${t("layout.baseUrl")}: `, { dim: true }) + style(llmBaseUrl, { dim: true }),
       style(`${t("layout.directory")}: `, { dim: true }) + currentDir,
     ];
