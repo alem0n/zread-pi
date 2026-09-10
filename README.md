@@ -137,4 +137,4 @@ bun run browse:dev
 - **Skill 系统 / Task / Team / Cron / LSP / WebSearch / Notebook / Worktree / Plan 模式 / AskUser 等 27 个内置工具**；
 - **会话持久化**（`~/.open-agent-sdk/sessions/*.json`、tag/rename/fork/list）—— pi 侧是 JSONL 会话树 + SQLite，语义不同；当前 wiki 生成是"每次运行一次性 agent"，不需要该能力。
 
-补充阅读：`MIGRATION.md`（迁移决策、风险、后续路径）。
+补充阅读：`AGENTS.md`（上下文总结 + 开发与 Git 流程，协作唯一入口）、`MIGRATION.md`（迁移决策、风险、后续路径）。
