@@ -97,8 +97,9 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 删除 | `App.tsx`、`index.tsx`、`layout/*.tsx`、`provider/**`、`components/*.tsx`、`i18n/useI18n.ts`、`views/wiki-generate/{components,hooks}`、`views/wiki-sync/hooks` |
 | 依赖变更 | `apps/cli` 新增 `@earendil-works/pi-tui`；移除 `ink`、`ink-*`、`fullscreen-ink`、`react`、`react-router`、`zustand`、`use-immer`、`@types/react`、`ink-testing-library` |
 | 构建 | `tsup` 入口 `src/index.tsx` → `src/index.ts`，去掉 ink 的 react-devtools mock 与 yoga.wasm 拷贝；`scripts/dev.ts` 同步 |
-| 验证 | 新增 `bun run test:tui`（89 + 13 + 9 + 19 项），并纳入根 `bun run test` |
+| 验证 | 新增 `bun run test:tui`（151 + 16 + 9 + 24 + 19 项），并纳入根 `bun run test` |
 | 可用性补强 | 列表窗口化分页（`computeItemWindow` / `scrollIndicator`）、PageUp·PageDown·Home·End、终端高度自适应、console 接管（`console-guard.ts`） |
+| 新增全局选项 | `-d, --dir <path>`：入口切一次 `process.cwd()`（业务层零改动），TUI 头部显示实际目标；目录不存在/不是目录时不进入 TUI，单行错误 + 退出码 1。实现 `apps/cli/src/utils/target-dir.ts`，回归 `apps/cli/test/cli-target-dir.ts` |
 
 ### 7.3 映射关系与语义对齐
 

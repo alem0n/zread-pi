@@ -8,6 +8,8 @@ export const enUS: TranslationKeys = {
   cli: {
     version: 'Display version number',
     help: 'Display help information',
+    dirDesc: 'Target directory (default: current directory)',
+    dirInvalid: 'Target directory does not exist or is not a directory: {path}',
     wikiDesc: 'Generate Wiki documentation',
     configDesc: 'Interactive configuration editor',
     browseDesc: 'Start Wiki preview server',

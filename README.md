@@ -58,7 +58,14 @@ bun run mock:wiki path/to/any/repo   # 也可指定其它仓库
 #    配置界面直接使用 pi-ai 的 Provider 目录与 login（API Key / OAuth），
 #    可以同时登录多个 Provider，并为任意 Provider 添加自定义模型。
 bun run cli config
-bun run cli            # 等价于 open-zread wiki
+bun run cli            # 等价于 open-zread wiki，目标 = 当前目录
+
+# -d / --dir：不切换 shell 目录也能对指定仓库生成/浏览文档
+bun run cli --dir fixtures/hello-python          # 相对路径按当前目录解析
+bun run cli -d /path/to/repo                     # 绝对路径
+bun run cli wiki --dir /path/to/repo             # 显式 wiki 子命令写法
+bun run cli browse --dir /path/to/repo           # 预览站也看该目录的产物
+# 目录无效（不存在/不是目录）时不进入 TUI：单行错误 + 退出码 1
 
 # 5) 预览站（独立 React 19 环境）
 bun run browse:install
@@ -103,7 +110,7 @@ bun run browse:dev
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件 | 6/6 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截 | 6/6 |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + mock LLM 的生成/同步全链路 | 151 + 16 + 9 + 19 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 | 151 + 16 + 9 + 24 + 19 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
@@ -124,7 +131,7 @@ bun run browse:dev
 
 ```
 apps/cli/src/
-├─ index.ts          CLI 入口（commander，同迁移前）
+├─ index.ts          CLI 入口（commander，同迁移前；全局选项 -d/--dir 指定目标目录）
 ├─ app.ts            应用启动（对应迁移前的 App.tsx）
 ├─ routes.ts         路由表（对应 <Routes> 声明，含 /config/provider/custom 优先等顺序约束）
 ├─ state/            ConfigStore / I18nStore / WikiStore（替代 ConfigProvider / I18nProvider / WikiProvider）
@@ -169,6 +176,22 @@ apps/cli/src/
 
 业务逻辑（Orchestrator 调用、并发、落盘、提示词、文案）零改动；
 原先的 `views/*/mapper.ts`、`state.ts`、`types.ts`（纯函数）原样保留并继续被 `__tests__` 覆盖。
+
+### 目标目录参数（`-d` / `--dir`）
+
+迁移前必须先 `cd` 到目标仓库再运行 CLI。现在入口提供全局选项 `-d, --dir <path>`：
+
+```bash
+open-zread --dir /path/to/repo        # 默认命令（wiki）
+open-zread wiki --dir /path/to/repo   # 显式子命令写法
+open-zread browse -d /path/to/repo    # 预览站也读这份产物
+```
+
+- 业务层所有路径都以 `process.cwd()` 为根（RepoAnalyzer 扫描、`.open-zread` 落盘、Agent 的 cwd），
+  所以实现是在进入 TUI 之前**切一次进程工作目录**（`apps/cli/src/utils/target-dir.ts`），业务层零改动；
+  TUI 头部的「目录」行会显示实际生效的绝对路径。
+- 相对路径按「调用时的当前目录」解析；目录不存在或不是目录时**不进入 TUI**，只输出单行错误并以退出码 1 结束。
+- 未指定时保持旧行为（目标 = 当前目录）。`test:tui` 覆盖了绝对/相对路径、显式子命令写法、产物落盘位置与两类无效目录。
 
 ### 列表分页与刷新（pi-tui 版本的可用性补强）
 
