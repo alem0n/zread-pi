@@ -45,19 +45,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-tui": "^0.85.1",
     "commander": "^14.0.3",
     "express": "^5.1.0",
-    "fullscreen-ink": "^0.1.0",
     "get-port": "^7.1.0",
-    "ink": "^4.4.0",
-    "ink-select-input": "^5.0.0",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^5.0.0",
-    "open": "^10.1.2",
-    "react": "^18.0.0",
-    "react-router": "^7.14.2",
-    "use-immer": "^0.11.0",
-    "zustand": "^5.0.12"
+    "open": "^10.1.2"
   },
   "devDependencies": {
     "@open-zread/agent-runtime": "workspace:*",
@@ -66,8 +58,6 @@
     "@open-zread/types": "workspace:*",
     "@open-zread/utils": "workspace:*",
     "@types/node": "^20.0.0",
-    "@types/react": "^18.0.0",
-    "ink-testing-library": "^4.0.0",
     "typescript": "^5.0.0",
     "@types/express": "^5.0.6"
   }

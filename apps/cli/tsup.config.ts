@@ -3,25 +3,6 @@ import { cp } from 'fs/promises'
 import { join, resolve } from 'path'
 import { defineConfig } from 'tsup'
 
-// Mock react-devtools-core (ink 的可选开发依赖，生产环境不需要)
-const reactDevToolsMock = {
-  name: 'react-devtools-mock',
-  setup(build: unknown) {
-    const b = build as {
-      onResolve: (args: { filter: RegExp }, handler: () => { path: string; namespace: string }) => void
-      onLoad: (args: { filter: RegExp; namespace: string }, handler: () => { contents: string; loader: string }) => void
-    }
-    b.onResolve({ filter: /^react-devtools-core$/ }, () => ({
-      path: 'react-devtools-core',
-      namespace: 'mock',
-    }))
-    b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({
-      contents: 'export default { connectToDevTools: () => {} }',
-      loader: 'js',
-    }))
-  },
-}
-
 function findFileRecursively(dir: string, target: string): string | null {
   try {
     const entries = readdirSync(dir)
@@ -44,7 +25,7 @@ export default defineConfig(() => {
   const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as { version: string }
 
   return {
-    entry: ['src/index.tsx'],
+    entry: ['src/index.ts'],
     format: ['esm'],
     splitting: false,
     sourcemap: false,
@@ -53,7 +34,6 @@ export default defineConfig(() => {
     bundle: true,
     noExternal: [/.*/],
     platform: 'node',
-    esbuildPlugins: [reactDevToolsMock],
     define: {
       // 替换 globalThis.CLI_VERSION 为版本号常量
       'globalThis.CLI_VERSION': JSON.stringify(pkg.version),
@@ -73,7 +53,7 @@ export default defineConfig(() => {
         await cp(browseDistPath, browseTargetPath, { recursive: true })
       }
 
-      // 复制 WASM 文件
+      // 复制 WASM 文件（repo-analyzer 的 Tree-sitter 需要）
       const nmPath = resolve(cwd, '../../node_modules')
       const copyWasm = async (name: string) => {
         const found = findFileRecursively(nmPath, name)
@@ -82,7 +62,6 @@ export default defineConfig(() => {
         }
       }
       await Promise.all([
-        copyWasm('yoga.wasm'),
         copyWasm('tree-sitter.wasm'),
         copyWasm('mappings.wasm'),
       ])

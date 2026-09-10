@@ -1,0 +1,23 @@
+{
+	"name": "@earendil-works/pi-tui",
+	"version": "0.85.1",
+	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
+	"type": "module",
+	"private": true,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"dependencies": {
+		"get-east-asian-width": "1.6.0",
+		"marked": "18.0.11"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
