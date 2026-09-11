@@ -48,8 +48,8 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 工具结果新增可选 `details` 与图片内容块 | 截断信息 / diff / 命中上限需要结构化回传（不进模型上下文）；图片按 magic number 判型后以 image 块回传（仅当 `model.input` 含 `image`）。均为**新增可选字段**，旧调用点零改动 |
 | 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread-pi/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
 | 思考深度（thinking level）直接沿用 pi 的 7 档 | 配置界面新增 `/config/thinking`（`llm.thinking_level`，默认 off）；受支持等级由 pi-ai `getSupportedThinkingLevels` 计算，模型不支持时分界清楚标注、请求时由 pi 自动 clamp；运行时 `createAgent({ thinkingLevel })` 透传为 `options.reasoning` |
-| 最大轮次进配置（不再硬编码） | 配置界面新增 `/config/max-turns`（`agent.max_turns`，1-100，默认 30）；Orchestrator 的 `create-agent.ts` 读配置下发，`generate-wiki` 不再写死 `maxTurns: 30` |
-| 轮次收尾：提示 + 宽限轮 | 倒数第 1 轮向模型注入收尾提示（steering user 消息，按文档语言点名输出工具 `write_page` / `generate_blueprint`），超限后允许 1 轮宽限（`finalization.graceTurns`，0=旧行为）；上下文将满时不给宽限，仍不收敛才 `error_max_turns` |
+| 最大轮次进配置（不再硬编码） | 配置界面新增 `/config/max-turns`（`agent.max_turns`，0-100，默认 30；0 = 不限制轮次）；Orchestrator 的 `create-agent.ts` 读配置下发，`generate-wiki` 不再写死 `maxTurns: 30` |
+| 轮次收尾：提示 + 宽限轮 | 倒数第 1 轮向模型注入收尾提示（steering user 消息，按文档语言点名输出工具 `write_page` / `generate_blueprint`），超限后允许 1 轮宽限（`finalization.graceTurns`，0=旧行为）；上下文将满时不给宽限，仍不收敛才 `error_max_turns`；`max_turns=0` = 不限制轮次（不发提示、不因轮次停止） |
 | 上下文压缩用 pi 的 `transformContext` + `compaction` | 每次请求前按 `model.contextWindow - reserveTokens` 判定，超限时调用 pi 的 `prepareCompaction` / `compact` 生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；`shouldStopAfterTurn` 在压缩无法腾出空间时优雅停止（`error_context_full`），不让 provider 报上下文溢出 |
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
@@ -71,7 +71,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 - `TokenUsage` 字段名、`BlueprintResult.durationMs / tokenUsage`
 - 工具名：`Read` / `Write` / `Edit` / `Glob` / `Grep` / `write_page` / `generate_blueprint`（提示词里写死了）；`Ls` 为新增工具名（见 §1.3）
 - 工具结果新增**可选**字段（不破坏旧调用方）：`ToolResult.details` / `SDKToolResultMessage.result.details`（截断、diff、命中上限等元信息，不进入模型上下文）、`ToolResult.content` 允许内容块数组（图片回传）、`ToolContext.supportsImages`
-- `AppConfig.llm` 的旧扁平字段（`provider/model/api_key/base_url`）仍可读；新增 `providers` 映射（`LlmProviderConfig`）与 `CustomModelConfig`；新增 `agent.max_turns`（旧配置缺省 30）。旧配置必须能直接启动（运行时自动迁移/回退）
+- `AppConfig.llm` 的旧扁平字段（`provider/model/api_key/base_url`）仍可读；新增 `providers` 映射（`LlmProviderConfig`）与 `CustomModelConfig`；新增 `agent.max_turns`（旧配置缺省 30；`0` = 不限制轮次）。旧配置必须能直接启动（运行时自动迁移/回退）
 
 ---
 
@@ -139,18 +139,18 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 
 | 命令 | 覆盖内容 | 期望 |
 | --- | --- | --- |
-| `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout | 32/32 |
+| `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、旧配置补 `agent.max_turns` 默认值（`0` 保留为不限制、负数回退 30）、logout | 34/34 |
 | `test:agent` | pi 循环、工具执行、钩子、流式事件、429 重试、usage、thinkingLevel 透传、maxTurns | 11/11 |
 | `test:tools` | 工具层专项：截断设施、glob 语义（与 fd `--glob` 对齐）、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与 image 块穿过桥接层进入模型上下文、外部工具启用开关→二进制解析联动 | 95/95 |
 | `test:installer` | 外部工具：注册表与资产名（已对真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化、安装全流程（本地 mock Releases + 注入探测，含进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关 | 70/70 |
-| `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 收尾提示 + 宽限轮（最后一轮/宽限轮输出 → success，不收敛 → `error_max_turns`，`graceTurns=0` = 旧行为） | 35/35 |
+| `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 收尾提示 + 宽限轮（最后一轮/宽限轮输出 → success，不收敛 → `error_max_turns`，`graceTurns=0` = 旧行为，`maxTurns=0` = 不限制轮次） | 39/39 |
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析 | 5/5 |
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json`；模型不产出蓝图时必须报错（不再假装目录完成） | 7/7 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验；页面未落盘（未调用 `write_page` / 写入路径不符 / Mermaid 拦截）必须记失败并发出 `page_error` | 8/8 |
 | `test:browse` | 「浏览文档」服务器 + pi-tui 浏览页：静态资源/API 同端口、SPA fallback、未知 API 404、`close()` 后可连性；页面显示真实地址、ESC 停止；源码无产物时进程内 Vite 兜底；无效资源目录报错 | 28/28（有 `apps/browse/dist` 时兜底 4 项自动跳过） |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/外部工具页/版本号与项目版本同步 185 项）、`render-all-routes.ts`（全部 19 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项）、`browse-server.ts`（浏览文档服务 + 页面，24~28 项：有 `apps/browse/dist` 时兜底 4 项自动跳过） | 185 + 19 + 9 + 25 + 19 + 24 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页（含 `0` = 不限制写回与落盘）/外部工具页/版本号与项目版本同步 187 项）、`render-all-routes.ts`（全部 19 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项）、`browse-server.ts`（浏览文档服务 + 页面，24~28 项：有 `apps/browse/dist` 时兜底 4 项自动跳过） | 187 + 19 + 9 + 25 + 19 + 24 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -326,7 +326,7 @@ Refs: MIGRATION.md §4
 它已被两处 `.gitignore` 覆盖，跑完测试或试跑后无需提交。
 
 ### 6.6 配置与凭据在 zread-pi 侧
-- `~/.zread-pi/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）；`tools.<id>.enabled` 是外部工具（rg / fd）的启用开关（缺省 `true`，配置界面 `/config/tools` 维护，见 §1.4）。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
+- `~/.zread-pi/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（0-100，缺省 30，`0` = 不限制轮次，配置界面 `/config/max-turns` 维护）；`tools.<id>.enabled` 是外部工具（rg / fd）的启用开关（缺省 `true`，配置界面 `/config/tools` 维护，见 §1.4）。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
 - `~/.zread-pi/bin/`：zread-pi 托管安装的外部工具（rg / fd）；探测顺序为「环境变量指定 → 托管目录 → 系统 PATH」，用户停用时直接不用（强制内置纯 JS 实现）。
 - `~/.zread-pi/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
 - `~/.zread-pi/models-store.json`：动态 Provider 的模型目录缓存。

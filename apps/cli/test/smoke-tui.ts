@@ -388,7 +388,8 @@ console.log("▶ TUI 冒烟测试");
 
   const text = screenText(app);
   checkContains("最大轮次页：当前值（旧配置缺省为 30）", text, "当前值: 30");
-  checkContains("最大轮次页：范围", text, "范围: 1-100");
+  checkContains("最大轮次页：范围（0 = 不限制）", text, "范围: 0-100");
+  checkContains("最大轮次页：0 = 不限制说明", text, "0 = 不限制轮次");
   checkContains("最大轮次页：宽限轮说明", text, "自动追加 1 轮收尾轮");
   checkContains("最大轮次页 Footer", text, "ESC 返回 | Enter 确认 | s 保存并返回");
 
@@ -404,12 +405,24 @@ console.log("▶ TUI 冒烟测试");
     `实际: ${app.config.config.agent.max_turns}`,
   );
 
+  // 再改成 0 → Enter：0 = 不限制轮次，保留 0 不回退默认值
+  terminal.send("\x7f");
+  terminal.send("\x7f");
+  terminal.send("0");
+  terminal.send("\r");
+  await settle();
+  check(
+    "Enter 写回配置 agent.max_turns=0（0 = 不限制）",
+    app.config.config.agent.max_turns === 0,
+    `实际: ${app.config.config.agent.max_turns}`,
+  );
+
   // s：保存到 config.yaml（新增 agent 段）
   terminal.send("s");
   await settle(120);
   checkContains("最大轮次页：s 保存后提示已保存", screenText(app), "配置已保存");
   const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
-  checkContains("config.yaml 写入 agent.max_turns: 50", yaml, "max_turns: 50");
+  checkContains("config.yaml 写入 agent.max_turns: 0", yaml, "max_turns: 0");
 
   app.exit();
 }

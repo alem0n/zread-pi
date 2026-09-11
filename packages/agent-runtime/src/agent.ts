@@ -213,7 +213,7 @@ export interface AgentOptions {
 	systemPrompt?: string;
 	appendSystemPrompt?: string;
 	tools?: ToolDefinition[] | string[];
-	/** 每次运行的最大轮次（缺省 30；业务默认来自 `config.agent.max_turns`） */
+	/** 每次运行的最大轮次（缺省 30；`0` = 不限制轮次。业务默认来自 `config.agent.max_turns`） */
 	maxTurns?: number;
 	maxTokens?: number;
 	canUseTool?: (tool: ToolDefinition, input: unknown) => Promise<{ behavior: "allow" | "deny"; message?: string }>;
@@ -844,6 +844,8 @@ class AgentRuntimeImpl implements AgentInstance {
 					}
 
 					// ---- 2) 轮次收尾：最后一轮软提示 → 宽限轮提示 → 停止 ----
+					// maxTurns <= 0 = 不限制轮次（配置界面 0 轮）：不发收尾提示，也不因轮次停止
+					if (maxTurns <= 0) return false;
 					if (turnCount < maxTurns) {
 						if (turnCount === maxTurns - 1 && finalizationNoticeEnabled) {
 							agentRef?.steer(createFinalizationNotice());

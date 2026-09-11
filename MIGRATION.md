@@ -55,7 +55,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 思考深度 | 新增 `thinkingLevel` 选项（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，缺省 `off` = 旧行为）与 `config.llm.thinking_level`：pi 以 `options.reasoning` 下发，模型不支持时 pi-ai 在请求时自动 clamp。 |
 | 会话 | 旧实现的 `saveSession/loadSession/tag/rename/fork` 未迁移；wiki 生成是一次性 agent，不需要。若 CLI 后续要做"会话聊天"，需接 pi 的 JSONL 会话树。 |
 | 上下文窗口/定价 | 旧 `MODEL_PRICING` 表未迁移，`Model` 用保守默认（200k 窗口 / 8k 输出、cost=0）。pi 的 usage 记账照常工作，只是成本字段为 0。 |
-| 最大轮次 | 旧实现在 Orchestrator 硬编码 30；现由 `config.agent.max_turns`（默认 30）提供，`createAgent({ maxTurns })` 仍可显式覆盖。到达上限前会向模型注入收尾提示（steering user 消息），超限后默认允许 1 轮宽限（`finalization.graceTurns`，0 = 旧行为）；模型在最后一轮给出最终答复（无工具调用）时按 success 处理，不再误报 `error_max_turns`。 |
+| 最大轮次 | 旧实现在 Orchestrator 硬编码 30；现由 `config.agent.max_turns`（默认 30，`0` = 不限制轮次）提供，`createAgent({ maxTurns })` 仍可显式覆盖。到达上限前会向模型注入收尾提示（steering user 消息），超限后默认允许 1 轮宽限（`finalization.graceTurns`，0 = 旧行为）；`maxTurns = 0` 时不发提示、不因轮次停止（仍受上下文/取消约束）；模型在最后一轮给出最终答复（无工具调用）时按 success 处理，不再误报 `error_max_turns`。 |
 | 上下文压缩 | 旧引擎的「自动压缩」语义由 pi 的 `transformContext` + `compaction` 对等实现：超阈值时摘要历史（发出 `system/compact_boundary`），摘要请求会额外消耗一次模型调用；压缩无法再腾出空间时在本轮边界优雅停止（`error_context_full`）。 |
 | 事件粒度 | `assistant` 事件在 `message_end` 产出（完整内容 + usage）；流式增量以 `partial_message` 产出（旧引擎同形）。 |
 | 成功判定以落盘为准 | `generateWikiCatalog()` 在 Agent 正常结束后校验 `wiki.json` 可加载；`generateWikiContent()` 校验 `.zread-pi/wiki/<section>/<file>` 真实存在，否则记为失败（抛错/`page_error`）。旧实现把「Agent 循环正常结束」当作完成，模型只输出文字、写到错误路径或被 Mermaid 校验拦截时会显示完成，但首页按文件检查仍显示未完成；现以磁盘产物为唯一判定依据。**落盘兜底**：`write_page` 已成功但文件不在约定路径时（典型：漏传 `section` 落到 wiki 根、只传 `slug` 写成 `<slug>.md`），按「write_page 报告的真实路径 → 模型传入参数复算 → wiki 目录按文件名扫描（跳过 `archived/` 快照）」三层候选找到文件并移动回约定位置，移动成功仍计为完成，不再误报「写入路径与 wiki.json 不一致」。 |
@@ -207,7 +207,7 @@ bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路�
 
 **a) `agent.max_turns` 不再硬编码**
 
-- 配置：`AppConfig.agent.max_turns`（1-100，默认 30）；`validateConfig` 对旧 `config.yaml` 自动补齐；
+- 配置：`AppConfig.agent.max_turns`（0-100，默认 30；`0` = 不限制轮次）；`validateConfig` 对旧 `config.yaml` 自动补齐；
 - UI：配置首页「最大轮次」项 → `/config/max-turns`（`apps/cli/src/views/config-max-turns`）；
 - Orchestrator：`agents/create-agent.ts` 改为 `options.maxTurns ?? config.agent.max_turns ?? 30`，`wiki/generate-wiki.ts` 删除写死的 `maxTurns: 30`（`GenerateWikiOptions.maxTurns` 仍可显式覆盖）。
 
@@ -216,6 +216,7 @@ bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路�
 - 适配层在 `shouldStopAfterTurn` 中倒数第 1 轮/每个宽限轮前通过 `agent.steer()` 注入一条 user 消息（`FinalizationOptions.notice`，缺省英文文案）；
 - Orchestrator 按 `doc_language` 下发本地化文案并点名输出工具（`write_page` / `generate_blueprint`）；
 - 宽限轮数 `graceTurns` 缺省 1（因此实际最多 `max_turns + 1` 轮），`0` 可回到旧行为；上下文将满时优先压缩/优雅停止，**不**发宽限轮；
+- `max_turns = 0` = 不限制轮次：适配层跳过全部轮次收尾逻辑（不发提示、不因轮次停止），上下文保护仍然生效；Orchestrator 也不下发收尾提示；
 - 本轮无工具调用（模型已给出最终答复）时不受轮次/上下文预算影响，避免把「刚好在最后一轮完成」误判为失败。
 
 **b) 上下文压缩与优雅停止（pi `transformContext` + `compaction`）**
@@ -228,9 +229,10 @@ bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路�
   如果上下文将满且压缩已无法腾出空间（单个巨大 turn、可总结内容为空、摘要请求失败/关闭压缩），
   在轮次边界优雅停止并产出 `subtype: "error_context_full"`；
 - `convertToLlm` 改用 pi harness 版本，保证 `compactionSummary` 消息能转成模型可见的 user 消息；
-- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，35 项）覆盖
+- 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，39 项）覆盖
   「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」
-  「最后一轮软提示 + 宽限轮提示 → success」「仍不收敛 → error_max_turns」「graceTurns=0 = 旧行为」「最后一轮完成不误报失败」。
+  「最后一轮软提示 + 宽限轮提示 → success」「仍不收敛 → error_max_turns」「graceTurns=0 = 旧行为」「最后一轮完成不误报失败」
+  「maxTurns=0 = 不限制轮次（不发收尾提示、不因轮次停止）」。
 
 ---
 

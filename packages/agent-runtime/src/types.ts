@@ -441,7 +441,7 @@ export interface AgentOptions {
   appendSystemPrompt?: string
   /** Available tools (ToolDefinition[] or string[] preset) */
   tools?: ToolDefinition[] | string[] | { type: 'preset'; preset: 'default' }
-  /** Maximum number of agentic turns per query */
+  /** Maximum number of agentic turns per query (0 = unlimited) */
   maxTurns?: number
   /** Maximum USD budget per query */
   maxBudgetUsd?: number

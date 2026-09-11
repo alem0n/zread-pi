@@ -91,7 +91,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `hooks.ts`（PreToolUse/PostToolUse） | 映射到 pi `Agent` 的 `beforeToolCall` / `afterToolCall` |
 | `query(): AsyncGenerator<SDKMessage>` | 订阅 pi `AgentEvent` → 归一化为同一套 `SDKMessage`（含 `system/init`、`assistant`、`partial_message`、`tool_result`、`result`） |
 | `thinkingLevel`（pi 思考深度） | `createAgent({ thinkingLevel })` → pi `Agent` 的 `initialState.thinkingLevel`，随请求作为 `options.reasoning` 传给 pi-ai；`off` 不发送 reasoning。模型不支持所选档位时由 pi-ai 自动调整（clamp） |
-| `maxTurns` | pi 的 `shouldStopAfterTurn` 计数；轮次由 `config.agent.max_turns` 提供（配置界面 `/config/max-turns`，旧实现硬编码 30）。倒数第 1 轮注入收尾提示、超限后允许 `finalization.graceTurns`（默认 1）轮宽限；仍不收敛才产出 `subtype: "error_max_turns"` |
+| `maxTurns` | pi 的 `shouldStopAfterTurn` 计数；轮次由 `config.agent.max_turns` 提供（配置界面 `/config/max-turns`，旧实现硬编码 30）。倒数第 1 轮注入收尾提示、超限后允许 `finalization.graceTurns`（默认 1）轮宽限；仍不收敛才产出 `subtype: "error_max_turns"`。`0` = 不限制轮次（不发收尾提示、不因轮次停止，仍受上下文/取消约束） |
 | 上下文压缩 | pi 的 `transformContext` + `prepareCompaction` / `compact`：超过 `contextWindow - reserveTokens` 时生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；无法再腾出空间时 `shouldStopAfterTurn` 优雅停止，产出 `subtype: "error_context_full"`（不再等到 provider 报上下文溢出） |
 | 5 个文件工具（Read/Write/Edit/Glob/Grep） | **按上游 pi 实现重写**（并新增 `Ls`）：见下方「工具层（对齐上游 pi）」；工具名与既有参数名保持不变，包装成 pi 的 `AgentTool`（JSON Schema 直接作为 TypeBox `TSchema` 使用） |
 | `TokenUsage` | 由 pi `Usage` 映射（`cacheWrite`→`cache_creation_input_tokens`，`cacheRead`→`cache_read_input_tokens`） |
@@ -137,18 +137,18 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 
 | 测试 | 覆盖 | 结果 |
 |---|---|---|
-| `test:catalog` | **pi-ai Provider 目录**：内置 Provider 列表、api_key 登录写 `auth.json`、多 Provider 同时配置、自定义模型合并、未内置 Provider 注册、runtime model 元数据、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout 隔离 | 32/32 |
+| `test:catalog` | **pi-ai Provider 目录**：内置 Provider 列表、api_key 登录写 `auth.json`、多 Provider 同时配置、自定义模型合并、未内置 Provider 注册、runtime model 元数据、思考深度支持列表、旧配置补 `agent.max_turns` 默认值（`0` 保留为不限制、负数回退 30）、logout 隔离 | 34/34 |
 | `test:agent` | pi Agent 循环、工具执行、钩子、流式事件、**429 重试**、usage 映射、thinkingLevel → reasoning 透传、maxTurns | 11/11 |
 | `test:tools` | **工具层专项**：截断设施、glob 语义、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与图片内容块穿过桥接层进入模型上下文、外部工具启用开关 → 二进制解析联动 | 95/95 |
 | `test:installer` | **外部工具安装**：注册表与资产名（对过真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关、**版本探测与可用性解耦**（多组参数回退 / 识别不出版本仍可用 / 安装台账与不一致提示） | 70/70 |
-| `test:context` | **上下文压缩 + 优雅停止**：`transformContext` 调用 pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续成功；单个巨大 turn（压缩无法腾出空间）与 `compaction.enabled=false` 时产出 `error_context_full`；`maxTurns` 收尾提示 + 宽限轮：模型最后一轮/宽限轮输出 → success，仍不收敛 → `error_max_turns`，`graceTurns=0` 回到旧行为 | 35/35 |
+| `test:context` | **上下文压缩 + 优雅停止**：`transformContext` 调用 pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续成功；单个巨大 turn（压缩无法腾出空间）与 `compaction.enabled=false` 时产出 `error_context_full`；`maxTurns` 收尾提示 + 宽限轮：模型最后一轮/宽限轮输出 → success，仍不收敛 → `error_max_turns`，`graceTurns=0` 回到旧行为，**`maxTurns=0` = 不限制轮次**（不发收尾提示、不因轮次停止） | 39/39 |
 | `test:agent:http` | 真实 HTTP/SSE 路径：baseURL + apiKey 注入、增量 tool_call 参数解析、第二轮请求 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径）、system 透传、usage | 5/5 |
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件；模型不产出蓝图时报错 | 7/7 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截；页面未落盘时必须记失败并发出 `page_error`（不再误报完成）；**`write_page` 写错路径时落盘兜底移回 wiki.json 约定位置**（报告路径 / 参数复算 / 目录扫描三层，跳过 `archived/` 历史快照） | 18/18（e2e 11 + 兜底 7） |
 | `test:browse` | **「浏览文档」服务器 + pi-tui 浏览页**：静态资源与 API 同端口、SPA fallback、未知 API 404、`close()` 后端口不可连；页面显示「服务器已启动」+ 真实访问地址、ESC 停止；源码无产物时进程内 Vite 兜底（`/api` 代理）；无效 `ZREAD_PI_BROWSE_DIST` 直接报错 | 28/28（apps/browse 有 dist 时兜底 4 项自动跳过） |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 外部工具页（安装/卸载/启停 + 进度条）+ 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 185 + 19 + 9 + 25 + 19 + 24 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页（含 `0` = 不限制写回与落盘）+ 外部工具页（安装/卸载/启停 + 进度条）+ 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 187 + 19 + 9 + 25 + 19 + 24 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
@@ -193,7 +193,7 @@ apps/cli/src/
 /config/provider/custom              完全自定义端点（Base URL → 模型 → API Key）
 /config/provider/:id/custom          兼容旧路由 → 等同于 model-new
 /config/thinking                     思考深度（pi thinking level：off/minimal/low/medium/high/xhigh/max）
-/config/max-turns                    最大轮次（agent.max_turns：1-100，默认 30）
+/config/max-turns                    最大轮次（agent.max_turns：0-100，默认 30；0 = 不限制轮次）
 ```
 
 登录只提供 API Key（写入 `~/.zread-pi/auth.json`，走 pi-ai `Models.login`）；不再提供 OAuth 订阅选项。
@@ -281,9 +281,9 @@ zread-pi browse -d /path/to/repo    # 预览站也读这份产物
   `llm.providers.<providerId>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型（`models`）与上次选择的模型；
   `llm.thinking_level` 是 pi 的思考深度（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，旧配置缺省 `off`），
   由配置界面 `/config/thinking` 维护，生成/同步时传给 Agent（模型不支持时 pi 自动调整）；
-  `agent.max_turns` 是每次 Agent 运行的最大轮次（1-100，默认 30），由配置界面 `/config/max-turns` 维护，
-  旧配置缺省 30（迁移前硬编码值）；
-  它是「工作轮数」：倒数第 1 轮会提示模型立即调用输出工具，超限后自动允许 1 轮收尾宽限（可用 `finalization.graceTurns` 调），
+  `agent.max_turns` 是每次 Agent 运行的最大轮次（0-100，默认 30），由配置界面 `/config/max-turns` 维护，
+  旧配置缺省 30（迁移前硬编码值）；`0` = 不限制轮次（不发收尾提示、不因轮次停止，仍受上下文/取消约束）；
+  非 0 时它是「工作轮数」：倒数第 1 轮会提示模型立即调用输出工具，超限后自动允许 1 轮收尾宽限（可用 `finalization.graceTurns` 调），
   因此实际最多可能跑到 `max_turns + 1` 轮；仍不收敛才以 `error_max_turns` 结束。
   旧字段 `llm.api_key` / `llm.base_url` 仍然兼容读取，首次在新界面切换模型时会自动迁移到下面两个位置。
 - `~/.zread-pi/auth.json`：pi-ai 格式的凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，

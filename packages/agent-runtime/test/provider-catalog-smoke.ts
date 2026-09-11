@@ -44,6 +44,29 @@ delete process.env.OPENAI_API_KEY;
 
 const authPath = join(home, ".zread-pi", "auth.json");
 await mkdir(join(home, ".zread-pi"), { recursive: true });
+
+/** 重写 home 下的 config.yaml（用于验证 agent 段的归一化语义） */
+async function writeHomeConfig(agentLines: string[]): Promise<void> {
+	await writeFile(
+		join(home, ".zread-pi", "config.yaml"),
+		[
+			"language: zh",
+			"doc_language: zh",
+			"llm:",
+			"  provider: null",
+			"  model: null",
+			"  api_key: null",
+			"  base_url: null",
+			"  providers: {}",
+			...agentLines,
+			"concurrency:",
+			"  max_concurrent: 1",
+			"  max_retries: 0",
+			"",
+		].join("\n"),
+		"utf-8",
+	);
+}
 await writeFile(
 	join(home, ".zread-pi", "config.yaml"),
 	[
@@ -70,6 +93,23 @@ try {
 		"旧 config.yaml（缺 agent 段）补默认 max_turns=30",
 		loadedConfig.agent.max_turns === 30,
 		JSON.stringify(loadedConfig.agent),
+	);
+
+	// max_turns 归一化：0 = 不限制轮次（保留 0，不回退默认值）；负数非法，回退默认 30
+	await writeHomeConfig(["agent:", "  max_turns: 0"]);
+	const zeroTurnsConfig = await loadConfig();
+	check(
+		"agent.max_turns: 0 保留为 0（0 = 不限制轮次，不回退 30）",
+		zeroTurnsConfig.agent.max_turns === 0,
+		JSON.stringify(zeroTurnsConfig.agent),
+	);
+
+	await writeHomeConfig(["agent:", "  max_turns: -1"]);
+	const negativeTurnsConfig = await loadConfig();
+	check(
+		"agent.max_turns 为负数时回退默认 30",
+		negativeTurnsConfig.agent.max_turns === 30,
+		JSON.stringify(negativeTurnsConfig.agent),
 	);
 
 	const providers = await listZreadProviders();
