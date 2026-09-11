@@ -119,7 +119,7 @@ export interface GenerateWikiOptions {
   pages?: WikiPage[];
   /** Custom concurrency limit (overrides config) */
   maxConcurrent?: number;
-  /** 单个页面的最大轮次（覆盖 config.agent.max_turns） */
+  /** 单个页面的最大轮次（覆盖 config.agent.max_turns；0 = 不限制轮次） */
   maxTurns?: number;
   /** 细粒度事件回调（实时） */
   onEvent?: (event: ArticleEventPayload) => void;

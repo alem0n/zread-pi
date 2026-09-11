@@ -4,7 +4,7 @@
  * 路由：/config/max-turns
  *
  * agent.max_turns 控制每次 Agent 运行（单页 Wiki / 蓝图 / 同步）的最大轮次。
- * 旧实现在 Orchestrator 里硬编码 30，现在由配置提供。
+ * 旧实现在 Orchestrator 里硬编码 30，现在由配置提供；0 = 不限制轮次。
  *
  * 按键：Enter 确认 | s 保存并返回 | ESC 返回
  */

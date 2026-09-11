@@ -69,10 +69,11 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   const config = await loadConfig();
   const docLanguage = config.doc_language as 'zh' | 'en';
   const maxRetries = config.concurrency.max_retries;
-  // 最大轮次：调用方显式传入 > config.agent.max_turns > 适配层兜底 30
+  // 最大轮次：调用方显式传入 > config.agent.max_turns > 适配层兜底 30；0 = 不限制轮次
   const maxTurns = options.maxTurns ?? config.agent.max_turns ?? 30;
-  // 轮次收尾提示：让模型在预算耗尽前直接调用输出工具（适配层默认再加 1 轮宽限）
-  const finalizationNotice = buildFinalizationNotice(options.tools, docLanguage);
+  // 轮次收尾提示：只在有轮次预算时启用（maxTurns <= 0 = 不限制，无收尾一说）
+  const finalizationNotice =
+    maxTurns > 0 ? buildFinalizationNotice(options.tools, docLanguage) : undefined;
 
   // 提取 LLM 配置（null → undefined，SDK 不接受 null）
   const model = config.llm.model ?? undefined;
@@ -91,7 +92,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     throw new Error('LLM configuration incomplete. Please run `zread-pi config` to configure.');
   }
 
-  logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, 最大轮次: ${maxTurns}, baseURL: ${baseURL}`);
+  logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, 最大轮次: ${maxTurns > 0 ? maxTurns : '不限制'}, baseURL: ${baseURL}`);
 
   // Token 累积统计
   let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };

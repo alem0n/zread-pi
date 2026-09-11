@@ -11,12 +11,13 @@ import { toolIds } from '../tools/registry';
  * Agent 每次运行的最大轮次（turn）配置
  *
  * 旧实现硬编码 30；现在由 `agent.max_turns` 控制，配置界面 /config/max-turns 维护。
+ * `0` = 不限制轮次（不倒数收尾、不因轮次停止，仍受上下文窗口与取消约束）。
  */
 export const DEFAULT_MAX_TURNS = 30;
-export const MIN_MAX_TURNS = 1;
+export const MIN_MAX_TURNS = 0;
 export const MAX_MAX_TURNS = 100;
 
-/** 归一化最大轮次：非法/缺省值回退默认 30 */
+/** 归一化最大轮次：0 = 不限制；非法/缺省值回退默认 30 */
 export function normalizeMaxTurns(value: unknown): number {
   if (typeof value === 'number' && Number.isInteger(value) && value >= MIN_MAX_TURNS) return value;
   if (typeof value === 'string' && value.trim()) {

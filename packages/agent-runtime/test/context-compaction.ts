@@ -9,7 +9,8 @@
  *     shouldStopAfterTurn 优雅停止，结果为 error_context_full（不让 provider 报溢出）；
  *  4. maxTurns 计数仍然生效（配置界面 agent.max_turns 的最终落点）：
  *     倒数第 1 轮注入收尾提示，超限后允许 1 轮宽限；仍不收敛才 error_max_turns；
- *     `finalization.graceTurns: 0` 可回到「到达上限立即停止」的旧行为。
+ *     `finalization.graceTurns: 0` 可回到「到达上限立即停止」的旧行为；
+ *  5. `maxTurns: 0` = 不限制轮次：不发收尾提示、不因轮次停止（仍受上下文/取消约束）。
  *
  * 运行：bun run test:context
  */
@@ -354,6 +355,37 @@ console.log("\n▶ 场景 8：maxTurns=1 一次到位 → success");
 
 	check("maxTurns=1 且无工具调用 → success", result.subtype === "success", String(result.subtype));
 	check("恰好 1 个 turn", result.numTurns === 1, String(result.numTurns));
+}
+
+// ---------------------------------------------------------------------------
+// 场景 9：maxTurns=0 → 不限制轮次（不发收尾提示、不因轮次停止）
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 9：maxTurns=0 → 不限制轮次");
+{
+	const notice = "【收尾提示】立即输出最终结果";
+	const result = await runScenario({
+		contextWindow: 200000,
+		maxTurns: 0,
+		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+		finalization: { notice },
+		prompt: "开始",
+		responses: [
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_3" })]),
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_4" })]),
+			fauxAssistantMessage("全部完成"),
+		],
+	});
+
+	check("0 轮 = 不限制：4 个工作轮后仍继续（共 5 次模型请求）", result.callCount === 5, `callCount=${result.callCount}`);
+	check("不限制轮次时不被 error_max_turns 打断", result.subtype === "success", String(result.subtype));
+	check("numTurns = 5（4 工作轮 + 1 输出轮）", result.numTurns === 5, String(result.numTurns));
+	check(
+		"不限制轮次时不注入收尾提示",
+		result.capturedUserTexts.every((texts) => texts.every((text) => !text.includes(notice))),
+		JSON.stringify(result.capturedUserTexts),
+	);
 }
 
 const failed = checks.filter((entry) => !entry.ok);

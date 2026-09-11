@@ -98,6 +98,7 @@ export interface AgentConfig {
    *
    * pi 侧由 `shouldStopAfterTurn` 计数，达到上限后优雅停止并产出
    * `subtype: "error_max_turns"`；缺省 30（旧实现硬编码值）。
+   * `0` = 不限制轮次（不倒数收尾、不因轮次停止，仍受上下文窗口与取消约束）。
    */
   max_turns: number;
 }
