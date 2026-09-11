@@ -22,7 +22,7 @@ apps/browse         React 19 + Vite 预览站（保留；独立安装，见 §6.
 packages/
   agent-runtime     ★ 适配层：createAgent / createProvider / 5 个文件工具 / SDKMessage 等类型
                     + pi/provider-catalog（pi-ai 内置 Provider 目录 / 登录 / 自定义模型）
-                    + pi/auth-store（~/.zread/auth.json 凭据）/ pi/models-store（模型目录缓存）
+                    + pi/auth-store（~/.zread-pi/auth.json 凭据）/ pi/models-store（模型目录缓存）
   orchestrator      ★ 编排层：三层 Repo Map 工作流、prompts、p-limit 并发、wiki.json 契约（仅 import 改指向）
   repo-analyzer     ★ Tree-sitter 扫描与解析（未改）
   utils             ★ 配置 / cache / wiki 落盘 / 版本快照 / provider-registry（未改）
@@ -42,7 +42,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 重试放在 `streamFn` 层，且只在"未产出内容"时重试 | pi 的 Agent 循环刻意不内置重试；这样失败尝试不会写进会话记录 |
 | 钩子映射到 pi 的 `beforeToolCall` / `afterToolCall` | 与旧 `PreToolUse` / `PostToolUse` 语义一一对应，UI 进度事件零改动 |
 | 5 个文件工具**原样复制**而非改用 pi 内置工具 | 保持工具名/schema/提示文本不变，避免 LLM 行为漂移 |
-| 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
+| 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread-pi/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
 | 思考深度（thinking level）直接沿用 pi 的 7 档 | 配置界面新增 `/config/thinking`（`llm.thinking_level`，默认 off）；受支持等级由 pi-ai `getSupportedThinkingLevels` 计算，模型不支持时分界清楚标注、请求时由 pi 自动 clamp；运行时 `createAgent({ thinkingLevel })` 透传为 `options.reasoning` |
 | 最大轮次进配置（不再硬编码） | 配置界面新增 `/config/max-turns`（`agent.max_turns`，1-100，默认 30）；Orchestrator 的 `create-agent.ts` 读配置下发，`generate-wiki` 不再写死 `maxTurns: 30` |
 | 轮次收尾：提示 + 宽限轮 | 倒数第 1 轮向模型注入收尾提示（steering user 消息，按文档语言点名输出工具 `write_page` / `generate_blueprint`），超限后允许 1 轮宽限（`finalization.graceTurns`，0=旧行为）；上下文将满时不给宽限，仍不收敛才 `error_max_turns` |
@@ -85,7 +85,7 @@ bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终�
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
 bun run browse:install     # 预览站依赖（apps/browse 独立安装）
 bun run browse:build       # 预览站静态产物（打包 CLI / 免 Vite 预览）
-bun run cli                # 真机 CLI（需 ~/.zread/config.yaml）
+bun run cli                # 真机 CLI（需 ~/.zread-pi/config.yaml）
 bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=当前目录）
 ```
 
@@ -267,16 +267,16 @@ Refs: MIGRATION.md §4
 ### 6.4 RepoAnalyzer 依赖 cwd
 `parseFiles()` 以 `process.cwd()` 为根解析相对路径，`scanFiles()` 返回相对路径。
 任何调用它的脚本/测试都必须先 `process.chdir(目标仓库)`（见 `packages/repo-analyzer/test/smoke-analyzer.ts`）。
-首次解析某种语言会从 CDN 下载 WASM 到 `~/.zread/parsers`。
+首次解析某种语言会从 CDN 下载 WASM 到 `~/.zread-pi/parsers`。
 
 ### 6.5 生成的 Wiki 产物不入库
 流水线会在**目标仓库**写出 `.zread-pi/wiki/**`；夹具里也一样。
 它已被两处 `.gitignore` 覆盖，跑完测试或试跑后无需提交。
 
 ### 6.6 配置与凭据在 zread-pi 侧
-- `~/.zread/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）——倒数第 1 轮会提示模型立即输出，超限后自动允许 1 轮宽限（`finalization.graceTurns`），仍不收敛才 `error_max_turns`。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
-- `~/.zread/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
-- `~/.zread/models-store.json`：动态 Provider 的模型目录缓存。
+- `~/.zread-pi/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）——倒数第 1 轮会提示模型立即输出，超限后自动允许 1 轮宽限（`finalization.graceTurns`），仍不收敛才 `error_max_turns`。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
+- `~/.zread-pi/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
+- `~/.zread-pi/models-store.json`：动态 Provider 的模型目录缓存。
 - 适配层把这份配置翻译成 pi 的 Provider + Model（内置 Provider 直接用 `builtinProviders()`；未内置的用 `createProvider()` 动态注册；自定义模型按 pi models.json 语义合并）。
 - 上下文压缩阈值不在 `config.yaml`，而是由适配层按 `model.contextWindow` + pi 默认值（`reserveTokens=16384` / `keepRecentTokens=20000`）自动判定；测试可通过 `createAgent({ compaction })` 调参。
 - **未登记的 providerId 回退 OpenAI 兼容协议**（旧实现会抛 `Unsupported provider`）——这是有意的健壮性增强。
@@ -295,7 +295,7 @@ Refs: MIGRATION.md §4
 所有代码、脚本、命令示例与文档都必须跨平台成立，常见注意点：
 
 - **路径**：一律走 `node:path`（`join` / `resolve` / `sep`）或 POSIX 风格正斜杠；禁止手拼 `\` 或依赖 `path.sep` 字面量做判断。仓库内部约定：文件系统上接受两种分隔符，**落盘/比较前统一归一化为正斜杠**（参照 `tools/mock-wiki-run.ts` 的 `replace(/\\/g, "/")`）。
-- **家目录 / 用户配置**：写 `~/.zread/...` 只用于文档表述；代码中必须用 `os.homedir()`（或等价 API）展开，禁止假设 `C:\Users\...` 或 `/home/...`。
+- **家目录 / 用户配置**：写 `~/.zread-pi/...` 只用于文档表述；代码中必须用 `os.homedir()`（或等价 API）展开，禁止假设 `C:\Users\...` 或 `/home/...`。
 - **临时目录**：用 `os.tmpdir()` + `fs.mkdtemp`（参照 `tools/mock-wiki-run.ts`），不要写死 `/tmp`。
 - **Shell 命令**：`package.json` 的 `scripts` 一律用 `bun run <file>.ts` 形式（跨平台安全），不要写 `rm -rf`、`cp -r`、`&&` 链、`$(...)` 等 CMD/PowerShell 不支持的写法；确需 shell 逻辑时放进 TS 脚本。文档中的 bash 示例假定在 Git Bash / WSL / POSIX shell 下执行。
 - **换行符与编码**：源码与文档统一 LF（UTF-8 无 BOM）；Windows 侧依赖 `core.autocrlf` 的只影响本地检出，不要在代码里对 `\r\n` 做硬编码假设，读取外部文件时注意 strip `\r`。

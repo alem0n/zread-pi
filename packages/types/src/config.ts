@@ -6,7 +6,7 @@
 
 /**
  * 登录/认证方式：
- * - api_key: 用户输入的 API Key（保存在 ~/.zread/auth.json）
+ * - api_key: 用户输入的 API Key（保存在 ~/.zread-pi/auth.json）
  * - oauth:   pi-ai 的 OAuth 订阅登录（Claude Pro/Max、Codex、Copilot 等）
  */
 export type LlmAuthType = 'api_key' | 'oauth';
@@ -51,7 +51,7 @@ export interface CustomModelConfig {
  * LlmProviderConfig - 单个 Provider 的持久化配置
  *
  * 凭据（API Key / OAuth token）不在这里，而是交给 pi-ai 的 CredentialStore，
- * 落盘在 ~/.zread/auth.json —— 因此可以同时登录多个 Provider。
+ * 落盘在 ~/.zread-pi/auth.json —— 因此可以同时登录多个 Provider。
  */
 export interface LlmProviderConfig {
   /** 最近一次成功使用的认证方式（仅用于展示与预选） */

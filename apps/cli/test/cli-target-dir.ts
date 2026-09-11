@@ -199,9 +199,9 @@ const home = await mkdtemp(join(tmpdir(), "zread-pi-dir-home-"));
 const workspace = await mkdtemp(join(tmpdir(), "zread-pi-dir-work-"));
 const targetRepo = join(workspace, "target-repo");
 
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
-  join(home, ".zread", "config.yaml"),
+  join(home, ".zread-pi", "config.yaml"),
   [
     "language: zh",
     "doc_language: zh",

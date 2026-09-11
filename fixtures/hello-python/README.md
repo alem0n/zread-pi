@@ -30,7 +30,7 @@ bun run mock:wiki
 # 2) 只验证扫描 + AST 解析（Tree-sitter Python）
 bun run test:analyzer
 
-# 3) 真机生成 Wiki（先在 ~/.zread/config.yaml 配置 LLM）
+# 3) 真机生成 Wiki（先在 ~/.zread-pi/config.yaml 配置 LLM）
 bun run cli
 ```
 

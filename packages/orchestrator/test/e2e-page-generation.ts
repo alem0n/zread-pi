@@ -22,7 +22,7 @@ function check(name: string, ok: boolean, detail?: string): void {
 
 const home = await mkdtemp(join(tmpdir(), "zread-pi-home-"));
 const repo = await mkdtemp(join(tmpdir(), "zread-pi-repo-"));
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await mkdir(join(repo, "src"), { recursive: true });
 await writeFile(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
 
@@ -145,7 +145,7 @@ const server = Bun.serve({
 });
 
 await writeFile(
-	join(home, ".zread", "config.yaml"),
+	join(home, ".zread-pi", "config.yaml"),
 	[
 		"language: en",
 		"doc_language: en",

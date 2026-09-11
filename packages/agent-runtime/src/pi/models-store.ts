@@ -1,7 +1,7 @@
 /**
  * FileModelsStore —— pi-ai ModelsStore 的落盘实现。
  *
- * 落盘位置：~/.zread/models-store.json
+ * 落盘位置：~/.zread-pi/models-store.json
  *   { "<providerId>": { models, checkedAt, lastModified, etag } }
  *
  * 动态 Provider（如 opencode / vercel-ai-gateway / radius）刷新出的模型目录

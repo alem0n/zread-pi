@@ -1,7 +1,7 @@
 /**
  * FileCredentialStore —— pi-ai CredentialStore 的 zread-pi 实现。
  *
- * 落盘位置：~/.zread/auth.json（与 pi coding-agent 同格式）
+ * 落盘位置：~/.zread-pi/auth.json（与 pi coding-agent 同格式）
  *   { "<providerId>": Credential }
  *
  * 为什么单独放一个文件：

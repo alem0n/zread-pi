@@ -16,7 +16,7 @@ zread-pi/
 │  │  ├─ src/agent.ts             createAgent（pi Agent 循环 + 重试编排 + 事件/钩子映射）
 │  │  ├─ src/pi/runtime-model.ts  配置（provider/model/apiKey/baseURL）→ pi Provider + Model
 │  │  ├─ src/pi/provider-catalog.ts  pi-ai 内置 Provider 目录 + 登录 + 自定义模型
-│  │  ├─ src/pi/auth-store.ts     ~/.zread/auth.json 凭据存储（pi CredentialStore）
+│  │  ├─ src/pi/auth-store.ts     ~/.zread-pi/auth.json 凭据存储（pi CredentialStore）
 │  │  ├─ src/pi/models-store.ts   动态模型目录缓存（pi ModelsStore）
 │  │  ├─ src/retry.ts             RetryConfig 契约 + pi-ai 错误分类/退避
 │  │  ├─ src/providers/           createProvider（pi-ai Models，供 browse-chat 使用）
@@ -165,7 +165,7 @@ apps/cli/src/
 /config/max-turns                    最大轮次（agent.max_turns：1-100，默认 30）
 ```
 
-登录只提供 API Key（写入 `~/.zread/auth.json`，走 pi-ai `Models.login`）；不再提供 OAuth 订阅选项。
+登录只提供 API Key（写入 `~/.zread-pi/auth.json`，走 pi-ai `Models.login`）；不再提供 OAuth 订阅选项。
 
 对照关系与判定条件：
 
@@ -211,7 +211,7 @@ zread-pi browse -d /path/to/repo    # 预览站也读这份产物
 - **异步加载都能刷到屏幕**：加载态、进度态、保存态、重试倒计时都走 `requestRender()`；`test:tui` 用假终端断言了「加载中 → 列表」「目录完成 → 文章列表」等中间态确实被渲染。
 - **按键立即重绘**：页面按键交给 pi-tui 的聚焦分发（`Screen.handleInput` → `Screen.handleKey`），pi-tui 分发后会自动请求一次立即重绘，页面无需手动 `refresh()`；同时 Kitty 键盘协议的上报松开事件被统一过滤，一次按键只处理一次（此前用原始输入监听器自行转发，改状态后不重绘，需点一下鼠标才看到切换）。
 - **直接进入子路由时先加载 `wiki.json`**：`/wiki/generate`、`/wiki/sync` 的 `onEnter` 会 `await wiki.load()` 再启动流程（否则会误判为「无目录」而重新扫描）。
-- **防止杂散输出花屏**：TUI 期间 `console.*` 被接管并转存到 `~/.zread/logs/zread-pi-*.log`（典型来源：provider-registry 同步失败时的 `console.error`），退出时还原（`tui/console-guard.ts`）。
+- **防止杂散输出花屏**：TUI 期间 `console.*` 被接管并转存到 `~/.zread-pi/logs/zread-pi-*.log`（典型来源：provider-registry 同步失败时的 `console.error`），退出时还原（`tui/console-guard.ts`）。
 
 ---
 
@@ -246,7 +246,7 @@ zread-pi browse -d /path/to/repo    # 预览站也读这份产物
 
 配置分两层，均归 zread-pi 自己管理：
 
-- `~/.zread/config.yaml`：非敏感配置。`llm.provider` / `llm.model` 是当前生效的 Provider/模型；
+- `~/.zread-pi/config.yaml`：非敏感配置。`llm.provider` / `llm.model` 是当前生效的 Provider/模型；
   `llm.providers.<providerId>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型（`models`）与上次选择的模型；
   `llm.thinking_level` 是 pi 的思考深度（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，旧配置缺省 `off`），
   由配置界面 `/config/thinking` 维护，生成/同步时传给 Agent（模型不支持时 pi 自动调整）；
@@ -255,9 +255,9 @@ zread-pi browse -d /path/to/repo    # 预览站也读这份产物
   它是「工作轮数」：倒数第 1 轮会提示模型立即调用输出工具，超限后自动允许 1 轮收尾宽限（可用 `finalization.graceTurns` 调），
   因此实际最多可能跑到 `max_turns + 1` 轮；仍不收敛才以 `error_max_turns` 结束。
   旧字段 `llm.api_key` / `llm.base_url` 仍然兼容读取，首次在新界面切换模型时会自动迁移到下面两个位置。
-- `~/.zread/auth.json`：pi-ai 格式的凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，
+- `~/.zread-pi/auth.json`：pi-ai 格式的凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，
   可同时保存多个 Provider 的 API Key；OAuth 凭据（手动写入时）也由 pi 自动刷新。
-- `~/.zread/models-store.json`：动态 Provider 的模型目录缓存（pi `ModelsStore`）。
+- `~/.zread-pi/models-store.json`：动态 Provider 的模型目录缓存（pi `ModelsStore`）。
 
 `packages/agent-runtime/src/pi/provider-catalog.ts` 把这份配置翻译成 pi 的 Provider + Model：
 内置 Provider 直接用 pi-ai 的 `builtinProviders()`，未内置的（自定义端点 / 旧 `openai-compatible`）用 `createProvider()` 动态注册；

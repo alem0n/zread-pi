@@ -2,7 +2,7 @@
  * I18nStore - 翻译状态（替代原 I18nProvider + useI18n）
  *
  * 语义与迁移前一致：
- * - 启动时读取 ~/.zread/config.yaml 的 language 字段
+ * - 启动时读取 ~/.zread-pi/config.yaml 的 language 字段
  * - setLanguage 热切换界面语言（ConfigLanguagePage 用）
  * - 未知 key 返回空字符串（与 useI18n 相同）
  */
