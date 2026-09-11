@@ -231,3 +231,86 @@ bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路�
 - 测试：`packages/agent-runtime/test/context-compaction.ts`（`bun run test:context`，35 项）覆盖
   「压缩后继续 success」「压缩无法腾空 → error_context_full」「关闭压缩 → error_context_full」
   「最后一轮软提示 + 宽限轮提示 → success」「仍不收敛 → error_max_turns」「graceTurns=0 = 旧行为」「最后一轮完成不误报失败」。
+
+---
+
+## 9. 工具层对齐上游 pi（第六步）
+
+目标：把 Agent **可见的工具层**从「迁移时原样拷贝的 5 个文件工具」升级为「按上游 pi 实现重写 + 补齐缺失能力」，
+让工具在 Windows / Linux / macOS 上等价可用，且不再依赖 POSIX-only 命令（旧实现里 `spawn('bash')` 的兜底分支在 Windows 上等于不可用）。
+
+### 9.1 决策：不引入 `pi-coding-agent`，能力走「复制 + 改写」
+
+上游工具实现分散在 `packages/coding-agent/src/core/tools/*` 与 `packages/agent/src/harness/tools/*`；
+前者所在的 `pi-coding-agent` 包未在 `exports` 里暴露工具子路径，且与既有「不引入 pi-coding-agent」的迁移决策冲突。
+因此本轮全部按「复制 + 改写」移植，并在文件头注明来源；`vendor/pi/**` 源码零改动。
+
+可直接复用的部分（vendor 已导出）**不复制**：`@earendil-works/pi-agent-core` 已导出
+`truncateHead` / `truncateTail` / `truncateLine` / `formatSize` / `DEFAULT_MAX_LINES` / `DEFAULT_MAX_BYTES`
+（`tools/truncate.ts` 只是薄封装 + 统一的提示文案拼装）。
+
+### 9.2 决策：rg / fd 只探测、不下载
+
+上游 `utils/tools-manager.ts` 在缺失时从 GitHub Releases 自动下载并解包（tar.gz/zip、chmod、
+Windows 用 `System32\tar.exe` 或 PowerShell `Expand-Archive`）。本轮**刻意不移植这段**：
+
+| 方案 | 取舍 |
+|---|---|
+| 自动下载（上游做法） | 运行期静默联网 + 解包可执行文件，失败面大；解包分支依赖 tar/unzip/PowerShell，是三平台最易碎的一段 |
+| **探测已有 → 有则用，没有则纯 JS 兜底（采用）** | 无联网、无解包；能力不降级（`file-walk.ts` + `glob-match.ts` 实现同一套语义），只牺牲一点速度 |
+| 缺失即报错 | 在没装 rg/fd 的机器上直接失去搜索能力，与「开箱可用」冲突 |
+
+两条路径**必须给出同一套可见文件集合**，因此：
+
+- 都用 `.gitignore` / `.ignore` / `.fdignore`，并且**不在 git 仓库内也生效**
+  （fd 加 `--no-require-git`；rg 加 `--no-require-git`；JS 兜底天然生效）；
+- 都跳过 `.git` / `node_modules` / `.zread-pi`（fd 用 `--exclude`，rg 用 `--glob '!**/<dir>/**'`）；
+- 都输出「相对搜索根的 POSIX 风格路径」，并按字典序排序；
+- 单测 `test:tools` 对同一条查询跑两条路径并断言结果一致。
+
+环境变量 `ZREAD_PI_RG_PATH` / `ZREAD_PI_FD_PATH` 可显式指定二进制（测试用它模拟缺失，也便于打包/离线场景）。
+
+### 9.3 工具变化清单
+
+| 工具 | 动作 | 关键变化 |
+|---|---|---|
+| `Ls` | **新增** | 目录列举（排序 + 目录后缀 + 条目/字节双上限）。补齐能力缺口：旧 `Read` 对目录的报错文案点名 `Bash`，而本仓库**从未注册 Bash 工具** |
+| `Glob` | 替换 | 去掉 Node 实验 API + `spawn('bash')` 兜底；改为 fd 优先 + 纯 JS 兜底；输出相对 POSIX 路径并排序；尊重 .gitignore；`limit` 可调 |
+| `Grep` | 替换 | rg `--json` **流式**解析（旧实现全量缓冲，命中上限形同虚设）；输出相对路径；rg/grep 双分支不一致 → 「rg + 纯 JS 兜底」同格式；新增 `ignoreCase` / `literal` / `context` / `limit`；长行截断 500 字符；保留 `output_mode`（content / files_with_matches / count） |
+| `Read` | 替换 | 图片按 **magic number** 判型（不再只看扩展名），模型支持图片时回传 image 内容块；1-based `offset`；行/字节双上限 + `Use offset=N to continue.` 续读提示；目录报错点名 `Ls`；非图片二进制不再灌乱码；参数 `file_path` 保留，并接受上游别名 `path` |
+| `Write` | 替换 | 同文件并发写**串行化**（`withFileMutationQueue`）；结果文本用请求路径；`details.created` 标记新建/覆盖 |
+| `Edit` | 替换 | BOM / CRLF 归一化（旧实现在 CRLF 检出上必然匹配失败）+ fuzzy 兜底；支持 `edits[]` 多段不相邻替换；`replace_all` 保留；回传 diff / unified patch / 首行变更行号；同文件并发编辑串行化 |
+| 输出截断设施 | 复用 | 统一 2000 行 / 50KB 双上限，替换旧工具里的硬编码（旧 `Read` 只有 2000 行、旧 `Grep` 只有 250 条且无字节上限） |
+
+### 9.4 契约扩展（均为向后兼容的「新增可选」）
+
+```ts
+ToolContext.supportsImages?: boolean      // 由 createAgent 按 model.input 注入；undefined = 无法判定
+ToolResult.details?: JsonValue            // 结构化元信息（截断/diff/命中上限），不进入模型上下文
+SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供钩子/UI 消费
+```
+
+- `ToolResult.content` 从「只当字符串用」扩展为「可以是内容块数组」，从而支持 image 回传
+  （此前非字符串会被 `JSON.stringify` 成文本，图片会变成 base64 垃圾）；
+- `Read` 仅在 `context.supportsImages === true` 时发送 image 块；未知或不支持时退化为文本说明，
+  避免把图片发给不支持图片输入的模型导致请求被 provider 拒绝；
+- `defineTool({ call })` 的返回值新增 `{ content, details }` 形态；原有的 `string` 与 `{ data, is_error }`
+  两种形态保持不变（`write_page` / `generate_blueprint` 等业务工具零改动）。
+
+### 9.5 验证
+
+- `bun run test:tools`（新增，88 项）：截断设施、glob 语义、Ls / Glob / Grep / Read / Write / Edit 的行为与错误文案、
+  **rg/fd 与纯 JS 兜底两条路径结果一致**、同文件 16 路并发编辑不丢更新、`details` 与 image 块真的穿过桥接层进入模型上下文。
+- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 88/88、agent:http 7/7、provider 5/5、
+  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 全套）；`bun run mock:wiki`（completed=4 failed=0）。
+
+### 9.6 未决项（需要人类拍板）
+
+1. **`Bash` / `PowerShell` 未迁移**：本轮只做「文件与搜索」工具。若后续要 shell 执行能力，需先定方案
+   （沙箱/审批/超时/输出截断/Windows 分支），本仓库现状**不应**在提示词里引用 shell 工具。
+2. **rg/fd 自动下载**：若确认要「开箱即用且更快」，可后续按上游 `tools-manager.ts` 走 vendor 流程移植，
+   但需接受三平台解包失败面与运行期联网。
+3. **`Read` 的图片缩放**：上游有 `processImage`（自动缩放到 2000x2000，依赖 photon）；本轮未引入该依赖，
+   大图直接按原字节发送。若真机出现「图片过大被 provider 拒绝」，再补缩放。
+4. **`Grep` 的 `type` 参数**：旧实现有 `type`（rg `--type ts`）；上游无该参数，本轮用 `glob` 覆盖该场景，
+   若模型习惯用 `type` 可再加回（映射到 `--type` 或扩展名 glob）。

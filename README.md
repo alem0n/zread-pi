@@ -20,7 +20,7 @@ zread-pi/
 │  │  ├─ src/pi/models-store.ts   动态模型目录缓存（pi ModelsStore）
 │  │  ├─ src/retry.ts             RetryConfig 契约 + pi-ai 错误分类/退避
 │  │  ├─ src/providers/           createProvider（pi-ai Models，供 browse-chat 使用）
-│  │  ├─ src/tools/               原样复用的 Read/Write/Edit/Glob/Grep + defineTool
+│  │  ├─ src/tools/               工具层：Read/Write/Edit/Glob/Grep/Ls + 截断/glob/遍历等共享设施
 │  │  └─ test/                    冒烟测试（离线 faux + 本地 mock HTTP + provider + catalog）
 │  ├─ orchestrator/      ← 保留：编排层（工具/提示词/并发/同步，仅把 import 指向 agent-runtime）
 │  ├─ repo-analyzer/     ← 保留：Tree-sitter 分析（未改）
@@ -94,13 +94,29 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `thinkingLevel`（pi 思考深度） | `createAgent({ thinkingLevel })` → pi `Agent` 的 `initialState.thinkingLevel`，随请求作为 `options.reasoning` 传给 pi-ai；`off` 不发送 reasoning。模型不支持所选档位时由 pi-ai 自动调整（clamp） |
 | `maxTurns` | pi 的 `shouldStopAfterTurn` 计数；轮次由 `config.agent.max_turns` 提供（配置界面 `/config/max-turns`，旧实现硬编码 30）。倒数第 1 轮注入收尾提示、超限后允许 `finalization.graceTurns`（默认 1）轮宽限；仍不收敛才产出 `subtype: "error_max_turns"` |
 | 上下文压缩 | pi 的 `transformContext` + `prepareCompaction` / `compact`：超过 `contextWindow - reserveTokens` 时生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；无法再腾出空间时 `shouldStopAfterTurn` 优雅停止，产出 `subtype: "error_context_full"`（不再等到 provider 报上下文溢出） |
-| 5 个文件工具（Read/Write/Edit/Glob/Grep） | 实现原样复用，仅包装成 pi 的 `AgentTool`（JSON Schema 直接作为 TypeBox `TSchema` 使用） |
+| 5 个文件工具（Read/Write/Edit/Glob/Grep） | **按上游 pi 实现重写**（并新增 `Ls`）：见下方「工具层（对齐上游 pi）」；工具名与既有参数名保持不变，包装成 pi 的 `AgentTool`（JSON Schema 直接作为 TypeBox `TSchema` 使用） |
 | `TokenUsage` | 由 pi `Usage` 映射（`cacheWrite`→`cache_creation_input_tokens`，`cacheRead`→`cache_read_input_tokens`） |
 | `createProvider()`（browse-chat） | pi-ai `Models.completeSimple()` |
 | 配置界面手工维护 provider 列表（LiteLLM 缓存） | pi-ai `builtinProviders()`（40 个内置 Provider）+ `Models.login()`（API Key / OAuth）+ `Models.refresh()`（模型目录刷新） |
 
 业务侧唯一改动：`import ... from '@zread-pi/agent-sdk'` → `'@zread-pi/agent-runtime'`（22 个文件，纯机械替换）。
 `Orchestrator` 的并发控制（p-limit）、错误隔离、三层 Repo Map 工具、prompt、`wiki.json` 契约、`WritePageTool` 的 Mermaid 校验**全部未改**。
+
+### 工具层（对齐上游 pi）
+
+| 工具 | 状态 | 要点 |
+|---|---|---|
+| `Ls` | 新增 | 目录列举：排序 + 目录补 `/` + dotfile + 条目/字节双上限 |
+| `Glob` | 重写 | 系统 `fd` 优先、纯 JS 兜底；相对 POSIX 路径 + 字典序；尊重 `.gitignore`（非 git 仓库内也生效） |
+| `Grep` | 重写 | rg `--json` 流式解析（命中上限立刻 kill）+ 纯 JS 兜底；`ignoreCase`/`literal`/`context`/`limit`；长行截断 500 字符 |
+| `Read` | 重写 | 图片按 magic number 判型并回传 image 块（仅当模型支持图片）；`offset` 1-based；2000 行 / 50KB + `Use offset=N to continue.` |
+| `Write` / `Edit` | 重写 | 同文件并发串行化；`Edit` 支持 BOM/CRLF 归一化、多段 `edits[]`、diff 回传 |
+
+- **不引入 `pi-coding-agent`**：上游工具按「复制 + 改写」移植，`vendor/pi/**` 零改动；
+  `truncateHead`/`truncateLine` 等纯函数直接复用 vendor 已导出的实现。
+- **rg/fd 只探测、不下载**：缺失时走纯 JS 兜底（`file-walk.ts` + `glob-match.ts`），
+  测试对同一条查询同时跑两条路径并断言结果一致。
+- 细节与未决项（`Bash`/`PowerShell` 未迁移等）见 `MIGRATION.md` §9。
 
 ---
 
@@ -110,6 +126,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 |---|---|---|
 | `test:catalog` | **pi-ai Provider 目录**：内置 Provider 列表、api_key 登录写 `auth.json`、多 Provider 同时配置、自定义模型合并、未内置 Provider 注册、runtime model 元数据、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout 隔离 | 32/32 |
 | `test:agent` | pi Agent 循环、工具执行、钩子、流式事件、**429 重试**、usage 映射、thinkingLevel → reasoning 透传、maxTurns | 11/11 |
+| `test:tools` | **工具层专项**：截断设施、glob 语义、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与图片内容块穿过桥接层进入模型上下文 | 88/88 |
 | `test:context` | **上下文压缩 + 优雅停止**：`transformContext` 调用 pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续成功；单个巨大 turn（压缩无法腾出空间）与 `compaction.enabled=false` 时产出 `error_context_full`；`maxTurns` 收尾提示 + 宽限轮：模型最后一轮/宽限轮输出 → success，仍不收敛 → `error_max_turns`，`graceTurns=0` 回到旧行为 | 35/35 |
 | `test:agent:http` | 真实 HTTP/SSE 路径：baseURL + apiKey 注入、增量 tool_call 参数解析、第二轮请求 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径）、system 透传、usage | 5/5 |
