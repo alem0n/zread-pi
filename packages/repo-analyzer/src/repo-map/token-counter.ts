@@ -2,7 +2,7 @@
  * Token Counter - Estimate token count for Repo Map
  */
 
-import type { SymbolInfo } from '@open-zread/types';
+import type { SymbolInfo } from '@zread-pi/types';
 
 /**
  * Estimate tokens for a single file's Repo Map representation

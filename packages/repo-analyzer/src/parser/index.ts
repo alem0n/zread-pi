@@ -1,7 +1,7 @@
 import Parser from 'web-tree-sitter';
 import { join } from 'path';
-import type { FileManifest, SymbolManifest, SymbolInfo } from '@open-zread/types';
-import { logger, getProjectRoot, readTextFile } from '@open-zread/utils';
+import type { FileManifest, SymbolManifest, SymbolInfo } from '@zread-pi/types';
+import { logger, getProjectRoot, readTextFile } from '@zread-pi/utils';
 import { isLanguageSupported } from './language-map';
 import { loadParsers } from './wasm-loader';
 import { parseVueSfc } from './vue-handler';

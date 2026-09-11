@@ -3,10 +3,10 @@
   "compilerOptions": {
     "outDir": "./dist",
     "paths": {
-      "@open-zread/types": ["../types/src/index.ts"],
-      "@open-zread/utils": ["../utils/src/index.ts"],
-      "@open-zread/repo-analyzer": ["../repo-analyzer/src/index.ts"],
-      "@open-zread/agent-runtime": ["../agent-runtime/src/index.ts"]
+      "@zread-pi/types": ["../types/src/index.ts"],
+      "@zread-pi/utils": ["../utils/src/index.ts"],
+      "@zread-pi/repo-analyzer": ["../repo-analyzer/src/index.ts"],
+      "@zread-pi/agent-runtime": ["../agent-runtime/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

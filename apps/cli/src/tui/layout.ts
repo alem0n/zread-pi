@@ -16,7 +16,7 @@ import { clampLine } from "./text-layout";
 import { getVersion } from "../utils/display";
 import { thinkingLevelLabel } from "../utils/thinking";
 
-const PROJECT_NAME = "open-zread";
+const PROJECT_NAME = "zread-pi";
 
 /** 获取简短路径 */
 function getShortPath(path: string): string {

@@ -3,7 +3,7 @@ import { buildRepoMap, buildModuleDetails, buildDirectoryTreeOnly, buildCoreSign
 import { estimateTokens, getDepth } from '../token-counter.js';
 import { calculatePriority, selectByTokenBudget, getTopCoreFiles } from '../prioritizer.js';
 import { buildDirectoryTree, trimSignature } from '../formatter.js';
-import type { SymbolManifest, SymbolInfo, FilePriority } from '@open-zread/types';
+import type { SymbolManifest, SymbolInfo, FilePriority } from '@zread-pi/types';
 
 describe('Repo Map Builder', () => {
   // Mock SymbolManifest
@@ -199,7 +199,7 @@ describe('Repo Map Builder', () => {
           file: 'packages\\cli\\src\\bin.ts',
           exports: ['export function main()'],
           functions: [],
-          imports: ['import { core } from "@open-zread/utils"'],
+          imports: ['import { core } from "@zread-pi/utils"'],
           docstrings: [],
         },
       ],

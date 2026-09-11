@@ -1,5 +1,5 @@
 import { join } from 'path';
-import type { FileManifest, CacheManifest } from '@open-zread/types';
+import type { FileManifest, CacheManifest } from '@zread-pi/types';
 import { getCacheDir, readJsonFile, writeJsonFile, ensureDir } from '../file-io.js';
 import { CACHE_FILES, CACHE_VERSION } from './constants';
 

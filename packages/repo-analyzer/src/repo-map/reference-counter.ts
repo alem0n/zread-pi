@@ -3,7 +3,7 @@
  * Optimized O(n) algorithm using Map for file path indexing
  */
 
-import type { SymbolManifest } from '@open-zread/types';
+import type { SymbolManifest } from '@zread-pi/types';
 
 export function countReferences(symbols: SymbolManifest): Record<string, number> {
   const referenceMap: Record<string, number> = {};

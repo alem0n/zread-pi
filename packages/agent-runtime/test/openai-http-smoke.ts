@@ -22,7 +22,7 @@ function check(name: string, ok: boolean, detail?: string): void {
 	console.log(`${ok ? "  ✅" : "  ❌"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-const workdir = await mkdtemp(join(tmpdir(), "open-zread-http-smoke-"));
+const workdir = await mkdtemp(join(tmpdir(), "zread-pi-http-smoke-"));
 const targetFile = join(workdir, "http-out.md").replace(/\\/g, "/");
 const seenAuth: string[] = [];
 const seenBodies: Array<Record<string, unknown>> = [];

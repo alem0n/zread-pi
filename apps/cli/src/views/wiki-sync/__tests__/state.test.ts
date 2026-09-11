@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage } from '@zread-pi/types';
 import {
   initialSyncCatalogState,
   initialSyncPageState,

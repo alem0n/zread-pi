@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import Parser from 'web-tree-sitter';
 import { WASM_CDN_URL, WASM_FILE_MAP } from './constants';
 import { LANGUAGE_TO_PARSER } from './language-map';
-import { logger } from '@open-zread/utils';
+import { logger } from '@zread-pi/utils';
 
 const languageCache = new Map<string, Parser.Language>();
 

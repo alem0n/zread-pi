@@ -6,7 +6,7 @@
 
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import type { WikiOutput, WikiPage, AppConfig, TechStackSummary } from '@open-zread/types';
+import type { WikiOutput, WikiPage, AppConfig, TechStackSummary } from '@zread-pi/types';
 import { getWikiDir, getWikiJsonPath, writeJsonFile } from '../file-io.js';
 import { logger } from '../logger.js';
 
@@ -49,7 +49,7 @@ export async function generateWikiJson(
  *
  * Load wiki.json from wiki directory.
  *
- * @param path - Optional custom path (defaults to .open-zread/wiki/wiki.json)
+ * @param path - Optional custom path (defaults to .zread-pi/wiki/wiki.json)
  * @returns WikiOutput with pages array
  * @throws Error if blueprint not found or invalid structure
  */

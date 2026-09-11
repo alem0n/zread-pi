@@ -10,7 +10,7 @@
  */
 
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
-import { DEFAULT_MAX_TURNS, MAX_MAX_TURNS, MIN_MAX_TURNS } from "@open-zread/utils";
+import { DEFAULT_MAX_TURNS, MAX_MAX_TURNS, MIN_MAX_TURNS } from "@zread-pi/utils";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";

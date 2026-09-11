@@ -161,8 +161,8 @@ const server = Bun.serve({
 // 2) 临时 HOME + 目标仓库
 // ---------------------------------------------------------------------------
 
-const home = await mkdtemp(join(tmpdir(), "open-zread-tui-gen-home-"));
-const repo = await mkdtemp(join(tmpdir(), "open-zread-tui-gen-repo-"));
+const home = await mkdtemp(join(tmpdir(), "zread-pi-tui-gen-home-"));
+const repo = await mkdtemp(join(tmpdir(), "zread-pi-tui-gen-repo-"));
 
 await mkdir(join(home, ".zread"), { recursive: true });
 await writeFile(
@@ -287,7 +287,7 @@ check("目录完成后展示文章列表", catalogDone);
 const allDone = await waitFor(() => screenText().includes("文章 2/2"), 30000, "全部页面生成完成");
 check("两篇文章全部完成（文章 2/2）", allDone);
 
-const wikiJsonPath = join(repo, ".open-zread", "wiki", "wiki.json");
+const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
 const wikiJsonExists = await stat(wikiJsonPath).then(
   () => true,
   () => false,
@@ -301,7 +301,7 @@ if (wikiJsonExists) {
   check("wiki.json 含 2 个页面", catalog.pages.length === 2, `实际 ${catalog.pages.length}`);
 
   for (const page of PAGES) {
-    const file = join(repo, ".open-zread", "wiki", page.section, page.file);
+    const file = join(repo, ".zread-pi", "wiki", page.section, page.file);
     const exists = await stat(file).then(
       () => true,
       () => false,

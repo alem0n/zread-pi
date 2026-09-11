@@ -3,15 +3,15 @@
  *
  * 流程：检测变更 → LLM 重新规划 → 产出 SyncDiff
  */
-import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@open-zread/agent-runtime';
-import { scanFiles, parseFiles } from '@open-zread/repo-analyzer';
+import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@zread-pi/agent-runtime';
+import { scanFiles, parseFiles } from '@zread-pi/repo-analyzer';
 import {
   loadCachedManifest,
   saveCachedManifest,
   saveCachedSymbols,
   loadWikiBlueprint,
   diffManifests,
-} from '@open-zread/utils';
+} from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent';
 import SyncCatalogPrompt from '../prompts/sync-catalog';
 import {
@@ -23,9 +23,9 @@ import {
   GetDirectoryTreeTool,
   GetModuleDetailsTool,
 } from '../tools/repo-map-tools.js';
-import type { SyncDiff } from '@open-zread/types';
+import type { SyncDiff } from '@zread-pi/types';
 import type { CatalogEvent } from '../types.js';
-import type { TokenUsage } from '@open-zread/agent-runtime';
+import type { TokenUsage } from '@zread-pi/agent-runtime';
 
 /** Sync Agent 工具列表 */
 const SYNC_TOOLS = [

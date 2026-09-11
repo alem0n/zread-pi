@@ -4,7 +4,7 @@
 
 import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
-import type { SymbolManifest } from '@open-zread/types';
+import type { SymbolManifest } from '@zread-pi/types';
 import { getCacheDir, ensureDir } from '../file-io.js';
 
 const SYMBOL_CACHE_FILE = 'last_symbols.json';

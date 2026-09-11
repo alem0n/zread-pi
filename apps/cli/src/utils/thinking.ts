@@ -5,8 +5,8 @@
  * 这里只负责把它渲染成「本地化名称 (原始等级)」，例如 "中 (medium)"。
  */
 
-import type { ThinkingLevel } from "@open-zread/types";
-import { normalizeThinkingLevel } from "@open-zread/utils";
+import type { ThinkingLevel } from "@zread-pi/types";
+import { normalizeThinkingLevel } from "@zread-pi/utils";
 import type { TranslateFn } from "../i18n/types";
 
 /** 取思考深度的展示文本（非法/缺省值按 off 处理） */

@@ -1,8 +1,8 @@
 {
-  "name": "@open-zread/agent-runtime",
+  "name": "@zread-pi/agent-runtime",
   "version": "0.1.0",
   "private": true,
-  "description": "open_zread 的 Agent 运行时适配层：对外保持原 agent-sdk 公共契约，内部由 pi（@earendil-works/pi-ai + pi-agent-core）提供 Agent 循环、多提供商请求、重试与工具执行。",
+  "description": "zread-pi 的 Agent 运行时适配层：对外保持原 agent-sdk 公共契约，内部由 pi（@earendil-works/pi-ai + pi-agent-core）提供 Agent 循环、多提供商请求、重试与工具执行。",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -15,7 +15,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
-    "@open-zread/types": "workspace:*",
-    "@open-zread/utils": "workspace:*"
+    "@zread-pi/types": "workspace:*",
+    "@zread-pi/utils": "workspace:*"
   }
 }

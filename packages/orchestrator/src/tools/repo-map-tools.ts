@@ -6,9 +6,9 @@
  * Layer 3: get_module_details - 模块完整详情
  */
 
-import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@open-zread/agent-runtime';
-import { loadCachedSymbols } from '@open-zread/utils';
-import { buildDirectoryTreeOnly, buildCoreSignatures, buildModuleDetails } from '@open-zread/repo-analyzer';
+import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@zread-pi/agent-runtime';
+import { loadCachedSymbols } from '@zread-pi/utils';
+import { buildDirectoryTreeOnly, buildCoreSignatures, buildModuleDetails } from '@zread-pi/repo-analyzer';
 
 /**
  * Layer 1: Get Directory Tree Tool

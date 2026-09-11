@@ -2,8 +2,8 @@
  * 构建 standalone 二进制（bun compile）并打包 zip。
  *
  * 布局约定（wasm 必须与二进制同目录，运行时按 process.execPath 同目录查找）：
- *   open-zread[-vX.Y.Z-<os>-<arch>].zip
- *   ├── open-zread(.exe)
+ *   zread-pi[-vX.Y.Z-<os>-<arch>].zip
+ *   ├── zread-pi(.exe)
  *   ├── tree-sitter.wasm
  *   ├── mappings.wasm
  *   └── browse/            # 「浏览文档」前端静态资源（可选，缺失时 browse 功能不可用）
@@ -38,11 +38,11 @@ interface TargetInfo {
 }
 
 const TARGETS: Record<string, TargetInfo> = {
-  'windows-x64': { bunTarget: 'bun-windows-x64', os: 'windows', arch: 'x64', exeName: 'open-zread.exe' },
-  'linux-x64': { bunTarget: 'bun-linux-x64', os: 'linux', arch: 'x64', exeName: 'open-zread' },
-  'linux-arm64': { bunTarget: 'bun-linux-arm64', os: 'linux', arch: 'arm64', exeName: 'open-zread' },
-  'macos-x64': { bunTarget: 'bun-darwin-x64', os: 'macos', arch: 'x64', exeName: 'open-zread' },
-  'macos-arm64': { bunTarget: 'bun-darwin-arm64', os: 'macos', arch: 'arm64', exeName: 'open-zread' },
+  'windows-x64': { bunTarget: 'bun-windows-x64', os: 'windows', arch: 'x64', exeName: 'zread-pi.exe' },
+  'linux-x64': { bunTarget: 'bun-linux-x64', os: 'linux', arch: 'x64', exeName: 'zread-pi' },
+  'linux-arm64': { bunTarget: 'bun-linux-arm64', os: 'linux', arch: 'arm64', exeName: 'zread-pi' },
+  'macos-x64': { bunTarget: 'bun-darwin-x64', os: 'macos', arch: 'x64', exeName: 'zread-pi' },
+  'macos-arm64': { bunTarget: 'bun-darwin-arm64', os: 'macos', arch: 'arm64', exeName: 'zread-pi' },
 };
 
 function nativeTargetName(): string {
@@ -105,7 +105,7 @@ function main(): void {
   }
 
   const version = (JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8')) as { version: string }).version;
-  const artifactName = `open-zread-v${version}-${target.os}-${target.arch}`;
+  const artifactName = `zread-pi-v${version}-${target.os}-${target.arch}`;
   const stageDir = join(OUT_DIR, artifactName);
   const zipPath = join(OUT_DIR, `${artifactName}.zip`);
 

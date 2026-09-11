@@ -2,8 +2,8 @@ import { readdir, stat, readFile } from 'fs/promises';
 import { join, extname, relative, resolve } from 'path';
 import Ignore, { type Ignore as IgnoreType } from 'ignore';
 import { createHash } from 'crypto';
-import type { FileManifest, FileInfo } from '@open-zread/types';
-import { logger, getProjectRoot } from '@open-zread/utils';
+import type { FileManifest, FileInfo } from '@zread-pi/types';
+import { logger, getProjectRoot } from '@zread-pi/utils';
 import { SCANNER_CONFIG, LANGUAGE_MAP } from './constants';
 
 function detectLanguage(filePath: string): string {

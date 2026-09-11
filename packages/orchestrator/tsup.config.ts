@@ -11,10 +11,10 @@ export default defineConfig(() => {
     minify: !isDev,
     clean: true,
     external: [
-      '@open-zread/agent',
-      '@open-zread/skeleton',
-      '@open-zread/core',
-      '@open-zread/types'
+      '@zread-pi/agent',
+      '@zread-pi/skeleton',
+      '@zread-pi/core',
+      '@zread-pi/types'
     ],
   }
 })

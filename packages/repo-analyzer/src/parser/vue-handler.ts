@@ -1,5 +1,5 @@
 import Parser from 'web-tree-sitter';
-import { logger } from '@open-zread/utils';
+import { logger } from '@zread-pi/utils';
 
 export function extractVueScript(source: string): { scriptContent: string; scriptLang: string } | null {
   const scriptMatch = source.match(/<script[^>]*>([\s\S]*?)<\/script>/);

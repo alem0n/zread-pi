@@ -4,8 +4,8 @@
  * Types for Wiki content generation system.
  */
 
-import type { WikiPage } from '@open-zread/types';
-import type { TokenUsage } from '@open-zread/agent-runtime';
+import type { WikiPage } from '@zread-pi/types';
+import type { TokenUsage } from '@zread-pi/agent-runtime';
 
 // ==================== 进度状态（批量回调） ====================
 
@@ -113,7 +113,7 @@ export interface ArticleEventPayload {
  * Generate Wiki Content Options
  */
 export interface GenerateWikiOptions {
-  /** Blueprint file path (default: .open-zread/wiki/wiki.json) */
+  /** Blueprint file path (default: .zread-pi/wiki/wiki.json) */
   blueprintPath?: string;
   /** 待生成的页面列表（如果传入，则不从 blueprint 加载，只生成这些页面） */
   pages?: WikiPage[];

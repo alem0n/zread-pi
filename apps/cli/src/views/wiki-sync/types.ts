@@ -5,12 +5,12 @@
  * 新增 sync 特有的状态展示。
  */
 
-import type { WikiPage } from '@open-zread/types';
-import type { TokenUsage } from '@open-zread/orchestrator';
+import type { WikiPage } from '@zread-pi/types';
+import type { TokenUsage } from '@zread-pi/orchestrator';
 
 // Reuse from wiki-generate (imported at usage site)
-export type { WikiPage } from '@open-zread/types';
-export type { TokenUsage } from '@open-zread/orchestrator';
+export type { WikiPage } from '@zread-pi/types';
+export type { TokenUsage } from '@zread-pi/orchestrator';
 
 /** 同步阶段 */
 export type SyncPhase = 'detecting' | 'planning' | 'executing';

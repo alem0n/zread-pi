@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "./dist",
     "paths": {
-      "@open-zread/types": ["../types/src/index.ts"]
+      "@zread-pi/types": ["../types/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

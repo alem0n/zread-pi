@@ -5,13 +5,13 @@
  * 检测 → 规划（LLM） → 执行（归档 + 并发生成 .md）
  */
 
-import { loadConfig, WikiStore } from "@open-zread/utils";
+import { loadConfig, WikiStore } from "@zread-pi/utils";
 import {
   generateWikiContent,
   syncWiki,
   type ArticleEventPayload,
   type CatalogEvent,
-} from "@open-zread/orchestrator";
+} from "@zread-pi/orchestrator";
 import { createInitialSyncState } from "./state";
 import { syncArticleEventToState, syncCatalogEventToState, type SyncCatalogEventPayload } from "./mapper";
 import type { WikiSyncState } from "./types";

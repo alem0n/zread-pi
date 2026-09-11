@@ -2,7 +2,7 @@
  * 同步初始状态工厂（纯函数）
  */
 
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage } from '@zread-pi/types';
 import type { SyncCatalogState, SyncArticlesState, SyncPageState, WikiSyncState } from './types';
 
 export const initialSyncCatalogState: SyncCatalogState = {

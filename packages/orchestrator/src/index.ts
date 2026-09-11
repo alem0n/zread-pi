@@ -1,5 +1,5 @@
 /**
- * @open-zread/blueprint
+ * @zread-pi/blueprint
  *
  * Wiki blueprint generation using Agent orchestration.
  */
@@ -19,4 +19,4 @@ export type { SyncResult } from './wiki/sync-wiki.js'
 export * from './types.js'
 
 // Re-export TokenUsage from agent-sdk
-export type { TokenUsage } from '@open-zread/agent-runtime'
+export type { TokenUsage } from '@zread-pi/agent-runtime'

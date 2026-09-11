@@ -52,7 +52,7 @@ export interface BrowseServerInfo {
 
 /** Browse 服务器启动选项 */
 export interface BrowseServerOptions {
-  /** 是否自动打开浏览器（默认 true；无头/测试环境可用 OPEN_ZREAD_BROWSE_NO_OPEN=1 关闭） */
+  /** 是否自动打开浏览器（默认 true；无头/测试环境可用 ZREAD_PI_BROWSE_NO_OPEN=1 关闭） */
   openBrowser?: boolean;
 }
 
@@ -68,14 +68,14 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_BROWSE_ROOT = path.resolve(MODULE_DIR, "..", "..", "..", "..", "apps", "browse");
 
 /** 显式指定前端构建产物目录 */
-const WEB_DIST_ENV = "OPEN_ZREAD_BROWSE_DIST";
+const WEB_DIST_ENV = "ZREAD_PI_BROWSE_DIST";
 
 /** 置为 1 时不自动打开浏览器 */
-const NO_OPEN_ENV = "OPEN_ZREAD_BROWSE_NO_OPEN";
+const NO_OPEN_ENV = "ZREAD_PI_BROWSE_NO_OPEN";
 
 /**
  * 定位 SPA 静态资源目录（必须含 index.html）：
- * 1. OPEN_ZREAD_BROWSE_DIST 显式覆盖（目录无效则直接报错，不静默回退）
+ * 1. ZREAD_PI_BROWSE_DIST 显式覆盖（目录无效则直接报错，不静默回退）
  * 2. 打包产物 dist/browse（tsup onSuccess 从 apps/browse/dist 复制）
  * 3. 源码仓库 apps/browse/dist（bun run browse:build 的产物）
  */
@@ -252,7 +252,7 @@ function createWikiApp(projectPath: string) {
   app.use(express.json({ limit: "1mb" }));
 
   // Wiki data path
-  const wikiPath = path.join(projectPath, ".open-zread", "wiki");
+  const wikiPath = path.join(projectPath, ".zread-pi", "wiki");
   const wikiJsonPath = path.join(wikiPath, "wiki.json");
 
   // 1. Get wiki catalog
@@ -506,6 +506,6 @@ export async function startWikiBrowseServer(
 
 /** 检查是否存在 wiki.json */
 export function hasWikiCatalog(projectPath: string): boolean {
-  const wikiJsonPath = path.join(projectPath, ".open-zread", "wiki", "wiki.json");
+  const wikiJsonPath = path.join(projectPath, ".zread-pi", "wiki", "wiki.json");
   return existsSync(wikiJsonPath);
 }

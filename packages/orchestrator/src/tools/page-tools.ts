@@ -9,9 +9,9 @@
  */
 
 import { resolve, dirname } from 'path';
-import { defineTool, getRequiredString, getString } from '@open-zread/agent-runtime';
-import type { ToolInputParams, ToolContext } from '@open-zread/agent-runtime';
-import { ensureDir, writeTextFile } from '@open-zread/utils';
+import { defineTool, getRequiredString, getString } from '@zread-pi/agent-runtime';
+import type { ToolInputParams, ToolContext } from '@zread-pi/agent-runtime';
+import { ensureDir, writeTextFile } from '@zread-pi/utils';
 
 interface MermaidValidationIssue {
   block: number;
@@ -115,13 +115,13 @@ function formatMermaidValidationError(issues: MermaidValidationIssue[]): string 
  * Write Wiki page content to the specified file path.
  * Uses WikiPage.file field for path, organized by section.
  *
- * Path structure: .open-zread/wiki/{section}/{file}
- * Example: .open-zread/wiki/入门指南/1-project-overview.md
+ * Path structure: .zread-pi/wiki/{section}/{file}
+ * Example: .zread-pi/wiki/入门指南/1-project-overview.md
  */
 export const WritePageTool = defineTool({
   name: 'write_page',
   description: `将 Wiki 页面内容写入指定文件路径。按照章节组织目录结构。
-输出路径: .open-zread/wiki/{file}`,
+输出路径: .zread-pi/wiki/{file}`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -164,15 +164,15 @@ export const WritePageTool = defineTool({
       // If file contains path separator, use it directly
       // Otherwise, organize by section
       if (file.includes('/') || file.includes('\\')) {
-        filePath = resolve(context.cwd, '.open-zread/wiki', file);
+        filePath = resolve(context.cwd, '.zread-pi/wiki', file);
       } else if (section) {
-        filePath = resolve(context.cwd, '.open-zread/wiki', section, file);
+        filePath = resolve(context.cwd, '.zread-pi/wiki', section, file);
       } else {
-        filePath = resolve(context.cwd, '.open-zread/wiki', file);
+        filePath = resolve(context.cwd, '.zread-pi/wiki', file);
       }
     } else {
       // Fallback: use slug if file is not provided
-      const wikiDir = resolve(context.cwd, '.open-zread/wiki');
+      const wikiDir = resolve(context.cwd, '.zread-pi/wiki');
       filePath = resolve(wikiDir, `${slug}.md`);
     }
 

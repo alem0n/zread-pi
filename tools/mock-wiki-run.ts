@@ -151,7 +151,7 @@ const server = Bun.serve({
 // 2) 临时 HOME（~/.zread/config.yaml 指向 mock）
 // ---------------------------------------------------------------------------
 
-const home = await mkdtemp(join(tmpdir(), "open-zread-mock-home-"));
+const home = await mkdtemp(join(tmpdir(), "zread-pi-mock-home-"));
 await mkdir(join(home, ".zread"), { recursive: true });
 await writeFile(
 	join(home, ".zread", "config.yaml"),
@@ -203,7 +203,7 @@ server.stop(true);
 // 4) 汇报产物
 // ---------------------------------------------------------------------------
 
-const wikiDir = join(target, ".open-zread", "wiki");
+const wikiDir = join(target, ".zread-pi", "wiki");
 const blueprint = JSON.parse(await readFile(join(wikiDir, "wiki.json"), "utf-8")) as { pages: Array<{ file: string; section: string }> };
 console.log(`\n▶ 产物: ${wikiDir}`);
 console.log(`   wiki.json（${blueprint.pages.length} 页）`);

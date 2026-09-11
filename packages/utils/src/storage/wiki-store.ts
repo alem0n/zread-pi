@@ -1,10 +1,10 @@
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage } from '@zread-pi/types';
 import { getProjectRoot, joinPath, ensureDir, writeTextFile, readTextFile } from '../file-io.js';
 import { dirname, join } from 'path';
 import { createVersionSnapshot, generateSnapshotName } from './versioning';
 import { existsSync, mkdirSync, renameSync } from 'fs';
 
-const WIKI_DIR = '.open-zread/wiki';
+const WIKI_DIR = '.zread-pi/wiki';
 const CURRENT_DIR = joinPath(WIKI_DIR, 'current');
 const ARCHIVED_DIR = joinPath(WIKI_DIR, 'archived');
 

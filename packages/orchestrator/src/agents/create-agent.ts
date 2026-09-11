@@ -9,8 +9,8 @@
  * - LLM API 重试由 agent-sdk 的 retryConfig 处理
  */
 
-import { createAgent as CreateAgentSdk, hasZreadProvider, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@open-zread/agent-runtime';
-import { loadConfig, logger } from '@open-zread/utils';
+import { createAgent as CreateAgentSdk, hasZreadProvider, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
+import { loadConfig, logger } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
 
@@ -88,7 +88,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   //   （catalog 认识的 provider 由 pi Models 自行解析凭据，OAuth 也走这条路）。
   const providerKnown = providerId ? hasZreadProvider(providerId) : false;
   if (!model || (!apiKey && !providerKnown)) {
-    throw new Error('LLM configuration incomplete. Please run `open-zread config` to configure.');
+    throw new Error('LLM configuration incomplete. Please run `zread-pi config` to configure.');
   }
 
   logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, 最大轮次: ${maxTurns}, baseURL: ${baseURL}`);

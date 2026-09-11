@@ -17,7 +17,7 @@ function check(name: string, ok: boolean, detail?: string): void {
 	console.log(`${ok ? "  ✅" : "  ❌"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-const fixture = await mkdtemp(join(tmpdir(), "open-zread-fixture-"));
+const fixture = await mkdtemp(join(tmpdir(), "zread-pi-fixture-"));
 // RepoAnalyzer 的既有行为：parseFiles 以 process.cwd() 为根解析相对路径，
 // 因此使用它的工作流必须先切到目标仓库根目录（Orchestrator 也遵循这一约定）。
 process.chdir(fixture);

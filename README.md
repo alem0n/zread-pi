@@ -1,6 +1,6 @@
-# open-zread-pi
+# zread-pi
 
-把 **open_zread 的业务层**（`cli` / `Orchestrator` / `Browse` / `RepoAnalyzer` / `Types`）搬到 **pi 的 agent 内核**（`@earendil-works/pi-ai` + `@earendil-works/pi-agent-core`）之上运行。
+把 **zread-pi 的业务层**（`cli` / `Orchestrator` / `Browse` / `RepoAnalyzer` / `Types`）搬到 **pi 的 agent 内核**（`@earendil-works/pi-ai` + `@earendil-works/pi-agent-core`）之上运行。
 
 > 一句话：**只换运行时内核，业务逻辑一行不改。**
 > 原来的 `packages/agent-sdk`（自研 QueryEngine + 薄重试 + 整文件会话）被 `packages/agent-runtime` 适配层取代，对外仍暴露同名同签名的 `createAgent()` / `createProvider()` / 5 个文件工具 / 同一批类型。
@@ -10,7 +10,7 @@
 ## 目录结构
 
 ```
-open-zread-pi/
+zread-pi/
 ├─ packages/
 │  ├─ agent-runtime/     ← 新：pi 适配层（替代 agent-sdk）
 │  │  ├─ src/agent.ts             createAgent（pi Agent 循环 + 重试编排 + 事件/钩子映射）
@@ -58,7 +58,7 @@ bun run mock:wiki path/to/any/repo   # 也可指定其它仓库
 #    配置界面直接使用 pi-ai 的 Provider 目录与 login（API Key / OAuth），
 #    可以同时登录多个 Provider，并为任意 Provider 添加自定义模型。
 bun run cli config
-bun run cli            # 等价于 open-zread wiki，目标 = 当前目录
+bun run cli            # 等价于 zread-pi wiki，目标 = 当前目录
 
 # -d / --dir：不切换 shell 目录也能对指定仓库生成/浏览文档
 bun run cli --dir fixtures/hello-python          # 相对路径按当前目录解析
@@ -99,7 +99,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `createProvider()`（browse-chat） | pi-ai `Models.completeSimple()` |
 | 配置界面手工维护 provider 列表（LiteLLM 缓存） | pi-ai `builtinProviders()`（40 个内置 Provider）+ `Models.login()`（API Key / OAuth）+ `Models.refresh()`（模型目录刷新） |
 
-业务侧唯一改动：`import ... from '@open-zread/agent-sdk'` → `'@open-zread/agent-runtime'`（22 个文件，纯机械替换）。
+业务侧唯一改动：`import ... from '@zread-pi/agent-sdk'` → `'@zread-pi/agent-runtime'`（22 个文件，纯机械替换）。
 `Orchestrator` 的并发控制（p-limit）、错误隔离、三层 Repo Map 工具、prompt、`wiki.json` 契约、`WritePageTool` 的 Mermaid 校验**全部未改**。
 
 ---
@@ -116,7 +116,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `test:analyzer` | RepoAnalyzer 扫描 + Tree-sitter 解析（未改动包仍可运行） | 5/5 |
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件；模型不产出蓝图时报错 | 7/7 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截；页面未落盘时必须记失败并发出 `page_error`（不再误报完成） | 8/8 |
-| `test:browse` | **「浏览文档」服务器 + pi-tui 浏览页**：静态资源与 API 同端口、SPA fallback、未知 API 404、`close()` 后端口不可连；页面显示「服务器已启动」+ 真实访问地址、ESC 停止；源码无产物时进程内 Vite 兜底（`/api` 代理）；无效 `OPEN_ZREAD_BROWSE_DIST` 直接报错 | 28/28（apps/browse 有 dist 时兜底 4 项自动跳过） |
+| `test:browse` | **「浏览文档」服务器 + pi-tui 浏览页**：静态资源与 API 同端口、SPA fallback、未知 API 404、`close()` 后端口不可连；页面显示「服务器已启动」+ 真实访问地址、ESC 停止；源码无产物时进程内 Vite 兜底（`/api` 代理）；无效 `ZREAD_PI_BROWSE_DIST` 直接报错 | 28/28（apps/browse 有 dist 时兜底 4 项自动跳过） |
 | `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 151 + 16 + 9 + 25 + 19 + 28 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
@@ -127,7 +127,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 目录扫描 → 蓝图 `wiki.json` 落盘 → 并行页面 Agent → `write_page` 落盘，全程不联网、不需要 API Key。
 
 已用测试夹具 `fixtures/hello-python` 验证通过：4 个 Python 源文件 → 4 页 Wiki，`completed=4 failed=0`，mock 请求 10 次。
-（该目录下的 `.open-zread/` 就是生成产物，已 gitignore；真实内容请用 `bun run cli`。）
+（该目录下的 `.zread-pi/` 就是生成产物，已 gitignore；真实内容请用 `bun run cli`。）
 
 ---
 
@@ -189,12 +189,12 @@ apps/cli/src/
 迁移前必须先 `cd` 到目标仓库再运行 CLI。现在入口提供全局选项 `-d, --dir <path>`：
 
 ```bash
-open-zread --dir /path/to/repo        # 默认命令（wiki）
-open-zread wiki --dir /path/to/repo   # 显式子命令写法
-open-zread browse -d /path/to/repo    # 预览站也读这份产物
+zread-pi --dir /path/to/repo        # 默认命令（wiki）
+zread-pi wiki --dir /path/to/repo   # 显式子命令写法
+zread-pi browse -d /path/to/repo    # 预览站也读这份产物
 ```
 
-- 业务层所有路径都以 `process.cwd()` 为根（RepoAnalyzer 扫描、`.open-zread` 落盘、Agent 的 cwd），
+- 业务层所有路径都以 `process.cwd()` 为根（RepoAnalyzer 扫描、`.zread-pi` 落盘、Agent 的 cwd），
   所以实现是在进入 TUI 之前**切一次进程工作目录**（`apps/cli/src/utils/target-dir.ts`），业务层零改动；
   TUI 头部的「目录」行会显示实际生效的绝对路径。
 - 相对路径按「调用时的当前目录」解析；目录不存在或不是目录时**不进入 TUI**，只输出单行错误并以退出码 1 结束。
@@ -211,7 +211,7 @@ open-zread browse -d /path/to/repo    # 预览站也读这份产物
 - **异步加载都能刷到屏幕**：加载态、进度态、保存态、重试倒计时都走 `requestRender()`；`test:tui` 用假终端断言了「加载中 → 列表」「目录完成 → 文章列表」等中间态确实被渲染。
 - **按键立即重绘**：页面按键交给 pi-tui 的聚焦分发（`Screen.handleInput` → `Screen.handleKey`），pi-tui 分发后会自动请求一次立即重绘，页面无需手动 `refresh()`；同时 Kitty 键盘协议的上报松开事件被统一过滤，一次按键只处理一次（此前用原始输入监听器自行转发，改状态后不重绘，需点一下鼠标才看到切换）。
 - **直接进入子路由时先加载 `wiki.json`**：`/wiki/generate`、`/wiki/sync` 的 `onEnter` 会 `await wiki.load()` 再启动流程（否则会误判为「无目录」而重新扫描）。
-- **防止杂散输出花屏**：TUI 期间 `console.*` 被接管并转存到 `~/.zread/logs/open-zread-*.log`（典型来源：provider-registry 同步失败时的 `console.error`），退出时还原（`tui/console-guard.ts`）。
+- **防止杂散输出花屏**：TUI 期间 `console.*` 被接管并转存到 `~/.zread/logs/zread-pi-*.log`（典型来源：provider-registry 同步失败时的 `console.error`），退出时还原（`tui/console-guard.ts`）。
 
 ---
 
@@ -220,7 +220,7 @@ open-zread browse -d /path/to/repo    # 预览站也读这份产物
 ### 1. `apps/browse` 独立安装（历史原因：React 18/19 隔离）
 迁移到 pi-tui 之前，`apps/cli`（Ink 4 + React 18）与 `apps/browse`（React 19 + Vite）混装时，bun 会为 `ink` 的 `react-reconciler` 选到 React 19 变体，导致 CLI 启动即崩：
 `TypeError: undefined is not an object (evaluating 'ReactSharedInternals.ReactCurrentOwner')`。
-因此 **`apps/browse` 不列入根 workspaces**，单独 `bun install`（`bun run browse:install`）。它不引用任何 `@open-zread/*` 包，隔离无副作用。
+因此 **`apps/browse` 不列入根 workspaces**，单独 `bun install`（`bun run browse:install`）。它不引用任何 `@zread-pi/*` 包，隔离无副作用。
 
 > 现状：CLI 已不再依赖 React/Ink，该冲突不再存在；但本次迁移刻意不改动 browse 的安装方式（保持零风险）。如后续要合并，只需把它加回根 `workspaces` 并验证 CLI 启动。
 
@@ -244,7 +244,7 @@ open-zread browse -d /path/to/repo    # 预览站也读这份产物
 
 ### 3. 配置与凭据（config.yaml + auth.json）
 
-配置分两层，均归 open_zread 自己管理：
+配置分两层，均归 zread-pi 自己管理：
 
 - `~/.zread/config.yaml`：非敏感配置。`llm.provider` / `llm.model` 是当前生效的 Provider/模型；
   `llm.providers.<providerId>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型（`models`）与上次选择的模型；
@@ -281,8 +281,8 @@ unknown providerId 仍然回退为 OpenAI 兼容协议（旧实现会直接抛 `
 `packages/repo-analyzer/src/parser/wasm-loader.ts`）：
 
 ```text
-open-zread-v<版本>-<os>-<arch>.zip
-├── open-zread(.exe)
+zread-pi-v<版本>-<os>-<arch>.zip
+├── zread-pi(.exe)
 ├── tree-sitter.wasm
 ├── mappings.wasm
 └── browse/            # 「浏览文档」前端静态资源

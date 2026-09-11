@@ -9,7 +9,7 @@ import {
 	type AssistantMessage,
 } from "@earendil-works/pi-ai";
 
-/** 重试配置（与旧 @open-zread/agent-runtime 完全一致） */
+/** 重试配置（与旧 @zread-pi/agent-runtime 完全一致） */
 export interface RetryConfig {
 	maxRetries: number;
 	baseDelayMs: number;

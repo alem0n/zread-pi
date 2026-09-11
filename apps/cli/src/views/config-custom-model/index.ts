@@ -8,8 +8,8 @@
  */
 
 import { matchesKey } from "@earendil-works/pi-tui";
-import { setZreadCatalogConfig } from "@open-zread/agent-runtime";
-import type { CustomModelConfig } from "@open-zread/types";
+import { setZreadCatalogConfig } from "@zread-pi/agent-runtime";
+import type { CustomModelConfig } from "@zread-pi/types";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";

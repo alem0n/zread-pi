@@ -20,7 +20,7 @@ import {
   loginZreadProvider,
   refreshZreadProviderModels,
   setZreadCatalogConfig,
-} from "@open-zread/agent-runtime";
+} from "@zread-pi/agent-runtime";
 import { barIndicator, computeItemWindow, scrollIndicator } from "../../tui/components/select";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";

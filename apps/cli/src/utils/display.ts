@@ -13,7 +13,7 @@ declare global {
 }
 
 /** 仓库根 package.json 的 name（AGENTS.md §4.4：根 package.json 是唯一版本来源） */
-const ROOT_PACKAGE_NAME = 'open-zread-pi';
+const ROOT_PACKAGE_NAME = 'zread-pi';
 /** 既没注入、也找不到 package.json 时的兜底版本 */
 const FALLBACK_VERSION = '0.0.0-dev';
 
@@ -33,7 +33,7 @@ function readPackageJson(dir: string): { name?: string; version?: string } | nul
 }
 
 /**
- * 从当前模块位置向上查找版本号：优先根 package.json（open-zread-pi），
+ * 从当前模块位置向上查找版本号：优先根 package.json（zread-pi），
  * 找不到时退回最近的 package.json，保证开发模式界面版本与项目版本同步。
  */
 function resolveVersionFromDisk(): string | null {

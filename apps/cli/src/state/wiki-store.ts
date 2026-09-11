@@ -4,8 +4,8 @@
  * 仅负责加载/重载 wiki.json，不包含业务逻辑。
  */
 
-import type { WikiOutput } from "@open-zread/types";
-import { fileExists, getWikiJsonPath, readJsonFile } from "@open-zread/utils";
+import type { WikiOutput } from "@zread-pi/types";
+import { fileExists, getWikiJsonPath, readJsonFile } from "@zread-pi/utils";
 
 export class WikiStore {
   catalog: WikiOutput | null = null;

@@ -8,7 +8,7 @@
  * 注意：SDK 的 usage 已经是累积总量，不需要再累加
  */
 
-import type { ArticleEventPayload, TokenUsage } from '@open-zread/orchestrator';
+import type { ArticleEventPayload, TokenUsage } from '@zread-pi/orchestrator';
 import type {
   CatalogState,
   ArticlesState,

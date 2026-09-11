@@ -1,5 +1,5 @@
 /**
- * FileCredentialStore —— pi-ai CredentialStore 的 open_zread 实现。
+ * FileCredentialStore —— pi-ai CredentialStore 的 zread-pi 实现。
  *
  * 落盘位置：~/.zread/auth.json（与 pi coding-agent 同格式）
  *   { "<providerId>": Credential }
@@ -21,7 +21,7 @@ import type {
   CredentialInfo,
   CredentialStore,
 } from '@earendil-works/pi-ai';
-import { getZreadAuthPath } from '@open-zread/utils';
+import { getZreadAuthPath } from '@zread-pi/utils';
 
 type AuthFileData = Record<string, Credential>;
 

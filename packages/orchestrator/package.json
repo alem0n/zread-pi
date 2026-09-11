@@ -1,5 +1,5 @@
 {
-  "name": "@open-zread/orchestrator",
+  "name": "@zread-pi/orchestrator",
   "version": "0.1.0",
   "private": true,
   "description": "Wiki blueprint generation using Agent orchestration",
@@ -19,10 +19,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
-    "@open-zread/agent-runtime": "workspace:*",
-    "@open-zread/repo-analyzer": "workspace:*",
-    "@open-zread/utils": "workspace:*",
-    "@open-zread/types": "workspace:*",
+    "@zread-pi/agent-runtime": "workspace:*",
+    "@zread-pi/repo-analyzer": "workspace:*",
+    "@zread-pi/utils": "workspace:*",
+    "@zread-pi/types": "workspace:*",
     "p-limit": "^6.1.0",
     "zod": "^3.23.0"
   },

@@ -3,7 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 const LOG_DIR = join(homedir(), '.zread', 'logs');
-const LOG_FILE = join(LOG_DIR, `open-zread-${new Date().toISOString().slice(0, 10)}.log`);
+const LOG_FILE = join(LOG_DIR, `zread-pi-${new Date().toISOString().slice(0, 10)}.log`);
 
 function ensureLogDir(): void {
   if (!existsSync(LOG_DIR)) {

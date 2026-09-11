@@ -1,5 +1,5 @@
 {
-  "name": "@open-zread/utils",
+  "name": "@zread-pi/utils",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@open-zread/types": "workspace:*",
+    "@zread-pi/types": "workspace:*",
     "yaml": "^2.3.0"
   },
   "devDependencies": {
