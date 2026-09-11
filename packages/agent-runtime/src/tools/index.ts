@@ -1,8 +1,13 @@
 /**
- * 文件工具集（与旧 @zread-pi/agent-runtime 同名同行为）
+ * 文件工具集
  *
  * Orchestrator 的三条工作流按名称引用这些工具（Read / Write / Edit / Glob / Grep），
- * 因此这里保持导出的常量名不变，工具实现本身原样复用。
+ * 因此导出常量名保持不变；`Ls` 为本次新增（填补「目录列举」能力缺口）。
+ *
+ * 实现说明（详见 MIGRATION.md §3）：
+ *  - 搜索类（Glob / Grep / Ls）与写入类（Write / Edit）已按上游 pi 的实现重写，
+ *    共享 `truncate` / `file-walk` / `glob-match` / `file-mutation-queue` 等基础设施；
+ *  - 工具名与既有参数名保持向后兼容，新增参数均为可选。
  */
 
 export { FileReadTool } from "./read.js";
@@ -10,6 +15,31 @@ export { FileWriteTool } from "./write.js";
 export { FileEditTool } from "./edit.js";
 export { GlobTool } from "./glob.js";
 export { GrepTool } from "./grep.js";
+export { LsTool } from "./ls.js";
+
+// 共享设施（供其它工具/测试复用）
+export {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	GREP_MAX_LINE_LENGTH,
+	appendToolNotices,
+	byteLimitNotice,
+	formatSize,
+	toTruncationDetails,
+	truncateHead,
+	truncateLine,
+	truncateTail,
+	utf8ByteLength,
+} from "./truncate.js";
+export type { TruncationResult, TruncationOptions } from "./truncate.js";
+export { matchGlobPath, globToRegExp, expandBraces } from "./glob-match.js";
+export { BUILTIN_EXCLUDED_DIRS, MAX_WALK_ENTRIES, isInsideGitRepo, walkFiles } from "./file-walk.js";
+export type { WalkEntry, WalkOptions } from "./file-walk.js";
+export { findSearchBinary, resetSearchBinaryCache } from "./search-binaries.js";
+export { normalizeEditInput } from "./edit.js";
+export { withFileMutationQueue } from "./file-mutation-queue.js";
+export { detectSupportedImageMimeType, encodeBase64 } from "./image.js";
+export { resolveReadPathAsync, resolveToCwd } from "./path-utils.js";
 
 export {
 	defineTool,
@@ -22,3 +52,4 @@ export {
 	getObject,
 	getValue,
 } from "./types.js";
+export type { ToolCallReturn } from "./types.js";

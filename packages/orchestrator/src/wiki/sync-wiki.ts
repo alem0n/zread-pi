@@ -3,7 +3,7 @@
  *
  * 流程：检测变更 → LLM 重新规划 → 产出 SyncDiff
  */
-import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@zread-pi/agent-runtime';
+import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, LsTool } from '@zread-pi/agent-runtime';
 import { scanFiles, parseFiles } from '@zread-pi/repo-analyzer';
 import {
   loadCachedManifest,
@@ -39,6 +39,7 @@ const SYNC_TOOLS = [
   FileEditTool,
   GlobTool,
   GrepTool,
+  LsTool,
 ];
 
 export interface SyncResult {

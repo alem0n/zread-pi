@@ -66,7 +66,7 @@ export type { RuntimeModel, RuntimeModelOptions } from "./pi/runtime-model.js";
 // 工具
 // ---------------------------------------------------------------------------
 
-export { FileReadTool, FileWriteTool, FileEditTool, GlobTool, GrepTool } from "./tools/index.js";
+export { FileReadTool, FileWriteTool, FileEditTool, GlobTool, GrepTool, LsTool } from "./tools/index.js";
 export {
 	defineTool,
 	toApiTool,
@@ -78,6 +78,31 @@ export {
 	getObject,
 	getValue,
 } from "./tools/index.js";
+export type { ToolCallReturn } from "./tools/index.js";
+// 工具层共享设施（截断 / glob / 遍历 / 二进制探测）
+export {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	GREP_MAX_LINE_LENGTH,
+	appendToolNotices,
+	byteLimitNotice,
+	formatSize,
+	toTruncationDetails,
+	truncateHead,
+	truncateLine,
+	truncateTail,
+	utf8ByteLength,
+	matchGlobPath,
+	globToRegExp,
+	expandBraces,
+	BUILTIN_EXCLUDED_DIRS,
+	walkFiles,
+	findSearchBinary,
+	resetSearchBinaryCache,
+	detectSupportedImageMimeType,
+	encodeBase64,
+} from "./tools/index.js";
+export type { TruncationResult, TruncationOptions, WalkEntry, WalkOptions } from "./tools/index.js";
 
 // ---------------------------------------------------------------------------
 // 重试

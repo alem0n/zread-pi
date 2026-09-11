@@ -5,7 +5,8 @@
  *
  * - write_page: Write Wiki page content to file with organized path structure
  *
- * Note: agent-sdk provides GrepTool and GlobTool for code search, no need to duplicate.
+ * Note: agent-runtime provides LsTool / GrepTool / GlobTool for directory listing and code search,
+ * no need to duplicate here.
  */
 
 import { resolve, dirname } from 'path';

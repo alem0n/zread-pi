@@ -51,6 +51,7 @@ import { computeBackoff, isRetryableMessage, sleep, type RetryConfig } from "./r
 import type { ThinkingLevel } from "@zread-pi/types";
 import type {
 	ContentBlock,
+	JsonValue,
 	PermissionMode,
 	SDKMessage,
 	TokenUsage,
@@ -278,12 +279,42 @@ interface ToolBridgeContext {
 	model?: string;
 	providerId?: string;
 	apiType?: ApiType;
+	/** 当前模型是否接受图片输入（决定 Read 是否回传 image 内容块） */
+	supportsImages?: boolean;
 	hooks?: HookConfig;
 	canUseTool?: AgentOptions["canUseTool"];
 }
 
+/** pi 的工具结果内容块形态（与 pi-ai 的 TextContent / ImageContent 对齐）。 */
+type BridgeToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
+/**
+ * 把 ToolResult.content 映射成 pi 的内容块数组。
+ *
+ * 契约扩展：`content` 可以是 `ContentBlockParam[]`（含 image 块），这样 Read 能把图片
+ * 以多模态形式回传给模型；此前非字符串内容会被 JSON.stringify 成文本（图片会变成 base64 垃圾）。
+ */
+function toolResultContent(result: ToolResult): BridgeToolContent[] {
+	if (typeof result.content === "string") {
+		return [{ type: "text", text: result.content }];
+	}
+	const blocks: BridgeToolContent[] = [];
+	for (const block of result.content) {
+		if (block.type === "text") {
+			blocks.push({ type: "text", text: block.text });
+		} else if (block.type === "image" && block.source.type === "base64") {
+			blocks.push({ type: "image", data: block.source.data, mimeType: block.source.media_type });
+		}
+	}
+	if (blocks.length === 0) blocks.push({ type: "text", text: "" });
+	return blocks;
+}
+
+/** 纯文本视图（错误结果必须退化成文本，pi 用抛异常表达工具失败）。 */
 function toolResultToText(result: ToolResult): string {
-	return typeof result.content === "string" ? result.content : JSON.stringify(result.content);
+	return toolResultContent(result)
+		.map((block) => (block.type === "text" ? block.text : `[image ${block.mimeType}]`))
+		.join("\n");
 }
 
 async function runToolHooks(
@@ -334,14 +365,18 @@ function toAgentTool(definition: ToolDefinition, context: ToolBridgeContext): Ag
 				abortSignal: signal,
 				model: context.model,
 				apiType: context.apiType,
+				supportsImages: context.supportsImages,
 			};
 			const result = await definition.call(params as ToolInputParams, toolContext);
-			const text = toolResultToText(result);
 			if (result.is_error) {
 				// pi 的工具以"抛异常"表达失败，错误文本仍会进入模型上下文
-				throw new Error(text);
+				throw new Error(toolResultToText(result));
 			}
-			return { content: [{ type: "text", text }], details: { toolUseId: toolCallId } };
+			return {
+				content: toolResultContent(result),
+				// details 与 content 分离：不会进入模型上下文，供钩子 / UI 消费
+				details: { toolUseId: toolCallId, ...(result.details !== undefined ? { details: result.details } : {}) },
+			};
 		},
 	};
 }
@@ -397,6 +432,11 @@ function toolResultText(content: AssistantMessage["content"] | unknown): string 
 			.map((block) => {
 				if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
 					return String((block as { text?: string }).text ?? "");
+				}
+				// 图片块没有文本表示：给 SDK 事件一个可读占位（图片本体在模型上下文里，不在这里）
+				if (block && typeof block === "object" && (block as { type?: string }).type === "image") {
+					const mediaType = (block as { mimeType?: string }).mimeType ?? "image";
+					return `[image ${mediaType}]`;
 				}
 				return "";
 			})
@@ -629,6 +669,7 @@ class AgentRuntimeImpl implements AgentInstance {
 				model: modelId,
 				providerId: providerIdForContext,
 				apiType: apiTypeForContext,
+				supportsImages: Array.isArray(model.input) ? model.input.includes("image") : undefined,
 				hooks: options.hooks,
 				canUseTool: options.canUseTool,
 			};
@@ -845,12 +886,15 @@ class AgentRuntimeImpl implements AgentInstance {
 						return;
 					}
 					case "tool_execution_end": {
+						const endDetails = (event.result as { details?: Record<string, unknown> } | undefined)?.details;
+						const toolDetails = endDetails && typeof endDetails === "object" ? endDetails.details : undefined;
 						queue.push({
 							type: "tool_result",
 							result: {
 								tool_use_id: event.toolCallId,
 								tool_name: event.toolName,
 								output: toolResultText(event.result?.content),
+								...(toolDetails !== undefined ? { details: toolDetails as JsonValue } : {}),
 							},
 						});
 						return;
