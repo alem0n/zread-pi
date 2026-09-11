@@ -111,6 +111,36 @@ function formatMermaidValidationError(issues: MermaidValidationIssue[]): string 
 }
 
 /**
+ * 按 write_page 的路径规则解析页面输出路径（与工具内拼接规则保持一致）。
+ *
+ * - `file` 含路径分隔符 → 相对 `.zread-pi/wiki` 解析（忽略 `section`）
+ * - `file` + `section` → `.zread-pi/wiki/<section>/<file>`
+ * - 只有 `file` → `.zread-pi/wiki/<file>`
+ * - 没有 `file` → `.zread-pi/wiki/<slug>.md`
+ *
+ * 单独导出，供 generate-wiki 的落盘兜底复用同一套解析规则。
+ */
+export function resolvePageOutputPath(
+  cwd: string,
+  params: { file?: string; section?: string; slug: string },
+): string {
+  const wikiDir = resolve(cwd, '.zread-pi/wiki');
+  const { file, section, slug } = params;
+
+  if (file) {
+    if (file.includes('/') || file.includes('\\')) {
+      return resolve(wikiDir, file);
+    }
+    if (section) {
+      return resolve(wikiDir, section, file);
+    }
+    return resolve(wikiDir, file);
+  }
+
+  return resolve(wikiDir, `${slug}.md`);
+}
+
+/**
  * Write Page Tool
  *
  * Write Wiki page content to the specified file path.
@@ -160,22 +190,7 @@ export const WritePageTool = defineTool({
 
     // Build output path based on file and section
     // Priority: file parameter (with section if needed) > slug fallback
-    let filePath: string;
-    if (file) {
-      // If file contains path separator, use it directly
-      // Otherwise, organize by section
-      if (file.includes('/') || file.includes('\\')) {
-        filePath = resolve(context.cwd, '.zread-pi/wiki', file);
-      } else if (section) {
-        filePath = resolve(context.cwd, '.zread-pi/wiki', section, file);
-      } else {
-        filePath = resolve(context.cwd, '.zread-pi/wiki', file);
-      }
-    } else {
-      // Fallback: use slug if file is not provided
-      const wikiDir = resolve(context.cwd, '.zread-pi/wiki');
-      filePath = resolve(wikiDir, `${slug}.md`);
-    }
+    const filePath = resolvePageOutputPath(context.cwd, { file, section, slug });
 
     // Build YAML frontmatter
     const frontmatter = title

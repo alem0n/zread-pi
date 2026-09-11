@@ -69,6 +69,15 @@ const noWritePage = {
 	level: "Beginner",
 };
 
+/** 故意漏传 file/section（只传 slug），文件会落到 wiki 根，用于验证落盘兜底移回约定位置 */
+const misplacedPage = {
+	slug: "6-misplaced",
+	title: "错位路径",
+	file: "6-misplaced.md",
+	section: "参考",
+	level: "Beginner",
+};
+
 let requests = 0;
 const server = Bun.serve({
 	port: 0,
@@ -80,11 +89,13 @@ const server = Bun.serve({
 		const promptText = JSON.stringify(messages.find((message) => message.role === "user")?.content ?? "");
 		const isBadPage = promptText.includes(badPage.slug);
 		const isNoWritePage = promptText.includes(noWritePage.slug);
+		const isMisplacedPage = promptText.includes(misplacedPage.slug);
 		const page =
 			(pages.find((candidate) => promptText.includes(candidate.slug)) ?? pages[0]) as
 				| (typeof pages)[number]
 				| typeof badPage
-				| typeof noWritePage;
+				| typeof noWritePage
+				| typeof misplacedPage;
 
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream<Uint8Array>({
@@ -96,6 +107,20 @@ const server = Bun.serve({
 					write(chunk(baseChunk({}, "stop")));
 				} else if (!hasToolResult) {
 					write(chunk(baseChunk({ role: "assistant", content: "" }, null)));
+					// misplacedPage 刻意漏传 file/section：模型把页面写到 .zread-pi/wiki/<slug>.md
+					const writeArgs = isMisplacedPage
+						? {
+							slug: page.slug,
+							title: page.title,
+							content: `# ${page.title}\n\n由 pi 驱动生成。\n`,
+						}
+						: {
+							slug: page.slug,
+							file: page.file,
+							section: page.section,
+							title: page.title,
+							content: isBadPage ? badPageContent : `# ${page.title}\n\n由 pi 驱动生成。\n`,
+						};
 					write(
 						chunk(
 							baseChunk(
@@ -107,13 +132,7 @@ const server = Bun.serve({
 											type: "function",
 											function: {
 												name: "write_page",
-												arguments: JSON.stringify({
-													slug: page.slug,
-													file: page.file,
-													section: page.section,
-													title: page.title,
-													content: isBadPage ? badPageContent : `# ${page.title}\n\n由 pi 驱动生成。\n`,
-												}),
+												arguments: JSON.stringify(writeArgs),
 											},
 										},
 									],
@@ -172,7 +191,7 @@ const progress: string[] = [];
 const events: string[] = [];
 console.log("▶ generateWikiContent({ maxConcurrent: 3 }) …");
 const result = await generateWikiContent({
-	pages: [...pages, badPage, noWritePage],
+	pages: [...pages, badPage, noWritePage, misplacedPage],
 	maxConcurrent: 3,
 	onEvent: (event) => {
 		events.push(`${event.type}:${event.slug}`);
@@ -198,8 +217,8 @@ check(
 );
 check("frontmatter 标题被写入", contents[0].includes('title: "概览"'), contents[0].split("\n")[1] ?? "");
 check(
-	"并发任务：3 页成功，2 页因未落盘被计为失败",
-	result.completed === 3 && result.failed === 2,
+	"并发任务：4 页成功，2 页因未落盘被计为失败",
+	result.completed === 4 && result.failed === 2,
 	`completed=${result.completed} failed=${result.failed} (${result.results.map((entry) => `${entry.slug}:${entry.success}`).join(", ")})`,
 );
 check(
@@ -221,6 +240,27 @@ check(
 		events.includes(`page_start:${noWritePage.slug}`) &&
 		!events.includes(`page_complete:${noWritePage.slug}`),
 	result.results.find((entry) => entry.slug === noWritePage.slug)?.error ?? "(无结果)",
+);
+
+// ---- 落盘兜底：write_page 写错路径时移回 wiki.json 约定位置 ----
+const misplacedTarget = join(repo, ".zread-pi", "wiki", "参考", "6-misplaced.md");
+const misplacedWrongPath = join(repo, ".zread-pi", "wiki", "6-misplaced.md");
+const misplacedContent = await readFile(misplacedTarget, "utf-8").catch(() => "");
+check(
+	"write_page 写错路径时被兜底移动到 wiki.json 约定位置",
+	misplacedContent.includes("由 pi 驱动生成"),
+	misplacedContent.slice(0, 18) || "(目标文件不存在)",
+);
+check(
+	"兜底成功后计为完成并发出 page_complete（不再误报失败）",
+	events.includes(`page_complete:${misplacedPage.slug}`) &&
+		result.results.some((entry) => entry.slug === misplacedPage.slug && entry.success === true),
+	result.results.find((entry) => entry.slug === misplacedPage.slug)?.error ??
+		`outputPath=${result.results.find((entry) => entry.slug === misplacedPage.slug)?.outputPath}`,
+);
+check(
+	"错误路径不再残留文件",
+	(await readFile(misplacedWrongPath, "utf-8").catch(() => "")) === "",
 );
 check("每个页面都发生了真实模型调用（>=8 次请求）", requests >= 8, `requests=${requests}`);
 
