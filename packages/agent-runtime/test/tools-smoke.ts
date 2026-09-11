@@ -22,11 +22,21 @@
  */
 
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createModels } from '@earendil-works/pi-ai'
 import type { Context as PiContext, Model as PiModel, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai/providers/faux'
+import {
+  getManagedBinaryPath,
+  loadConfig,
+  notifyToolsChanged,
+  onToolsChanged,
+  RG_TOOL,
+  saveConfig,
+  setBinaryProbeForTesting,
+} from '@zread-pi/utils'
 import {
   FileEditTool,
   FileReadTool,
@@ -152,6 +162,15 @@ async function createFixture(): Promise<string> {
 
 const fixture = await createFixture()
 const ctx = context(fixture)
+
+// 外部工具配置来自 ~/.zread-pi/config.yaml，测试必须隔离（否则会读到开发机的真实配置）
+const toolsHome = await mkdtemp(join(tmpdir(), 'zread-pi-tools-home-'))
+const managedDir = join(toolsHome, 'bin')
+process.env.HOME = toolsHome
+process.env.USERPROFILE = toolsHome
+process.env.ZREAD_PI_TOOLS_DIR = managedDir
+delete process.env.ZREAD_PI_RG_PATH
+delete process.env.ZREAD_PI_FD_PATH
 
 try {
   // -------------------------------------------------------------------------
@@ -618,8 +637,44 @@ try {
     }),
   )
   check('桥接层：image 内容块真的进入模型上下文', sawImageInContext)
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ 10. 外部工具启用开关 → 搜索工具二进制解析')
+  // -------------------------------------------------------------------------
+  // 造一个「托管安装」的 rg，并把探测替换成基于文件是否存在的假实现
+  await mkdir(managedDir, { recursive: true })
+  await writeFile(getManagedBinaryPath(RG_TOOL), 'fake', 'utf-8')
+  setBinaryProbeForTesting((path: string) =>
+    existsSync(path) ? { path, source: 'system' as const, version: '14.1.1' } : undefined,
+  )
+  resetSearchBinaryCache()
+  check('启用时：findSearchBinary 命中托管目录', findSearchBinary('rg') === getManagedBinaryPath(RG_TOOL), String(findSearchBinary('rg')))
+
+  // 停用（配置界面的 /config/tools 写的就是这个字段）
+  const toolsConfig = await loadConfig()
+  toolsConfig.tools = { ...toolsConfig.tools, rg: { enabled: false } }
+  await saveConfig(toolsConfig)
+  resetSearchBinaryCache()
+  check('停用后：findSearchBinary 返回 null（Grep 退回纯 JS 兜底）', findSearchBinary('rg') === null)
+
+  // 重新启用后必须立刻可用（配置界面保存会触发 notifyToolsChanged）
+  const reEnabledConfig = await loadConfig()
+  reEnabledConfig.tools = { ...reEnabledConfig.tools, rg: { enabled: true } }
+  await saveConfig(reEnabledConfig)
+  notifyToolsChanged()
+  check('重新启用并广播变更后：缓存失效、立刻可用', findSearchBinary('rg') === getManagedBinaryPath(RG_TOOL), String(findSearchBinary('rg')))
+
+  const seenChanges: number[] = []
+  const unsubscribe = onToolsChanged(() => seenChanges.push(Date.now()))
+  notifyToolsChanged()
+  unsubscribe()
+  notifyToolsChanged()
+  check('onToolsChanged 订阅/取消订阅生效', seenChanges.length === 1, `events=${seenChanges.length}`)
+
+  setBinaryProbeForTesting(undefined)
 } finally {
   await rm(fixture, { recursive: true, force: true })
+  await rm(toolsHome, { recursive: true, force: true })
 }
 
 const failed = checks.filter((entry) => !entry.ok)

@@ -41,7 +41,51 @@ export {
   MIN_MAX_TURNS,
   MAX_MAX_TURNS,
   normalizeMaxTurns,
+  normalizeToolsConfig,
 } from './config/index.js';
+
+// 外部工具（注册表 / 安装器 / 归档解包），配置界面 /config/tools 与 agent-runtime 共用
+export {
+  TOOL_REGISTRY,
+  RG_TOOL,
+  FD_TOOL,
+  listTools,
+  getToolSpec,
+  toolIds,
+  archiveKindOf,
+} from './tools/registry.js';
+export type { ToolSpec, ToolId } from './tools/registry.js';
+export {
+  DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  DEFAULT_NETWORK_TIMEOUT_MS,
+  getManagedBinDir,
+  getManagedBinaryPath,
+  getManagedBinUsage,
+  getToolStatus,
+  getToolStatuses,
+  installTool,
+  isToolEnabled,
+  notifyToolsChanged,
+  onToolsChanged,
+  probeBinary,
+  resolveLatestVersion,
+  resolveToolBinary,
+  setBinaryProbeForTesting,
+  ToolInstallError,
+  uninstallTool,
+} from './tools/installer.js';
+export type {
+  BinaryProbe,
+  InstallToolOptions,
+  ResolvedToolBinary,
+  ToolInstallPhase,
+  ToolInstallProgress,
+  ToolSource,
+  ToolState,
+  ToolStatus,
+} from './tools/installer.js';
+export { ArchiveError, extractArchive, parseTarEntries, parseZipEntries, safeEntryPath } from './tools/archive.js';
+export type { ArchiveKind, ExtractedEntry } from './tools/archive.js';
 
 // Cache
 export {

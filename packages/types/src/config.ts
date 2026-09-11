@@ -103,6 +103,30 @@ export interface AgentConfig {
 }
 
 /**
+ * ToolConfig - 单个外部工具的配置
+ *
+ * 用户只表达「是否允许使用」这一意图；
+ * 「装没装、装在哪、什么版本」属于运行时探测到的事实（见 `@zread-pi/utils` 的 tools/installer），
+ * 不写进 config.yaml，避免配置文件与实际文件系统状态不一致。
+ */
+export interface ToolConfig {
+  /**
+   * 是否允许使用该外部工具。
+   *
+   * `false` = 即使系统里装了也只是不用（搜索类工具会退回内置纯 JS 实现）。
+   */
+  enabled: boolean;
+}
+
+/**
+ * ToolsConfig - 外部工具配置表（以工具 id 为键）
+ *
+ * 新增工具只需在 `@zread-pi/utils` 的工具注册表里登记，这里无需改类型：
+ * 未登记的键会被忽略，未出现的键按注册表默认值（enabled=true）补齐。
+ */
+export type ToolsConfig = Record<string, ToolConfig>;
+
+/**
  * AppConfig - Configuration
  */
 export interface AppConfig {
@@ -111,6 +135,8 @@ export interface AppConfig {
   llm: LLMConfig;
   /** Agent 运行时配置（旧 config.yaml 缺少该段时由 validateConfig 补齐默认值） */
   agent: AgentConfig;
+  /** 外部工具（rg / fd …）的启用开关，配置界面 /config/tools 维护 */
+  tools: ToolsConfig;
   concurrency: {
     max_concurrent: number;
     max_retries: number;

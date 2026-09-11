@@ -3,8 +3,9 @@ import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel } from '@zread-pi/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
 import { ensureDir } from '../file-io';
+import { toolIds } from '../tools/registry';
 
 /**
  * Agent 每次运行的最大轮次（turn）配置
@@ -50,6 +51,29 @@ export function normalizeThinkingLevel(value: unknown): ThinkingLevel {
   return isThinkingLevel(value) ? value : 'off';
 }
 
+/**
+ * 归一化外部工具配置。
+ *
+ * 规则：以 `@zread-pi/utils` 的工具注册表为准——
+ *  - 已登记的工具有效值缺失时补 `enabled: true`（旧 config.yaml 无需迁移）；
+ *  - 未登记/格式错误的键直接忽略（不会污染配置）；
+ *  - 新增工具时只需在注册表（tools/registry.ts）里登记，这里自动跟上。
+ */
+export function normalizeToolsConfig(value: unknown): ToolsConfig {
+  const raw =
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const result: ToolsConfig = {};
+  for (const id of toolIds()) {
+    const entry = raw[id];
+    const enabled =
+      entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>).enabled
+        : undefined;
+    result[id] = { enabled: typeof enabled === 'boolean' ? enabled : true };
+  }
+  return result;
+}
+
 /** ~/.zread-pi 目录（延迟计算，测试可以覆盖 HOME/USERPROFILE） */
 export function getZreadDir(): string {
   return join(homedir(), '.zread-pi');
@@ -92,6 +116,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   agent: {
     max_turns: DEFAULT_MAX_TURNS,
   },
+  tools: normalizeToolsConfig(undefined),
   concurrency: {
     max_concurrent: 1,
     max_retries: 0,  // 默认不重试，用户可配置
@@ -258,6 +283,7 @@ export function validateConfig(raw: unknown): AppConfig {
     agent: {
       max_turns: normalizeMaxTurns(agent.max_turns),
     },
+    tools: normalizeToolsConfig(config.tools),
     concurrency: {
       max_concurrent: concurrency.max_concurrent as number,
       max_retries: concurrency.max_retries as number,

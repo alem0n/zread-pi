@@ -12,10 +12,11 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:tools && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:context && bun run test:tui",
+    "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:tools && bun run test:installer && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:context && bun run test:tui",
     "test:catalog": "bun run packages/agent-runtime/test/provider-catalog-smoke.ts",
     "test:agent": "bun run packages/agent-runtime/test/smoke-agent.ts",
     "test:tools": "bun run packages/agent-runtime/test/tools-smoke.ts",
+    "test:installer": "bun run packages/utils/test/tool-installer.ts",
     "test:context": "bun run packages/agent-runtime/test/context-compaction.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
     "test:provider": "bun run packages/agent-runtime/test/provider-http-smoke.ts",
@@ -32,6 +33,7 @@
     "test:browse": "bun run apps/cli/test/browse-server.ts",
     "test:tui": "bun run apps/cli/test/smoke-tui.ts && bun run apps/cli/test/render-all-routes.ts && bun run apps/cli/test/real-run-check.ts && bun run apps/cli/test/cli-target-dir.ts && bun run apps/cli/test/mock-generate.ts && bun run test:browse",
     "mock:wiki": "bun run tools/mock-wiki-run.ts",
+    "tools:install": "bun run tools/tool-install.ts",
     "build:binary": "bun run tools/build-binary.ts"
   },
   "devDependencies": {

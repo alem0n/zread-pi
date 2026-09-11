@@ -1,69 +1,49 @@
 /**
- * rg / fd 探测（**只探测，不下载**）
+ * rg / fd 探测（**只探测，不静默下载**）
  *
  * 决策（见 AGENTS.md §1.1「搜索工具的外部二进制策略」）：
- * 上游 pi 的 `utils/tools-manager.ts` 会在缺失时从 GitHub Releases 自动下载并解包
- * （tar.gz / zip、chmod、Windows 用 System32\tar.exe 或 PowerShell Expand-Archive）。
- * 本仓库**刻意不做自动下载**：
- *  1. 运行期静默联网 + 解包可执行文件，对「生成文档」这种长任务来说失败面太大；
- *  2. 解包分支依赖 tar/unzip/PowerShell，是三平台上最容易出问题的一段（上游为此写了 4 个回退）；
- *  3. 缺失时的行为可完全由纯 JS 兜底实现覆盖（见 file-walk.ts），不牺牲能力，只牺牲一点速度。
+ *  - 探测顺序与安装/卸载由 `@zread-pi/utils` 的工具层统一负责
+ *    （`resolveToolBinary`：托管目录 `~/.zread-pi/bin` → 系统 PATH → 用户停用时直接不用）；
+ *  - 缺失时本仓库的搜索工具会退回纯 JS 实现（见 file-walk.ts），能力不降级；
+ *  - **只有用户在配置界面 /config/tools 里显式点安装才会联网下载**，
+ *    agent 运行期不做任何隐式下载。
  *
- * 因此策略是「探测已有 → 用系统二进制；没有 → 用纯 JS 实现」，并在工具描述里说明。
- * 允许通过环境变量显式指定路径（打包/离线场景、测试用）：
- *   ZREAD_PI_RG_PATH / ZREAD_PI_FD_PATH
+ * 这里只做一层进程内缓存（工具热路径上会反复查询），并在工具可用性变化时失效。
  */
 
-import { spawnSync } from "node:child_process";
+import { onToolsChanged, resolveToolBinary, getToolSpec } from "@zread-pi/utils";
 
 export type SearchBinaryName = "rg" | "fd";
 
-/** 系统命令名候选：Debian 系把 fd 命名为 fdfind。 */
-const CANDIDATE_COMMANDS: Record<SearchBinaryName, string[]> = {
-	rg: ["rg"],
-	fd: ["fd", "fdfind"],
-};
-
-const ENV_OVERRIDES: Record<SearchBinaryName, string> = {
-	rg: "ZREAD_PI_RG_PATH",
-	fd: "ZREAD_PI_FD_PATH",
-};
-
 const cache = new Map<SearchBinaryName, string | null>();
+let subscribed = false;
 
-function commandWorks(command: string): boolean {
-	const result = spawnSync(command, ["--version"], { stdio: "pipe", timeout: 5_000, windowsHide: true });
-	if (result.error) return false;
-	return result.status === 0;
+function ensureSubscription(): void {
+	if (subscribed) return;
+	subscribed = true;
+	// 安装 / 卸载 / 启用状态变化后清空缓存，同一个进程内立即可用（配置界面装完即可搜索）
+	onToolsChanged(() => resetSearchBinaryCache());
 }
 
 /**
  * 返回可用的二进制（命令名或绝对路径），不可用时返回 null。
- * 结果会被缓存（一次进程内只探测一次）。
+ * 结果会被缓存，直到 `notifyToolsChanged()` / `resetSearchBinaryCache()` 触发。
  */
 export function findSearchBinary(name: SearchBinaryName): string | null {
+	ensureSubscription();
 	if (cache.has(name)) return cache.get(name) ?? null;
 
-	const override = process.env[ENV_OVERRIDES[name]];
-	if (override && override.trim().length > 0) {
-		const candidate = override.trim();
-		const resolved = commandWorks(candidate) ? candidate : null;
-		cache.set(name, resolved);
-		return resolved;
+	if (!getToolSpec(name)) {
+		cache.set(name, null);
+		return null;
 	}
-
-	let resolved: string | null = null;
-	for (const candidate of CANDIDATE_COMMANDS[name]) {
-		if (commandWorks(candidate)) {
-			resolved = candidate;
-			break;
-		}
-	}
-	cache.set(name, resolved);
-	return resolved;
+	const resolved = resolveToolBinary(name);
+	const value = resolved ? resolved.path : null;
+	cache.set(name, value);
+	return value;
 }
 
-/** 清空探测缓存（测试用：模拟二进制缺失/存在）。 */
+/** 清空探测缓存（安装/卸载后、或测试模拟二进制缺失/存在时使用）。 */
 export function resetSearchBinaryCache(): void {
 	cache.clear();
 }
