@@ -10,6 +10,7 @@
  *  4. Glob  ：相对路径输出、.gitignore、node_modules 排除、上限提示、两条路径一致
  *  5. Grep  ：content / files_with_matches / count、glob 过滤、大小写、字面量、上下文、
  *             上限、非法正则、.gitignore、两条路径一致
+ *  5b. git 仓库内的 .gitignore 分支：两种搜索路径都要与 fd/rg 的 git-aware 默认行为一致
  *  6. Read  ：offset 1-based、limit 续读提示、截断提示、目录报错点名 Ls、
  *             magic number 图片识别（支持/不支持图片的模型）、二进制与空文件
  *  7. Write ：建目录、created 标记、同文件并发写不丢更新
@@ -132,6 +133,15 @@ async function createFixture(): Promise<string> {
   await writeFile(join(root, 'notes.pdf'), Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02, 0x03]))
   await writeFile(join(root, 'empty.txt'), '', 'utf-8')
   await writeFile(join(root, 'many.txt'), Array.from({ length: 4200 }, (_, index) => `line ${index}`).join('\n'), 'utf-8')
+
+  // 「在 git 仓库内」的分支：(fd/rg 默认只在 git 仓库内应用 .gitignore，
+  // 上游为此写了 `--no-require-git` 的反向分支，这里造一个带 .git 的搜索根来覆盖它)
+  await mkdir(join(root, 'gitlike', '.git'), { recursive: true })
+  await mkdir(join(root, 'gitlike', 'skipdir'), { recursive: true })
+  await writeFile(join(root, 'gitlike', '.gitignore'), 'ignored.txt\nskipdir/\n', 'utf-8')
+  await writeFile(join(root, 'gitlike', 'kept.txt'), 'KEEP_TOKEN\n', 'utf-8')
+  await writeFile(join(root, 'gitlike', 'ignored.txt'), 'IGNORED_TOKEN\n', 'utf-8')
+  await writeFile(join(root, 'gitlike', 'skipdir', 'nested.txt'), 'IGNORED_TOKEN\n', 'utf-8')
 
   // 「并发编辑」用的工作文件
   const concurrencyDir = join(root, 'concurrency')
@@ -331,6 +341,31 @@ try {
     'Grep 两条路径的 .gitignore 行为一致（都跳过 dist/ 与 *.log）',
     systemGrepIgnored.includes('No matches found') && fallbackGrepIgnored.includes('No matches found'),
     `system=${systemGrepIgnored.split('\n')[0]} fallback=${fallbackGrepIgnored.split('\n')[0]}`,
+  )
+
+  // ===== git 仓库内（存在 .git）的 .gitignore 语义：fd/rg 与 JS 兜底必须一致 =====
+  const inRepoGlob = normalizeLines(textOf(await callTool(GlobTool, { pattern: '**/*.txt', path: 'gitlike' }, ctx)))
+  const inRepoGlobFallback = await withoutBinaries(async () =>
+    normalizeLines(textOf(await callTool(GlobTool, { pattern: '**/*.txt', path: 'gitlike' }, ctx))),
+  )
+  check(
+    'Grep/Glob 在 git 仓库内仍应用同目录 .gitignore',
+    JSON.stringify(inRepoGlob) === JSON.stringify(['kept.txt']) && JSON.stringify(inRepoGlobFallback) === JSON.stringify(['kept.txt']),
+    `system=${inRepoGlob.join(',')} fallback=${inRepoGlobFallback.join(',')}`,
+  )
+  const inRepoGrep = textOf(await callTool(GrepTool, { pattern: 'IGNORED_TOKEN', path: 'gitlike' }, ctx))
+  const inRepoGrepFallback = await withoutBinaries(async () =>
+    textOf(await callTool(GrepTool, { pattern: 'IGNORED_TOKEN', path: 'gitlike' }, ctx)),
+  )
+  check(
+    '在 git 仓库内：ignore 命中的文件不被 Grep 搜到（两条路径一致）',
+    inRepoGrep.includes('No matches found') && inRepoGrepFallback.includes('No matches found'),
+    `system=${inRepoGrep.split('\n')[0]}`,
+  )
+  check(
+    '在 git 仓库内：未 ignore 的文件正常命中（两条路径一致）',
+    textOf(await callTool(GrepTool, { pattern: 'KEEP_TOKEN', path: 'gitlike' }, ctx)).includes('kept.txt:1:') &&
+      (await withoutBinaries(async () => textOf(await callTool(GrepTool, { pattern: 'KEEP_TOKEN', path: 'gitlike' }, ctx)))).includes('kept.txt:1:'),
   )
 
   // -------------------------------------------------------------------------

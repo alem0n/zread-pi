@@ -117,7 +117,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | --- | --- | --- |
 | `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout | 32/32 |
 | `test:agent` | pi 循环、工具执行、钩子、流式事件、429 重试、usage、thinkingLevel 透传、maxTurns | 11/11 |
-| `test:tools` | 工具层专项：截断设施、glob 语义（与 fd `--glob` 对齐）、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与 image 块穿过桥接层进入模型上下文 | 88/88 |
+| `test:tools` | 工具层专项：截断设施、glob 语义（与 fd `--glob` 对齐）、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与 image 块穿过桥接层进入模型上下文 | 91/91 |
 | `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 收尾提示 + 宽限轮（最后一轮/宽限轮输出 → success，不收敛 → `error_max_turns`，`graceTurns=0` = 旧行为） | 35/35 |
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |

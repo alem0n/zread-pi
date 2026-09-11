@@ -299,9 +299,10 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 
 ### 9.5 验证
 
-- `bun run test:tools`（新增，88 项）：截断设施、glob 语义、Ls / Glob / Grep / Read / Write / Edit 的行为与错误文案、
-  **rg/fd 与纯 JS 兜底两条路径结果一致**、同文件 16 路并发编辑不丢更新、`details` 与 image 块真的穿过桥接层进入模型上下文。
-- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 88/88、agent:http 7/7、provider 5/5、
+- `bun run test:tools`（新增，91 项）：截断设施、glob 语义、Ls / Glob / Grep / Read / Write / Edit 的行为与错误文案、
+  **rg/fd 与纯 JS 兜底两条路径结果一致**（同时在「非 git 仓库」与「git 仓库内」两种搜索根上覆盖
+  `.gitignore` 语义）、同文件 16 路并发编辑不丢更新、`details` 与 image 块真的穿过桥接层进入模型上下文。
+- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 91/91、agent:http 7/7、provider 5/5、
   analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 全套）；`bun run mock:wiki`（completed=4 failed=0）。
 
 ### 9.6 未决项（需要人类拍板）
