@@ -299,11 +299,11 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 
 ### 9.5 验证
 
-- `bun run test:tools`（新增，91 项）：截断设施、glob 语义、Ls / Glob / Grep / Read / Write / Edit 的行为与错误文案、
+- `bun run test:tools`（新增，95 项）：截断设施、glob 语义、Ls / Glob / Grep / Read / Write / Edit 的行为与错误文案、
   **rg/fd 与纯 JS 兜底两条路径结果一致**（同时在「非 git 仓库」与「git 仓库内」两种搜索根上覆盖
   `.gitignore` 语义）、同文件 16 路并发编辑不丢更新、`details` 与 image 块真的穿过桥接层进入模型上下文。
-- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 91/91、agent:http 7/7、provider 5/5、
-  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 全套）；`bun run mock:wiki`（completed=4 failed=0）。
+- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 95/95、installer 55/55、agent:http 7/7、provider 5/5、
+  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 181+19+9+25+19+24）；`bun run mock:wiki`（completed=4 failed=0）。
 
 ### 9.6 未决项（需要人类拍板）
 
@@ -315,3 +315,62 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
    大图直接按原字节发送。若真机出现「图片过大被 provider 拒绝」，再补缩放。
 4. **`Grep` 的 `type` 参数**：旧实现有 `type`（rg `--type ts`）；上游无该参数，本轮用 `glob` 覆盖该场景，
    若模型习惯用 `type` 可再加回（映射到 `--type` 或扩展名 glob）。
+
+---
+
+## 10. 外部工具安装与配置界面（第七步：rg / fd）
+
+### 10.1 目标
+
+第六步把搜索工具改成「有 rg/fd 就用、没有就纯 JS 兜底」，但用户无法在应用内获得这两个二进制。
+本步补齐「安装」这一环，并且**把安装的决定权交给用户**：agent 运行期仍然绝不隐式联网，
+安装只能在配置界面（或等价的命令行入口）里由用户显式触发。
+
+### 10.2 分层
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 注册表（扩展点） | `packages/utils/src/tools/registry.ts` | `ToolSpec`：id / 仓库 / 资产名规则 / 版本探测 / 用途 / 校验文件。**新增工具只需加一条**，配置界面、安装器、状态探测、CLI 入口都会自动跟上 |
+| 安装器 | `packages/utils/src/tools/installer.ts` | `resolveToolBinary` / `getToolStatus`（同步探测：环境变量 → 托管目录 → 系统 PATH，用户停用即不用）、`installTool`（解析版本 → 下载 → 校验指纹 → 解包 → 落盘 → `--version` 校验）、`uninstallTool`、`onToolsChanged`（变更广播，用于让 agent-runtime 的探测缓存失效） |
+| 归档解包 | `packages/utils/src/tools/archive.ts` | 纯 JS 的 `.tar.gz`（ustar + GNU LongName）与 `.zip`（stored / deflate）解析，含 zip-slip 防护 |
+| 配置 | `packages/types` + `packages/utils/src/config` | `tools.<id>.enabled`（旧 `config.yaml` 缺省 `true`，零迁移）；`normalizeToolsConfig` 以注册表为准合并 |
+| 运行时 | `packages/agent-runtime/src/tools/search-binaries.ts` | 薄缓存层，委托 `resolveToolBinary`，并订阅 `onToolsChanged` 失效缓存（同一进程内装完即可用） |
+| TUI | `apps/cli/src/views/config-tools/` | 列表页（总体就绪进度条 + 每工具状态）+ 详情页（字段展示、安装/卸载/启用停用、**安装进度条**） |
+| CLI 入口 | `tools/tool-install.ts`（`bun run tools:install`） | 无头环境：列状态 / 安装（可指定版本）/ 卸载，与界面同一份实现 |
+
+### 10.3 与上游 `utils/tools-manager.ts` 的差异（有意为之）
+
+| 项 | 上游 | 本仓库 |
+| --- | --- | --- |
+| 触发时机 | agent 启动时静默下载缺失工具 | **仅用户显式触发**（配置界面 / `tools:install`）；运行期只探测 |
+| 解包 | 依次尝试 `tar` / `unzip` / `unzip+tar` / `System32\tar.exe` / PowerShell `Expand-Archive` | **纯 JS**（`zlib.gunzipSync` / `inflateRawSync` + 自写容器解析），无外部命令依赖，三平台一致 |
+| 完整性 | 不校验 | ripgrep 发布 `<asset>.sha256` 时**先校验指纹再解包**；fd 不发布则跳过（不做自签名的伪验证）；安装后必须能执行 `--version`，否则删除半成品并报错 |
+| 进度 | 仅状态文案（`onStatus`） | 结构化进度回调（阶段 + 百分比 + 已下载字节），界面用进度条 + 百分比 + 字节展示；同时打开终端原生忙指示（OSC 9;4） |
+| 安装位置 | `getBinDir()` | `~/.zread-pi/bin`（可用 `ZREAD_PI_TOOLS_DIR` 覆盖；与 `~/.zread-pi/parsers` 同级） |
+| 镜像 | 无 | `ZREAD_PI_TOOLS_BASE_URL` 可指向目录结构与 GitHub Releases 一致的内网镜像 |
+
+### 10.4 资产名踩坑记录（真实 release 对过）
+
+- **fd 的资产名带 `v` 前缀**：`fd-v10.5.0-x86_64-pc-windows-msvc.zip`；
+- **ripgrep 不带**：`ripgrep-15.2.0-x86_64-pc-windows-msvc.zip`；
+- 两者不能共用同一个命名模板（首次真机验证时 fd 下载 404 就是这个原因，现已固化为 `test:installer` 的断言）。
+
+### 10.5 验证
+
+- `bun run test:installer`（新增，55 项，离线）：注册表与资产名、归档解包（含 zip-slip 与长路径）、
+  配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：阶段齐全 / 百分比单调 / 指纹不匹配拒绝解包 /
+  校验失败不留下半成品）、卸载、启用开关。
+- `bun run test:tools`（95 项）：追加「启用开关 → `findSearchBinary` → 纯 JS 兜底」的联动与缓存失效断言。
+- `bun run test:tui`（181 项）：新增工具列表页与详情页的布局、导航、启用/停用/保存、进度条字符断言；
+  `render-all-routes` 覆盖到 19 条路由（无超宽行）。
+- **真机验证**（本次手动执行，非 CI）：对真实 GitHub Releases 安装并执行成功——
+  `ripgrep 15.2.0 (rev e89fff89ac)`、`fd 10.5.0`；卸载后状态回落到 `system`/`missing`。
+
+### 10.6 未决项
+
+1. **代理 / 自签证书环境**：首次真机验证时遇到过 `unknown certificate verification error`（该环境经代理，
+   Bun 的 TLS 校验偶发失败，重试即恢复）。目前只能靠镜像变量或手动安装绕过；后续可考虑读取
+   `HTTPS_PROXY` / 自定义 CA 的显式支持。
+2. **无增量进度与断点续传**：下载失败需重来（资产只有 1~2MB，暂不做 Range 续传）。
+3. **不支持 zip64 / 7z / xz 资产**：当前两个工具的资产不需要；新增工具若用这些格式需扩展 `archive.ts`。
+4. **未做版本升级提示的自动检查**：详情页只在用户点安装时才解析 latest（避免 UI 打开即联网）。

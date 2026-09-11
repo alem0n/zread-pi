@@ -24,7 +24,7 @@ zread-pi/
 │  │  └─ test/                    冒烟测试（离线 faux + 本地 mock HTTP + provider + catalog）
 │  ├─ orchestrator/      ← 保留：编排层（工具/提示词/并发/同步，仅把 import 指向 agent-runtime）
 │  ├─ repo-analyzer/     ← 保留：Tree-sitter 分析（未改）
-│  ├─ utils/             ← 保留：配置/cache/wiki 落盘/版本快照（未改）
+│  ├─ utils/             ← 保留：配置 / cache / wiki 落盘 / 版本快照 / 外部工具注册表与安装器
 │  └─ types/             ← 保留：共享类型（provider/model 配置结构有新增字段）
 ├─ apps/
 │  ├─ cli/               ← 保留：TUI（**pi-tui 实现**，不再依赖 Ink/React；仅 browse-chat 的 provider 改为 pi 实现）
@@ -72,8 +72,7 @@ bun run cli browse --dir /path/to/repo           # 预览站也看该目录的�
 #   源码运行且未构建 → 进程内自动启动 Vite dev server（/api 代理到 API 端口）。
 #   启动失败（端口占用/资源缺失）时页面直接显示原因，不再静默显示一个打不开的地址。
 
-# 5) 预览站（独立 React 19 环境，见「工程细节 1」）
-bun run browse:install      # 首次：安装 apps/browse 依赖
+# 5) 预览站（独立 React 19 环境，见「工程细节 1」）bun run browse:install      # 首次：安装 apps/browse 依赖
 bun run browse:build        # 可选：构建静态产物（打包 CLI / 免 Vite 预览）
 bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 ```
@@ -114,9 +113,23 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 
 - **不引入 `pi-coding-agent`**：上游工具按「复制 + 改写」移植，`vendor/pi/**` 零改动；
   `truncateHead`/`truncateLine` 等纯函数直接复用 vendor 已导出的实现。
-- **rg/fd 只探测、不下载**：缺失时走纯 JS 兜底（`file-walk.ts` + `glob-match.ts`），
+- **rg/fd 探测常驻、安装显式**：agent 运行期只探测，缺失时走纯 JS 兜底（`file-walk.ts` + `glob-match.ts`）；
   测试对同一条查询同时跑两条路径并断言结果一致。
-- 细节与未决项（`Bash`/`PowerShell` 未迁移等）见 `MIGRATION.md` §9。
+- 细节与未决项见 `MIGRATION.md` §9。
+
+### 外部工具安装（`/config/tools`）
+
+| 能力 | 说明 |
+|---|---|
+| 列表页 | 总体就绪进度条 + 每个工具的状态（系统已安装 / 已由 zread-pi 安装 / 未安装 / 已停用）与版本、用途 |
+| 详情页 | 状态、版本、路径、用途、安装目录；Enter 安装/重装（**进度条 + 百分比 + 字节数 + 阶段**）、`d` 卸载（只删托管副本）、`t` 启用/停用（写入 `tools.<id>.enabled`） |
+| 无头入口 | `bun run tools:install`（列状态）、`bun run tools:install -- fd`、`bun run tools:install -- rg 15.2.0`、`-- --remove` |
+| 托管目录 | `~/.zread-pi/bin`（`ZREAD_PI_TOOLS_DIR` 可覆盖）；下载源可用 `ZREAD_PI_TOOLS_BASE_URL` 指向内网镜像 |
+| 安全 | 只从固定仓库 HTTPS 下载；ripgrep 提供 `.sha256` 时先校验指纹再解包（fd 不提供则跳过）；解包带 zip-slip 防护；安装后必须能执行 `--version` 才算成功 |
+| 扩展 | 新增工具只需在 `packages/utils/src/tools/registry.ts` 加一条 `ToolSpec`，界面 / 安装器 / 探测自动跟上 |
+
+> 真机验证（手动执行）：对真实 GitHub Releases 安装成功并可直接运行——`ripgrep 15.2.0 (rev e89fff89ac)`、`fd 10.5.0`。
+> 离线回归：`bun run test:installer`（55/55，本地 mock Releases + 注入探测）。
 
 ---
 
@@ -126,7 +139,8 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 |---|---|---|
 | `test:catalog` | **pi-ai Provider 目录**：内置 Provider 列表、api_key 登录写 `auth.json`、多 Provider 同时配置、自定义模型合并、未内置 Provider 注册、runtime model 元数据、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout 隔离 | 32/32 |
 | `test:agent` | pi Agent 循环、工具执行、钩子、流式事件、**429 重试**、usage 映射、thinkingLevel → reasoning 透传、maxTurns | 11/11 |
-| `test:tools` | **工具层专项**：截断设施、glob 语义、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与图片内容块穿过桥接层进入模型上下文 | 91/91 |
+| `test:tools` | **工具层专项**：截断设施、glob 语义、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与图片内容块穿过桥接层进入模型上下文、外部工具启用开关 → 二进制解析联动 | 95/95 |
+| `test:installer` | **外部工具安装**：注册表与资产名（对过真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关 | 55/55 |
 | `test:context` | **上下文压缩 + 优雅停止**：`transformContext` 调用 pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续成功；单个巨大 turn（压缩无法腾出空间）与 `compaction.enabled=false` 时产出 `error_context_full`；`maxTurns` 收尾提示 + 宽限轮：模型最后一轮/宽限轮输出 → success，仍不收敛 → `error_max_turns`，`graceTurns=0` 回到旧行为 | 35/35 |
 | `test:agent:http` | 真实 HTTP/SSE 路径：baseURL + apiKey 注入、增量 tool_call 参数解析、第二轮请求 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径）、system 透传、usage | 5/5 |
@@ -134,7 +148,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件；模型不产出蓝图时报错 | 7/7 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截；页面未落盘时必须记失败并发出 `page_error`（不再误报完成） | 8/8 |
 | `test:browse` | **「浏览文档」服务器 + pi-tui 浏览页**：静态资源与 API 同端口、SPA fallback、未知 API 404、`close()` 后端口不可连；页面显示「服务器已启动」+ 真实访问地址、ESC 停止；源码无产物时进程内 Vite 兜底（`/api` 代理）；无效 `ZREAD_PI_BROWSE_DIST` 直接报错 | 28/28（apps/browse 有 dist 时兜底 4 项自动跳过） |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 151 + 16 + 9 + 25 + 19 + 28 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页 + 外部工具页（安装/卸载/启停 + 进度条）+ 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 181 + 19 + 9 + 25 + 19 + 24 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
