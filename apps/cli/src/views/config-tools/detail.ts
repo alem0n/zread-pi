@@ -33,7 +33,7 @@ import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { clampLine, wrapStyled } from "../../tui/text-layout";
 import { theme } from "../../theme";
-import { toolStateColor, toolStateHint, toolStateLabel } from "./status";
+import { toolStateColor, toolStateHint, toolStateLabel, toolVersionLabel } from "./status";
 
 type ActionStatus = "idle" | "installing" | "uninstalling" | "saving";
 
@@ -100,7 +100,7 @@ export default class ConfigToolDetailPage extends Screen {
 
     lines.push("");
     lines.push(field(t("tools.fieldState"), toolStateLabel(t, status), toolStateColor(status)));
-    lines.push(field(t("tools.fieldVersion"), status.version ?? t("tools.notInstalled")));
+    lines.push(field(t("tools.fieldVersion"), toolVersionLabel(t, status)));
     lines.push(field(t("tools.fieldPath"), status.path ?? "-"));
     lines.push(field(t("tools.fieldUsedBy"), t(`tools.usage.${status.id}`) || status.usedBy.join(" / ")));
     lines.push(field(t("tools.fieldManagedDir"), getManagedBinDir()));
@@ -138,6 +138,30 @@ export default class ConfigToolDetailPage extends Screen {
     }
 
     lines.push("", ...wrapStyled(style(toolStateHint(t, status), { dim: true }), width));
+
+    // 版本探测诊断：识别不出/与台账不一致时给出依据（避免“为什么没有版本号”变成黑盒）
+    if ((!status.version || status.versionMismatch) && status.state !== "missing") {
+      if (status.versionProbeArgs && status.versionProbeArgs.length > 0) {
+        lines.push(style(`${t("tools.probeArgs")}: ${status.versionProbeArgs.join(" ")}`, { dim: true }));
+      }
+      if (status.versionOutput) {
+        lines.push(...wrapStyled(style(`${t("tools.probeOutput")}: ${status.versionOutput}`, { dim: true }), width));
+      }
+    }
+    if (status.versionMismatch) {
+      lines.push(
+        ...wrapStyled(
+          style(
+            t("tools.versionMismatch", {
+              expected: status.versionMismatch.expected,
+              actual: status.versionMismatch.actual,
+            }),
+            { color: "yellow" },
+          ),
+          width,
+        ),
+      );
+    }
 
     if (this.action === "installing") {
       lines.push("", style(t("tools.installing"), { color: "yellow" }));
@@ -222,7 +246,13 @@ export default class ConfigToolDetailPage extends Screen {
         this.action = "idle";
         this.progress = null;
         this.app.setBusy(false);
-        this.message = { text: `${t("tools.installDone")} · ${status.version ?? ""}`.trim(), ok: true };
+        // 版本探测识别不出时，用台账里的安装版本兜底（不把它当成失败）
+        const message = status.version
+          ? `${t("tools.installDone")} · ${status.version}`
+          : status.installedVersion
+            ? t("tools.installDoneNoVersion", { version: status.installedVersion })
+            : t("tools.installDone");
+        this.message = { text: message, ok: true };
         this.refresh();
       })
       .catch((error: unknown) => {

@@ -97,7 +97,11 @@ export default class ConfigToolsPage extends Screen {
     const indicator = barIndicator(isSelected);
     const labelStyle = isSelected ? { bold: true, color: "white" } : { bold: false, color: "gray" };
     const stateColor = toolStateColor(status);
-    const versionSuffix = status.version ? ` · ${status.version}` : "";
+    const versionSuffix = status.version
+      ? ` · ${status.version}`
+      : status.installedVersion && status.state !== "missing"
+        ? ` · ${status.installedVersion}`
+        : "";
     // usage 文案已经点名了它驱动哪个 Agent 工具（如「Grep（文件内容搜索）」），
     // 不再拼 usedBy，避免出现「Grep · Grep（文件内容搜索）」这种重复
     const usage = t(`tools.usage.${status.id}`) || status.usedBy.join(" / ");

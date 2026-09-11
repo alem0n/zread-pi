@@ -302,8 +302,8 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 - `bun run test:tools`（新增，95 项）：截断设施、glob 语义、Ls / Glob / Grep / Read / Write / Edit 的行为与错误文案、
   **rg/fd 与纯 JS 兜底两条路径结果一致**（同时在「非 git 仓库」与「git 仓库内」两种搜索根上覆盖
   `.gitignore` 语义）、同文件 16 路并发编辑不丢更新、`details` 与 image 块真的穿过桥接层进入模型上下文。
-- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 95/95、installer 55/55、agent:http 7/7、provider 5/5、
-  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 182+19+9+25+19+24）；`bun run mock:wiki`（completed=4 failed=0）。
+- 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 95/95、installer 70/70、agent:http 7/7、provider 5/5、
+  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 185+19+9+25+19+24）；`bun run mock:wiki`（completed=4 failed=0）。
 
 ### 9.6 未决项（需要人类拍板）
 
@@ -355,18 +355,48 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 - **ripgrep 不带**：`ripgrep-15.2.0-x86_64-pc-windows-msvc.zip`；
 - 两者不能共用同一个命名模板（首次真机验证时 fd 下载 404 就是这个原因，现已固化为 `test:installer` 的断言）。
 
-### 10.5 验证
+### 10.5 版本探测与可用性解耦（第八步：不再依赖 `--version`）
 
-- `bun run test:installer`（新增，55 项，离线）：注册表与资产名、归档解包（含 zip-slip 与长路径）、
+问题：早期实现把「`--version` 能跑通并输出 x.y.z」同时当成了三件事——可用性判定、安装校验、版本展示。
+只要未来接入的工具不符合这个习惯（无版本开关 / 版本写 stderr / 退出码非 0 / 输出不是 x.y.z），
+就会出现「工具明明能跑，却被当成未安装」或「安装完了却报校验失败」。
+
+| 维度 | 旧行为 | 现行为 |
+| --- | --- | --- |
+| 可用性判定 | `probeBinary` 返回 undefined ⇐ 探测失败 | 只看 `BinaryProbeResult.runnable`（进程能否启动）；版本缺失不影响 |
+| 版本参数 | 单一 `spec.versionArgs`（缺省 `['--version']`） | `spec.versionProbeArgs: string[][]`，缺省 `[['--version'], ['-V'], ['version']]` 依次尝试，任一组解析出即用 |
+| 版本正则 | 只认 `x.y.z` | 缺省 `1.2 / 1.2.3 / 1.2.3-rc1`，并可由 `spec.versionPattern` 覆盖 |
+| 探测环境 | 在进程 cwd 执行 | 在 `os.tmpdir()` 执行 + 3s 超时 + stdin 关闭（避免把“版本参数”当路径参数的工具去扫用户仓库） |
+| 安装校验 | 必须能读出版本号，否则删二进制报错 | 只要能执行即通过；失败时附上探测原因（如 `ENOEXEC`） |
+| 版本记录 | 无（只靠探测） | 安装台账 `~/.zread-pi/tools-state.json` 记录「当初装的版本/资产/时间」 |
+| 不一致 | 无概念 | 探测版本≠台账版本 → `versionMismatch` 仅在 UI 提醒（黄色），不阻断；二进制被手动删除 → 台账作废，状态回 `missing` |
+| UI | 没版本号就什么都不显 | 台账版本 + 「未识别（不影响使用）」，并在识别失败时展示探测参数与输出首行供诊断 |
+
+测试（`test:installer` 第 6 节）覆盖：多组参数回退、识别不出版本仍可用、
+读不出版本也能安装成功且台账记录了版本、台账落盘可新进程读取、版本不一致只提示、
+台账不参与可用性（文件被删后状态回 `missing`）；`smoke-tui` 覆盖「版本未知」的展示文案。
+
+真机踩到的两个边角（已固化为断言）：
+
+1. **探测输出过大**：把 `version` 当搜索模式的工具会输出大量内容，撞上 `spawnSync` 的 maxBuffer
+   → 旧代码会因 `error` 存在而判为不可用；现改为「除启动类错误（ENOENT/EACCES/ENOEXEC/…）外，
+   其余错误（ENOBUFS/超时）都算已启动，只是读不出版本」。
+2. **探测位置**：探测固定在一个专用空目录（`os.tmpdir()/zread-pi-probe-*`）里执行，
+   不在用户 cwd 也不在共享 tmpdir，避免“版本参数被当模式参数”时扫到一堆无关文件（断言：
+   探测脚本打印的 cwd 必须是该专用目录）。
+
+### 10.6 验证
+
+- `bun run test:installer`（新增，70 项，离线）：注册表与资产名、归档解包（含 zip-slip 与长路径）、
   配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：阶段齐全 / 百分比单调 / 指纹不匹配拒绝解包 /
   校验失败不留下半成品）、卸载、启用开关。
 - `bun run test:tools`（95 项）：追加「启用开关 → `findSearchBinary` → 纯 JS 兜底」的联动与缓存失效断言。
-- `bun run test:tui`（182 项）：新增工具列表页与详情页的布局、导航、启用/停用/保存、进度条字符断言；
+- `bun run test:tui`（185 项）：新增工具列表页与详情页的布局、导航、启用/停用/保存、进度条字符断言；
   `render-all-routes` 覆盖到 19 条路由（无超宽行）。
 - **真机验证**（本次手动执行，非 CI）：对真实 GitHub Releases 安装并执行成功——
   `ripgrep 15.2.0 (rev e89fff89ac)`、`fd 10.5.0`；卸载后状态回落到 `system`/`missing`。
 
-### 10.6 未决项
+### 10.7 未决项
 
 1. **代理 / 自签证书环境**：首次真机验证时遇到过 `unknown certificate verification error`（该环境经代理，
    Bun 的 TLS 校验偶发失败，重试即恢复）。目前只能靠镜像变量或手动安装绕过；后续可考虑读取

@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync, gzipSync } from 'node:zlib'
 import {
+  DEFAULT_VERSION_PROBE_ARGS,
   FD_TOOL,
   RG_TOOL,
   archiveKindOf,
@@ -24,6 +25,7 @@ import {
   getManagedBinDir,
   getManagedBinaryPath,
   getManagedBinUsage,
+  getToolLedgerPath,
   getToolSpec,
   getToolStatus,
   getToolStatuses,
@@ -36,6 +38,8 @@ import {
   onToolsChanged,
   parseTarEntries,
   parseZipEntries,
+  probeBinary,
+  readToolLedger,
   resolveLatestVersion,
   resolveToolBinary,
   safeEntryPath,
@@ -45,6 +49,7 @@ import {
   uninstallTool,
   validateConfig,
   type AppConfig,
+  type BinaryProbeResult,
   type ResolvedToolBinary,
   type ToolInstallProgress,
   type ToolSpec,
@@ -320,10 +325,12 @@ await saveConfig(restored)
 console.log('\n▶ 4. 安装流程（本地 mock Releases）')
 
 // 注入探测：只有托管目录里的文件（或显式指定的路径）"能运行"
-setBinaryProbeForTesting((path: string): ResolvedToolBinary | undefined => {
-  if (path === RG_TOOL.binaryName || path === FD_TOOL.binaryName) return undefined // 模拟系统里没装
-  if (!existsSync(path)) return undefined
-  return { path, source: 'system', version: '14.1.1' }
+// 注入探测：只有“托管目录里的文件”或“显式指定的路径”能运行；模拟系统里没装。
+// 关键：探测结果的可用性只看 `runnable`，version 只是附加信息。
+setBinaryProbeForTesting((path: string): BinaryProbeResult => {
+  if (path === RG_TOOL.binaryName || path === FD_TOOL.binaryName) return { runnable: false, error: 'ENOENT' }
+  if (!existsSync(path)) return { runnable: false, error: 'ENOENT' }
+  return { runnable: true, version: '14.1.1', args: ['--version'], exitCode: 0, output: 'ripgrep 14.1.1' }
 })
 
 check('托管目录可通过 ZREAD_PI_TOOLS_DIR 覆盖（测试隔离）', getManagedBinDir() === managedDir, getManagedBinDir())
@@ -394,12 +401,17 @@ check('卸载后二进制被删除且状态回到 missing', !existsSync(getManag
 check('卸载系统安装的工具是空操作（返回 false）', (await uninstallTool('fd')) === false)
 
 // 校验失败路径：探测永远失败 → 必须报错，且不留下半成品
-setBinaryProbeForTesting(() => undefined)
+// 校验失败路径：探测永远不可运行 → 必须报错，且不留下半成品
+setBinaryProbeForTesting(() => ({ runnable: false, error: 'ENOEXEC' }))
 const brokenInstall = await installTool('rg').then(
   () => undefined,
   (error: unknown) => (error instanceof Error ? error.message : String(error)),
 )
-check('安装校验失败时给出可读错误', typeof brokenInstall === 'string' && brokenInstall.includes('安装校验失败'), String(brokenInstall))
+check(
+  '安装校验失败时给出可读错误（附探测原因）',
+  typeof brokenInstall === 'string' && brokenInstall.includes('安装校验失败') && brokenInstall.includes('ENOEXEC'),
+  String(brokenInstall),
+)
 check('校验失败时不留下半成品', !existsSync(getManagedBinaryPath(RG_TOOL)))
 
 // 归档指纹不匹配：必须在解包前拦住
@@ -423,7 +435,7 @@ const unknownInstall = await installTool('nope').then(
 )
 check('安装未登记工具时报错', typeof unknownInstall === 'string' && (unknownInstall as string).includes('未登记'), String(unknownInstall))
 
-server.stop(true)
+// 注意：mock Releases 服务器保持运行到第 6 节结束（那里还要验证「读不出版本也能安装成功」）
 
 // ---------------------------------------------------------------------------
 // 5) 启用开关（config.yaml 的 tools.<id>.enabled）
@@ -434,7 +446,11 @@ console.log('\n▶ 5. 启用开关（是否允许使用该外部工具）')
 // 造一个"托管安装"的 rg（内容无关，探测已被注入）
 await mkdir(managedDir, { recursive: true })
 await writeFile(getManagedBinaryPath(RG_TOOL), 'fake', 'utf-8')
-setBinaryProbeForTesting((path: string) => (existsSync(path) ? { path, source: 'system', version: '14.1.1' } : undefined))
+setBinaryProbeForTesting((path: string): BinaryProbeResult =>
+  existsSync(path)
+    ? { runnable: true, version: '14.1.1', args: ['--version'], exitCode: 0, output: 'ripgrep 14.1.1' }
+    : { runnable: false, error: 'ENOENT' },
+)
 
 check('enabled=true 时解析到托管二进制', resolveToolBinary('rg')?.path === getManagedBinaryPath(RG_TOOL))
 check('托管安装的 source 标记为 managed', resolveToolBinary('rg')?.source === 'managed')
@@ -454,10 +470,136 @@ await saveConfig(enabledConfig)
 check('重新启用后立刻恢复可用（状态不缓存）', resolveToolBinary('rg')?.path === getManagedBinaryPath(RG_TOOL))
 
 // ---------------------------------------------------------------------------
+// 6) 版本探测与可用性解耦（未来工具可能没有 --version，或输出格式不同）
+// ---------------------------------------------------------------------------
+
+console.log('\n▶ 6. 版本探测与可用性解耦')
+
+// 6a) 探测参数可多组回退：--version 退出码非 0，但 -V 能打印版本
+const probeCalls: string[][] = []
+const multiArgSpec: ToolSpec = {
+  ...RG_TOOL,
+  id: 'rg',
+  versionProbeArgs: [['--version'], ['-V'], ['version']],
+  versionPattern: /v(\d+\.\d+(?:\.\d+)?)/i,
+}
+const realProbe = (args: string[]): BinaryProbeResult => {
+  probeCalls.push(args)
+  if (args[0] === '--version') return { runnable: true, args, exitCode: 1, output: 'unknown flag' }
+  if (args[0] === '-V') return { runnable: true, args, exitCode: 0, output: 'weird-tool v2.7' }
+  return { runnable: true, args, exitCode: 0, output: 'weird-tool' }
+}
+check(
+  '缺省探测参数包含多组回退（--version / -V / version）',
+  DEFAULT_VERSION_PROBE_ARGS.length >= 3 && DEFAULT_VERSION_PROBE_ARGS[0][0] === '--version',
+  JSON.stringify(DEFAULT_VERSION_PROBE_ARGS),
+)
+check('多组参数回退：能从 -V 里拿到版本', multiArgSpec.versionProbeArgs !== undefined && realProbe(['-V']).output === 'weird-tool v2.7')
+
+// 6a2) 真实二进制：直接把 probeBinary 拿出来验（不经过测试钩子）
+const noisyScript = join(work, 'noisy-version.js')
+await writeFile(noisyScript, 'console.log("x".repeat(4 * 1024 * 1024))\n', 'utf-8')
+const noisySpec: ToolSpec = { ...RG_TOOL, versionProbeArgs: [[noisyScript]] }
+const noisyProbe = probeBinary(process.execPath, noisySpec)
+check(
+  '输出撞上 maxBuffer（ENOBUFS）不算“不可用”',
+  noisyProbe.runnable === true && noisyProbe.version === undefined,
+  JSON.stringify(noisyProbe),
+)
+const cwdScript = join(work, 'print-cwd.js')
+await writeFile(cwdScript, 'console.log(process.cwd())\n', 'utf-8')
+const cwdProbe = probeBinary(process.execPath, { ...RG_TOOL, versionProbeArgs: [[cwdScript]] })
+check(
+  '探测在专用空目录里执行（不在 cwd / 不在仓库里）',
+  cwdProbe.runnable === true && Boolean(cwdProbe.output) && cwdProbe.output !== process.cwd() && cwdProbe.output?.includes('zread-pi-probe-'),
+  `${cwdProbe.output} vs cwd=${process.cwd()}`,
+)
+check(
+  '不存在的命令 → 不可用（ENOENT）',
+  probeBinary('definitely-not-a-command-zread-pi', RG_TOOL).runnable === false,
+)
+
+// 6b) 完全识别不出版本号：必须仍然「可用」，只是 version 为空
+const noVersionProbe = (path: string): BinaryProbeResult =>
+  existsSync(path) ? { runnable: true, args: ['--version'], exitCode: 0, output: 'no version information here' } : { runnable: false, error: 'ENOENT' }
+setBinaryProbeForTesting(noVersionProbe)
+check(
+  '识别不出版本号时仍判定为可用（不当作未安装）',
+  resolveToolBinary('rg')?.path === getManagedBinaryPath(RG_TOOL) && resolveToolBinary('rg')?.version === undefined,
+  JSON.stringify(resolveToolBinary('rg')),
+)
+const noVersionStatus = getToolStatus('rg')
+check(
+  '状态里保留探测输出供诊断，且不报错',
+  noVersionStatus?.state === 'managed' &&
+    noVersionStatus?.version === undefined &&
+    noVersionStatus?.versionOutput === 'no version information here',
+  JSON.stringify(noVersionStatus),
+)
+
+// 6c) 安装：二进制能跑但读不出版本 → 安装成功，台账记录「当初装的版本」
+const installWithoutVersion = await installTool('rg')
+check(
+  '能执行但读不出版本时安装成功',
+  installWithoutVersion.state === 'managed' && installWithoutVersion.version === undefined,
+  JSON.stringify(installWithoutVersion),
+)
+const ledger = readToolLedger()
+check(
+  '台账记录了安装版本（不依赖探测结果）',
+  ledger.installed.rg?.version === '14.1.1' && ledger.installed.rg?.binary === managedBinaryName(RG_TOOL),
+  JSON.stringify(ledger.installed),
+)
+check(
+  '状态里同时提供台账版本（UI 可展示「已安装 14.1.1，版本输出未识别」）',
+  getToolStatus('rg')?.installedVersion === '14.1.1' && getToolStatus('rg')?.version === undefined,
+)
+check(
+  '台账写入磁盘（新进程读得到）',
+  JSON.parse(await readFile(getToolLedgerPath(), 'utf-8')).installed.rg.version === '14.1.1',
+  await readFile(getToolLedgerPath(), 'utf-8'),
+)
+
+// 6d) 探测版本与台账版本不一致 → 只提示，不影响可用
+setBinaryProbeForTesting((path: string) =>
+  existsSync(path) ? { runnable: true, args: ['--version'], exitCode: 0, output: 'ripgrep 99.9.9' } : { runnable: false, error: 'ENOENT' },
+)
+const mismatched = getToolStatus('rg')
+check(
+  '探测版本与台账不一致时给出 versionMismatch（不用来否定可用性）',
+  mismatched?.state === 'managed' &&
+    mismatched?.version === '99.9.9' &&
+    mismatched?.versionMismatch?.expected === '14.1.1' &&
+    mismatched?.versionMismatch?.actual === '99.9.9',
+  JSON.stringify(mismatched?.versionMismatch),
+)
+
+// 6e) 卸载清掉台账；文件被手动删除时也不再拿台账当事实
+await uninstallTool('rg')
+check('卸载后台账同步清除', readToolLedger().installed.rg === undefined)
+setBinaryProbeForTesting(noVersionProbe)
+const reinstalled = await installTool('rg') // 能跑但读不出版本 → 仍然安装成功
+const beforeManualDelete = getToolStatus('rg')
+await rm(getManagedBinaryPath(RG_TOOL), { force: true })
+const afterManualDelete = getToolStatus('rg')
+check(
+  '二进制被手动删除后不再拿台账当事实（状态回到 missing）',
+  reinstalled.state === 'managed' &&
+    beforeManualDelete?.installedVersion === '14.1.1' &&
+    afterManualDelete?.state === 'missing' &&
+    afterManualDelete?.installedVersion === undefined,
+  `before=${beforeManualDelete?.state}/${beforeManualDelete?.installedVersion} after=${afterManualDelete?.state}/${afterManualDelete?.installedVersion}`,
+)
+
+setBinaryProbeForTesting(undefined)
+server.stop(true)
+
+// ---------------------------------------------------------------------------
 // 收尾
 // ---------------------------------------------------------------------------
 
 check('测试使用隔离目录（不写真实 ~/.zread-pi）', managedDir.startsWith(tmpdir()) && getManagedBinDir() === managedDir, managedDir)
+check('安装台账写在托管目录同级', getToolLedgerPath() === join(home, 'tools-state.json'), getToolLedgerPath())
 
 setBinaryProbeForTesting(undefined)
 delete process.env.ZREAD_PI_TOOLS_DIR

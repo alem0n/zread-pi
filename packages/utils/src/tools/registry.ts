@@ -28,11 +28,20 @@ export interface ToolSpec {
   repo: string
   /** release tag 前缀（'v' 或 ''） */
   tagPrefix: string
-  /** 探测版本的参数 */
-  versionArgs: string[]
-  /** 从 `--version` 输出里提取版本号（缺省用通用 x.y.z 正则） */
+  /**
+   * 版本探测：按顺序尝试的参数组合。
+   *
+   * 缺省 `[['--version'], ['-V'], ['version']]`——不同工具的习惯差异很大
+   * （`-V` / `-v` / `version` 子命令都有），且有的工具压根没有版本开关。
+   * **探测失败不影响「工具是否可用」的判定**：只要进程能启动即视为可用，
+   * 版本号只是 UI 上的附加信息（见 installer.probeBinary）。
+   */
+  versionProbeArgs?: string[][]
+  /** 从探测输出里提取版本号（缺省：宽松匹配 1.2 / 1.2.3 / v1.2.3-rc1 / 2024.01.2） */
   versionPattern?: RegExp
-  /** 该工具驱动哪些 Agent 工具（UI 展示与文档用） */
+  /**
+   * 该工具驱动哪些 Agent 工具（UI 展示与文档用）
+   */
   usedBy: string[]
   /** 工具的用途说明（i18n key 后缀，见 i18n 的 tools.usage.<id>） */
   usageKey: string
@@ -68,8 +77,7 @@ export const RG_TOOL: ToolSpec = {
   systemBinaryNames: ['rg'],
   repo: 'BurntSushi/ripgrep',
   tagPrefix: '',
-  versionArgs: ['--version'],
-  versionPattern: /ripgrep\s+(\d+\.\d+\.\d+)/i,
+  versionPattern: /ripgrep\s+(\d+(?:\.\d+)+(?:[-+][\w.]+)?)/i,
   usedBy: ['Grep'],
   usageKey: 'rg',
   envPathVar: 'ZREAD_PI_RG_PATH',
@@ -91,8 +99,7 @@ export const FD_TOOL: ToolSpec = {
   systemBinaryNames: ['fd', 'fdfind'],
   repo: 'sharkdp/fd',
   tagPrefix: 'v',
-  versionArgs: ['--version'],
-  versionPattern: /\bfd\s+(\d+\.\d+\.\d+)/i,
+  versionPattern: /\bfd\s+(\d+(?:\.\d+)+(?:[-+][\w.]+)?)/i,
   usedBy: ['Glob'],
   usageKey: 'fd',
   envPathVar: 'ZREAD_PI_FD_PATH',

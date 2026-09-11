@@ -950,6 +950,36 @@ console.log("▶ TUI 冒烟测试");
   );
   checkContains("工具详情页 Footer", detailText, "Enter 安装/重装");
 
+  // 版本探测不到时不能显示成「未安装」（否则会被误解为工具不可用）
+  const toolsStatusModule = await import("../src/views/config-tools/status");
+  const fakeStatus = {
+    id: "rg",
+    displayName: "ripgrep",
+    state: "managed" as const,
+    usedBy: ["Grep"],
+    enabled: true,
+    managed: true,
+    installable: true,
+    installedVersion: "15.2.0",
+  };
+  const label = (key: string): string => key;
+  check(
+    "版本未知时展示「未识别（不影响使用）」而不是未安装",
+    toolsStatusModule.toolVersionLabel(label, fakeStatus).includes("tools.versionUnknown"),
+    toolsStatusModule.toolVersionLabel(label, fakeStatus),
+  );
+  check(
+    "版本未知但有安装台账时仍展示已安装版本",
+    toolsStatusModule.toolVersionLabel(label, fakeStatus).startsWith("15.2.0"),
+    toolsStatusModule.toolVersionLabel(label, fakeStatus),
+  );
+  check(
+    "版本与台账不一致时给出提示",
+    toolsStatusModule
+      .toolVersionLabel(label, { ...fakeStatus, version: "9.9.9", versionMismatch: { expected: "15.2.0", actual: "9.9.9" } })
+      .includes("tools.versionMismatch"),
+  );
+
   // t：停用（写当前配置，不落盘）
   terminal.send("t");
   await settle(60);

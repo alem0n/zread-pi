@@ -207,6 +207,13 @@ export interface TranslationKeys {
     fieldManagedDir: string;
     fieldEnabled: string;
     notInstalled: string;
+    /** 版本未知（探测不到版本号，不影响使用） */
+    versionUnknown: string;
+    /** 台账版本与探测版本不一致时的提示 */
+    versionMismatch: string;
+    /** 版本探测输出（诊断用） */
+    probeOutput: string;
+    probeArgs: string;
     managedHint: string;
     systemHint: string;
     missingHint: string;
@@ -223,6 +230,7 @@ export interface TranslationKeys {
     /** 动作与结果 */
     installing: string;
     installDone: string;
+    installDoneNoVersion: string;
     installFailed: string;
     uninstallDone: string;
     uninstallNothing: string;

@@ -32,8 +32,17 @@ const [toolId, version] = positional
 if (!toolId) {
   console.log(`外部工具状态（安装目录：${getManagedBinDir()}）`)
   for (const status of getToolStatuses()) {
-    const detail = [status.state, status.version, status.path].filter(Boolean).join(' · ')
+    // 版本展示：优先用探测结果；识别不出时回退到安装台账（不把“读不出版本”当成不可用）
+    const version = status.version
+      ? status.version
+      : status.installedVersion
+        ? `${status.installedVersion}(未识别)`
+        : undefined
+    const detail = [status.state, version, status.path].filter(Boolean).join(' · ')
     console.log(`  ${status.id.padEnd(3)} ${status.displayName.padEnd(10)} ${detail}`)
+    if (status.versionMismatch) {
+      console.log(`      ⚠ 台账版本 ${status.versionMismatch.expected}，实际探测到 ${status.versionMismatch.actual}`)
+    }
   }
   console.log('\n用法：bun run tools:install -- <rg|fd> [版本] [--remove]')
   process.exit(0)
@@ -70,7 +79,7 @@ try {
       }
     },
   })
-  console.log(`已安装 ${status.id} ${status.version ?? ''} → ${status.path}`)
+  console.log(`已安装 ${status.id} ${status.version ?? status.installedVersion ?? '(版本未识别)'} → ${status.path}`)
 } catch (error) {
   console.error(`安装失败：${error instanceof Error ? error.message : String(error)}`)
   process.exit(1)

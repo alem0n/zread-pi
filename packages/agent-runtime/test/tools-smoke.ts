@@ -36,6 +36,7 @@ import {
   RG_TOOL,
   saveConfig,
   setBinaryProbeForTesting,
+  type BinaryProbeResult,
 } from '@zread-pi/utils'
 import {
   FileEditTool,
@@ -644,8 +645,10 @@ try {
   // 造一个「托管安装」的 rg，并把探测替换成基于文件是否存在的假实现
   await mkdir(managedDir, { recursive: true })
   await writeFile(getManagedBinaryPath(RG_TOOL), 'fake', 'utf-8')
-  setBinaryProbeForTesting((path: string) =>
-    existsSync(path) ? { path, source: 'system' as const, version: '14.1.1' } : undefined,
+  setBinaryProbeForTesting((path: string): BinaryProbeResult =>
+    existsSync(path)
+      ? { runnable: true, version: '14.1.1', args: ['--version'], exitCode: 0, output: 'ripgrep 14.1.1' }
+      : { runnable: false, error: 'ENOENT' },
   )
   resetSearchBinaryCache()
   check('启用时：findSearchBinary 命中托管目录', findSearchBinary('rg') === getManagedBinaryPath(RG_TOOL), String(findSearchBinary('rg')))

@@ -19,19 +19,13 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, rmSync, createWriteStream } from 'node:fs'
+import { chmodSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import {
-  archiveKindOf,
-  getToolSpec,
-  listTools,
-  type ToolId,
-  type ToolSpec,
-} from './registry.js'
+import { archiveKindOf, getToolSpec, listTools, type ToolId, type ToolSpec } from './registry.js'
 import { extractArchive } from './archive.js'
 import { loadConfigSync } from '../config/index.js'
 
@@ -50,14 +44,101 @@ export function getManagedBinaryPath(spec: ToolSpec): string {
   return join(getManagedBinDir(), spec.binaryName + (process.platform === 'win32' ? '.exe' : ''))
 }
 
+// ---------------------------------------------------------------------------
+// 安装台账（~/.zread-pi/tools-state.json）
+//
+// 为什么需要它：版本探测只能算「尽力而为」（不同工具的版本 flag 与输出格式各异，
+// 未来工具甚至可能没有版本开关）。因此「当初装的是哪个版本」必须由我们自己记一笔：
+//  - 探测能识别出版本 → 以探测为准，台账用于发现不一致（例如手动手换过二进制）；
+//  - 探测识别不出 → 台账版本仍是可展示的信息（“由 zread-pi 安装 10.5.0，版本输出未识别”）。
+// 台账**不参与可用性判定**：二进制是否存在由文件系统决定，文件没了台账就作废。
+// ---------------------------------------------------------------------------
+
+const LEDGER_VERSION = 1
+
+export interface ToolLedgerEntry {
+  version: string
+  installedAt: string
+  /** 安装资产文件名（排查问题时用） */
+  asset?: string
+  /** 二进制相对托管目录的位置（目前固定为文件名） */
+  binary: string
+}
+
+interface ToolLedger {
+  version: number
+  installed: Record<ToolId, ToolLedgerEntry>
+}
+
+/** 台账路径（与托管目录同级，测试可用 ZREAD_PI_TOOLS_DIR 一并隔离） */
+export function getToolLedgerPath(): string {
+  return join(dirname(getManagedBinDir()), 'tools-state.json')
+}
+
+function emptyLedger(): ToolLedger {
+  return { version: LEDGER_VERSION, installed: {} }
+}
+
+/** 读取台账（损坏/缺失时返回空台账，不抛异常）。 */
+export function readToolLedger(): ToolLedger {
+  try {
+    const raw = readFileSync(getToolLedgerPath(), 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<ToolLedger>
+    const installed: Record<ToolId, ToolLedgerEntry> = {}
+    for (const [id, entry] of Object.entries(parsed?.installed ?? {})) {
+      if (!entry || typeof entry !== 'object') continue
+      const candidate = entry as Partial<ToolLedgerEntry>
+      if (typeof candidate.version !== 'string' || !candidate.version) continue
+      installed[id] = {
+        version: candidate.version,
+        installedAt: typeof candidate.installedAt === 'string' ? candidate.installedAt : '',
+        asset: typeof candidate.asset === 'string' ? candidate.asset : undefined,
+        binary: typeof candidate.binary === 'string' ? candidate.binary : '',
+      }
+    }
+    return { version: LEDGER_VERSION, installed }
+  } catch {
+    return emptyLedger()
+  }
+}
+
+function writeToolLedger(ledger: ToolLedger): void {
+  try {
+    mkdirSync(dirname(getToolLedgerPath()), { recursive: true })
+    writeFileSync(getToolLedgerPath(), `${JSON.stringify(ledger, null, 2)}\n`, 'utf-8')
+  } catch {
+    // 台账写失败不能影响安装本身（下次安装会重试）
+  }
+}
+
+/** 记录一次托管安装（安装成功后调用）。 */
+export function recordToolInstall(id: ToolId, entry: ToolLedgerEntry): void {
+  const ledger = readToolLedger()
+  ledger.installed[id] = entry
+  writeToolLedger(ledger)
+}
+
+/** 清除某个工具的托管安装记录（卸载后调用）。 */
+export function clearToolInstall(id: ToolId): void {
+  const ledger = readToolLedger()
+  if (!(id in ledger.installed)) return
+  delete ledger.installed[id]
+  writeToolLedger(ledger)
+}
+
 export type ToolSource = 'system' | 'managed'
 
+/** 一个被判定为「可执行」的二进制解析结果（含探测细节） */
 export interface ResolvedToolBinary {
   /** 可直接 spawn 的路径或命令名 */
   path: string
   source: ToolSource
-  /** `--version` 里解析出的版本号（探测失败时为空） */
+  /** `--version` 类探测里解析出的版本号（识别不到时为空，**不影响可用性**） */
   version?: string
+  /** 进程能否被启动（目前始终为 true：不能启动的候选不会被返回） */
+  runnable: true
+  /** 探测细节（参数、退出码、输出摘要），供 UI / 日志展示 */
+  probe: BinaryProbeResult
 }
 
 // ---------------------------------------------------------------------------
@@ -87,37 +168,146 @@ export function notifyToolsChanged(): void {
 
 // ---------------------------------------------------------------------------
 // 探测
+//
+// 设计要点（避免把「版本管理」绑死在一个 flag 上）：
+//  1. **可用性 ≠ 版本识别**：只要进程能被启动（spawn 无错、未超时）就视为可用，
+//     即使 `--version` 退出码非 0、把版本写到 stderr、或输出根本没有版本号；
+//  2. 版本号只是附加信息：按 `spec.versionProbeArgs`（缺省多组参数）依次尝试，
+//     解析不出就返回 undefined，不影响工具能否使用；
+//  3. 探测一律在临时目录里、带短超时、stdin 关闭的情况下执行——
+//     避免把「版本参数」当路径参数的工具去扫描用户仓库。
 // ---------------------------------------------------------------------------
 
+/** 缺省版本探测参数（多家工具的习惯差异都盖住；仍可由 spec 覆盖） */
+export const DEFAULT_VERSION_PROBE_ARGS: string[][] = [['--version'], ['-V'], ['version']]
+
+/** 宽松版本号：1.2 / 1.2.3 / v1.2.3 / 1.2.3-rc1 / 2024.01.2 */
+const DEFAULT_VERSION_PATTERN = /(\d+(?:\.\d+)+(?:[-+][\w.]+)?)/
+
+const PROBE_TIMEOUT_MS = 3_000
+const PROBE_OUTPUT_LIMIT = 200
+
+/**
+ * 探测专用的空目录（惰性创建，全进程复用）。
+ *
+ * 把 `version` 当子命令的工具不存在，但把 `version` 当**搜索模式**的工具（rg / find 类）很多：
+ * 在用户 cwd 里跑会把整个仓库扫一遍；在临时目录里跑也可能扫到一堆无关文件（实测 rg 会输出到
+ * 撞上 maxBuffer）。因此探测固定在一个空目录里执行。
+ */
+let probeCwd: string | undefined
+
+function getProbeCwd(): string | undefined {
+  if (probeCwd) return probeCwd
+  try {
+    probeCwd = mkdtempSync(join(tmpdir(), 'zread-pi-probe-'))
+  } catch {
+    probeCwd = tmpdir()
+  }
+  return probeCwd
+}
+
+/**
+ * 哪些 spawn 错误算「启动失败」。
+ *
+ * 其余错误（ENOBUFS / ETIMEDOUT / 未知）都意味着**进程已经启动**，
+ * 不能因为“输出太多”或“没及时退出”就把工具判成不可用。
+ */
+const LAUNCH_FAILURE_CODES = new Set([
+  'ENOENT',
+  'EACCES',
+  'EPERM',
+  'ENOTDIR',
+  'EISDIR',
+  'ELOOP',
+  'ENOEXEC',
+  'EINVAL',
+])
+
+function isLaunchFailure(error: NodeJS.ErrnoException | undefined): boolean {
+  if (!error) return false
+  return LAUNCH_FAILURE_CODES.has(String(error.code ?? ''))
+}
+
+/** 单次探测的结果（永不抛异常；失败也返回结构化信息）。 */
+export interface BinaryProbeResult {
+  /** 进程成功启动（无 spawn 错误、未超时）——**可用性只看这个** */
+  runnable: boolean
+  /** 识别到的版本号（识别不出时为 undefined，不影响可用性） */
+  version?: string
+  /** 实际使用的探测参数（用于 UI/日志诊断） */
+  args?: string[]
+  /** 子进程退出码 */
+  exitCode?: number | null
+  /** 探测输出（stdout + stderr 首行，已截断） */
+  output?: string
+  /** 失败原因（ENOENT / 超时 / 其它） */
+  error?: string
+}
+
+function truncateProbeOutput(text: string): string | undefined {
+  const trimmed = text.trim().split('\n').map((line) => line.trim()).filter(Boolean).join(' · ')
+  if (!trimmed) return undefined
+  return trimmed.length > PROBE_OUTPUT_LIMIT ? `${trimmed.slice(0, PROBE_OUTPUT_LIMIT)}…` : trimmed
+}
+
 function parseVersion(text: string, spec: ToolSpec): string | undefined {
-  const pattern = spec.versionPattern ?? /(\d+\.\d+\.\d+)/
-  const match = pattern.exec(text)
-  return match?.[1]
+  const pattern = spec.versionPattern ?? DEFAULT_VERSION_PATTERN
+  return pattern.exec(text)?.[1]
 }
 
-function probeCommand(command: string, args: string[]): { ok: boolean; version?: string; error?: string } {
-  const result = spawnSync(command, args, { stdio: 'pipe', timeout: 10_000, windowsHide: true })
-  if (result.error) return { ok: false, error: result.error.message }
-  const output = `${result.stdout?.toString() ?? ''}\n${result.stderr?.toString() ?? ''}`
-  if (result.status !== 0) return { ok: false, error: output.trim() || `退出码 ${result.status}` }
-  return { ok: true, version: output.trim().split('\n')[0] }
-}
+/**
+ * 探测一个具体二进制。
+ *
+ * 返回的 `runnable` 只看「进程能不能被启动」；`version` 依次尝试
+ * `spec.versionProbeArgs`（缺省 `[['--version'], ['-V'], ['version']]`），
+ * 任意一组成功且能解析出版本号即返回，否则 `version` 为 undefined。
+ */
+export function probeBinary(path: string, spec: ToolSpec): BinaryProbeResult {
+  const argSets = spec.versionProbeArgs ?? DEFAULT_VERSION_PROBE_ARGS
+  let last: BinaryProbeResult = { runnable: false, error: '未执行任何探测' }
 
-/** 探测一个具体二进制是否可用，并解析版本号。 */
-export function probeBinary(path: string, spec: ToolSpec): ResolvedToolBinary | undefined {
-  const result = probeCommand(path, spec.versionArgs)
-  if (!result.ok) return undefined
-  return { path, version: result.version ? parseVersion(result.version, spec) ?? result.version : undefined, source: 'system' }
+  for (const args of argSets) {
+    const result = spawnSync(path, args, {
+      stdio: 'pipe',
+      timeout: PROBE_TIMEOUT_MS,
+      windowsHide: true,
+      cwd: getProbeCwd(),
+    })
+
+    const output = truncateProbeOutput(`${result.stdout?.toString() ?? ''}\n${result.stderr?.toString() ?? ''}`)
+    // 启动失败（找不到 / 无权限 / 非法可执行文件）才是“不可用”；
+    // 超时、输出过大（ENOBUFS）等一律视为“已启动但读不出版本”
+    const launchFailure = isLaunchFailure(result.error)
+    const runnable = !launchFailure && (result.status !== null || result.error === undefined || Boolean(output))
+    const probe: BinaryProbeResult = {
+      runnable,
+      args: [...args],
+      exitCode: result.status,
+      output,
+      ...(result.error ? { error: result.error.message } : {}),
+    }
+
+    if (!runnable) {
+      last = probe
+      continue
+    }
+    const version = output ? parseVersion(output, spec) : undefined
+    if (version) return { ...probe, version }
+    // 能跑但没有可识别版本号：记下来，继续试其它参数组（可能只是这组参数不输出版本）
+    last = probe
+  }
+
+  return last
 }
 
 /**
  * 测试钩子：替换二进制探测实现。
  *
- * 生产路径永远是 `probeBinary`（spawnSync 执行 `--version`）；测试里注入假实现后，
+ * 生产路径永远是 `probeBinary`（spawnSync 执行版本探测）；测试里注入假实现后，
  * 就不需要在三平台上造一个真的可执行文件（Windows 无法直接 spawn .cmd 脚本），
  * 同时安装/状态/卸载全链路仍然走真实代码。
  */
-export type BinaryProbe = (path: string, spec: ToolSpec) => ResolvedToolBinary | undefined
+export type BinaryProbe = (path: string, spec: ToolSpec) => BinaryProbeResult
 
 let binaryProbeOverride: BinaryProbe | undefined
 
@@ -125,7 +315,7 @@ export function setBinaryProbeForTesting(probe: BinaryProbe | undefined): void {
   binaryProbeOverride = probe
 }
 
-function runProbe(path: string, spec: ToolSpec): ResolvedToolBinary | undefined {
+function runProbe(path: string, spec: ToolSpec): BinaryProbeResult {
   return binaryProbeOverride ? binaryProbeOverride(path, spec) : probeBinary(path, spec)
 }
 
@@ -142,6 +332,10 @@ export function isToolEnabled(id: ToolId): boolean {
  * 优先级：环境变量显式指定 → 托管目录 → 系统 PATH。
  * 用户停用时直接返回 undefined（即使系统里装了也不用，强制内置兜底实现）。
  *
+ * **可用性只看进程能否启动**（`probe.runnable`），与能否识别出版本号无关：
+ * 未来接入没有 `--version`（或把版本写到别处、退出码非 0、输出不是 x.y.z）的工具，
+ * 依然会被当成可用，只是 `version` 为空。
+ *
  * `options.enabled` 用于配置界面的「未保存预览」：覆盖 config.yaml 里的启用状态。
  */
 export function resolveToolBinary(id: ToolId, options?: { enabled?: boolean }): ResolvedToolBinary | undefined {
@@ -149,21 +343,31 @@ export function resolveToolBinary(id: ToolId, options?: { enabled?: boolean }): 
   if (!spec) return undefined
   if (!(options?.enabled ?? isToolEnabled(id))) return undefined
 
+  const fromProbe = (path: string, source: ToolSource, probe: BinaryProbeResult): ResolvedToolBinary => ({
+    path,
+    source,
+    // 健壮性：即使自定义探测（如测试钩子）只给了原始输出，也尝试再解析一次版本号
+    version: probe.version ?? (probe.output ? parseVersion(probe.output, spec) : undefined),
+    runnable: true,
+    probe,
+  })
+
   const override = process.env[spec.envPathVar]
   if (override && override.trim().length > 0) {
-    const resolved = runProbe(override.trim(), spec)
-    return resolved ? { ...resolved, source: 'system' } : undefined
+    const candidate = override.trim()
+    const probe = runProbe(candidate, spec)
+    return probe.runnable ? fromProbe(candidate, 'system', probe) : undefined
   }
 
   const managedPath = getManagedBinaryPath(spec)
   if (existsSync(managedPath)) {
-    const managed = runProbe(managedPath, spec)
-    if (managed) return { ...managed, path: managedPath, source: 'managed' }
+    const probe = runProbe(managedPath, spec)
+    if (probe.runnable) return fromProbe(managedPath, 'managed', probe)
   }
 
   for (const candidate of spec.systemBinaryNames) {
-    const found = runProbe(candidate, spec)
-    if (found) return found
+    const probe = runProbe(candidate, spec)
+    if (probe.runnable) return fromProbe(candidate, 'system', probe)
   }
   return undefined
 }
@@ -176,7 +380,16 @@ export interface ToolStatus {
   state: ToolState
   /** 可用二进制的路径（命令名或绝对路径） */
   path?: string
+  /** 探测到的版本号；识别不出时为空（**不影响可用性**） */
   version?: string
+  /** 版本探测输出（首行摘要），版本号识别失败时用于诊断展示 */
+  versionOutput?: string
+  /** 实际生效的版本探测参数 */
+  versionProbeArgs?: string[]
+  /** 安装台账里记录的「当初装的是哪个版本」（与探测结果互补，见 tools-state.json） */
+  installedVersion?: string
+  /** 仅当同时有台账版本与探测版本且两者不同时给出（不阻断使用，仅提示） */
+  versionMismatch?: { expected: string; actual: string }
   /** 用途说明用的 Agent 工具名（Glob / Grep …） */
   usedBy: string[]
   /** 用户是否允许使用 */
@@ -202,12 +415,22 @@ export function getToolStatus(id: ToolId, options?: { enabled?: boolean }): Tool
   const resolved = resolveToolBinary(id, { enabled })
 
   const state: ToolState = !enabled ? 'disabled' : !resolved ? 'missing' : resolved.source
+  // 台账只在“托管安装存在”时可信：文件被手动删除时不能再拿它当事实
+  const ledgerVersion = managedExists ? readToolLedger().installed[spec.id]?.version : undefined
+  const version = resolved?.version
+  const versionMismatch =
+    version && ledgerVersion && version !== ledgerVersion ? { expected: ledgerVersion, actual: version } : undefined
+
   return {
     id: spec.id,
     displayName: spec.displayName,
     state,
     path: resolved?.path,
-    version: resolved?.version,
+    version,
+    versionOutput: resolved?.probe?.output,
+    versionProbeArgs: resolved?.probe?.args && resolved.probe.args.length > 0 ? resolved.probe.args : undefined,
+    installedVersion: ledgerVersion,
+    ...(versionMismatch ? { versionMismatch } : {}),
     usedBy: [...spec.usedBy],
     enabled,
     managed: managedExists,
@@ -426,8 +649,12 @@ async function findBinary(root: string, fileName: string): Promise<string | unde
 /**
  * 安装（或重装）一个工具。
  *
- * 流程：解析版本 → 下载资产 → 解包到临时目录 → 找到二进制 → 落到 ~/.zread-pi/bin
- * → `--version` 校验 → 广播变更。任何一步失败都会清理临时文件并抛出可读错误。
+ * 流程：解析版本 → 下载资产 → 校验指纹 → 解包到临时目录 → 找到二进制 → 落到 ~/.zread-pi/bin
+ * → **可执行性**校验（只看进程能否启动）→ 写入安装台账 → 广播变更。
+ * 任何一步失败都会清理临时文件并抛出可读错误。
+ *
+ * 注意：校验不再要求「能读出版本号」——未来接入没有版本开关的工具也能安装成功，
+ * 只是 `version` 为空（此时台账里的“当初装的版本”仍然可展示）。
  */
 export async function installTool(id: ToolId, options: InstallToolOptions = {}): Promise<ToolStatus> {
   const spec = getToolSpec(id)
@@ -499,10 +726,19 @@ export async function installTool(id: ToolId, options: InstallToolOptions = {}):
     report('verifying', 0, target)
 
     const verified = runProbe(target, spec)
-    if (!verified) {
+    if (!verified.runnable) {
       rmSync(target, { force: true })
-      throw new ToolInstallError(`安装校验失败：${target} 无法执行`)
+      const reason = verified.error ? `（${verified.error}）` : ''
+      throw new ToolInstallError(`安装校验失败：${target} 无法执行${reason}`)
     }
+
+    // 台账记录「当初装的是哪个版本」：探测不到时它就是唯一可展示的版本信息
+    recordToolInstall(spec.id, {
+      version,
+      installedAt: new Date().toISOString(),
+      asset: assetName,
+      binary: basename(target),
+    })
 
     report('done', 100, verified.version ?? version)
     notifyToolsChanged()
@@ -519,13 +755,18 @@ async function copyFileOverwrite(source: string, destination: string): Promise<v
   await copyFile(source, destination)
 }
 
-/** 卸载：只删除托管目录里的二进制（系统安装不受影响）。 */
+/** 卸载：只删除托管目录里的二进制（系统安装不受影响），并清掉台账记录。 */
 export async function uninstallTool(id: ToolId): Promise<boolean> {
   const spec = getToolSpec(id)
   if (!spec) throw new ToolInstallError(`未登记的工具：${id}`)
   const target = getManagedBinaryPath(spec)
-  if (!existsSync(target)) return false
+  if (!existsSync(target)) {
+    // 文件已被手动删除：台账也要一起清，避免状态不一致
+    clearToolInstall(spec.id)
+    return false
+  }
   rmSync(target, { force: true })
+  clearToolInstall(spec.id)
   notifyToolsChanged()
   return true
 }
