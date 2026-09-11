@@ -51,15 +51,15 @@ const settle = async (ms = 40): Promise<void> => {
 };
 
 // ---------------------------------------------------------------------------
-// 1) 临时 HOME + 目标仓库（避免读写真实 ~/.zread）
+// 1) 临时 HOME + 目标仓库（避免读写真实 ~/.zread-pi）
 // ---------------------------------------------------------------------------
 
 const home = await mkdtemp(join(tmpdir(), "zread-pi-tui-home-"));
 const repo = await mkdtemp(join(tmpdir(), "zread-pi-tui-repo-"));
 
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
-  join(home, ".zread", "config.yaml"),
+  join(home, ".zread-pi", "config.yaml"),
   [
     "language: zh",
     "doc_language: zh",
@@ -234,7 +234,7 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("\r");
   await settle();
   const configText = screenText(app);
-  checkContains("进入配置首页：标题分割线", configText, "── Zread — 编辑配置 · ~/.zread/config.yaml ─");
+  checkContains("进入配置首页：标题分割线", configText, "── Zread — 编辑配置 · ~/.zread-pi/config.yaml ─");
   checkContains("配置项：界面语言", configText, "界面语言");
   checkContains("配置项：LLM 提供商", configText, "LLM 提供商");
   checkContains("配置项：思考深度（含默认值）", configText, "思考深度 (默认: off)");
@@ -255,7 +255,7 @@ console.log("▶ TUI 冒烟测试");
   // ESC 返回配置首页
   terminal.send("\x1b");
   await settle();
-  checkContains("ESC 返回配置首页", screenText(app), "── Zread — 编辑配置 · ~/.zread/config.yaml ─");
+  checkContains("ESC 返回配置首页", screenText(app), "── Zread — 编辑配置 · ~/.zread-pi/config.yaml ─");
   check("返回后未退出应用", exits() === 0);
 
   app.exit();
@@ -353,7 +353,7 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("s");
   await settle(120);
   checkContains("s 保存后提示已保存", screenText(app), "配置已保存");
-  const yaml = await readFile(join(home, ".zread", "config.yaml"), "utf-8");
+  const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
   checkContains("config.yaml 写入 thinking_level: medium", yaml, "thinking_level: medium");
 
   app.exit();
@@ -406,7 +406,7 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("s");
   await settle(120);
   checkContains("最大轮次页：s 保存后提示已保存", screenText(app), "配置已保存");
-  const yaml = await readFile(join(home, ".zread", "config.yaml"), "utf-8");
+  const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
   checkContains("config.yaml 写入 agent.max_turns: 50", yaml, "max_turns: 50");
 
   app.exit();
@@ -415,9 +415,9 @@ console.log("▶ TUI 冒烟测试");
 // --- 用例 4d：未选择模型时展示「全部等级可选」提示 ---
 {
   const bareHome = await mkdtemp(join(tmpdir(), "zread-pi-tui-bare-"));
-  await mkdir(join(bareHome, ".zread"), { recursive: true });
+  await mkdir(join(bareHome, ".zread-pi"), { recursive: true });
   await writeFile(
-    join(bareHome, ".zread", "config.yaml"),
+    join(bareHome, ".zread-pi", "config.yaml"),
     [
       "language: zh",
       "doc_language: zh",
@@ -541,12 +541,12 @@ console.log("▶ TUI 冒烟测试");
   checkContains("保存后提示已保存", text, "API Key 已保存");
   checkContains("保存后焦点移到模型列表", text, "enter 选择模型");
 
-  const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
+  const raw = JSON.parse(await readFile(join(home, ".zread-pi", "auth.json"), "utf-8")) as Record<
     string,
     { type?: string; key?: string }
   >;
   check(
-    "凭据写入 ~/.zread/auth.json",
+    "凭据写入 ~/.zread-pi/auth.json",
     raw.anthropic?.type === "api_key" && raw.anthropic.key === "sk-ant-test",
     JSON.stringify(raw.anthropic),
   );
@@ -583,7 +583,7 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("\r");
   await settle(60);
 
-  const raw = JSON.parse(await readFile(join(home, ".zread", "auth.json"), "utf-8")) as Record<
+  const raw = JSON.parse(await readFile(join(home, ".zread-pi", "auth.json"), "utf-8")) as Record<
     string,
     { key?: string }
   >;

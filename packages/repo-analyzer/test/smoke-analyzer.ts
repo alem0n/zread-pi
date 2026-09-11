@@ -1,7 +1,7 @@
 /**
  * smoke-analyzer.ts —— 验证未改动的 RepoAnalyzer（含 web-tree-sitter WASM 解析）在新工程中仍可运行
  *
- * 注意：解析器 WASM 首次运行会从 CDN 下载并缓存到 ~/.zread/parsers（这是原仓库既有行为，未改动）。
+ * 注意：解析器 WASM 首次运行会从 CDN 下载并缓存到 ~/.zread-pi/parsers（这是原仓库既有行为，未改动）。
  *
  * 运行：bun run packages/repo-analyzer/test/smoke-analyzer.ts
  */

@@ -104,7 +104,7 @@ export class ConfigStore {
   }
 
   /**
-   * 凭据已交给 ~/.zread/auth.json（pi CredentialStore），
+   * 凭据已交给 ~/.zread-pi/auth.json（pi CredentialStore），
    * 清掉 config.yaml 里的旧扁平 api_key/base_url，避免旧值覆盖新登录结果。
    */
   clearLegacyCredentials(): void {

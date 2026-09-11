@@ -3,7 +3,7 @@
  *
  * 数据来源：@zread-pi/agent-runtime 的 listZreadProviders()
  *   = pi-ai 的 40 个内置 Provider（含 OAuth/API Key 登录方式）
- *   + ~/.zread/config.yaml 里配置过的自定义 Provider
+ *   + ~/.zread-pi/config.yaml 里配置过的自定义 Provider
  *
  * 功能:
  * - 列出所有 Provider 及其凭据状态（OAuth / API Key / 未配置），支持同时配置多个

@@ -146,7 +146,7 @@
 
   - Full Chinese and English support (UI language and document language configured independently)
   - Hot-reload UI language switching — no restart required
-  - Config file: `~/.zread/config.yaml`
+  - Config file: `~/.zread-pi/config.yaml`
 
   ### Caching & Storage
 

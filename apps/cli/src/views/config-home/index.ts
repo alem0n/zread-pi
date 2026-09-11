@@ -110,7 +110,7 @@ export default class ConfigHomePage extends Screen {
     const t = this.app.t.bind(this.app);
     const lines: string[] = [];
 
-    lines.push(...new Divider(`${t("config.title")} · ~/.zread/config.yaml`).render(width));
+    lines.push(...new Divider(`${t("config.title")} · ~/.zread-pi/config.yaml`).render(width));
 
     if (this.saveStatus === "saving") {
       lines.push("", style("正在保存...", { color: "yellow" }));

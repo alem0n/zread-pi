@@ -18,4 +18,4 @@ export const WASM_FILE_MAP: Record<string, string> = {
   kotlin: 'tree-sitter-kotlin.wasm',
 };
 
-export const PARSER_CACHE_DIR = '~/.zread/parsers';
+export const PARSER_CACHE_DIR = '~/.zread-pi/parsers';

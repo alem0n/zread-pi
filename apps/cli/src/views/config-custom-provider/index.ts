@@ -5,7 +5,7 @@
  * 1. 完全自定义 Provider (providerId === 'custom'): Base URL → Model Name → API Key
  * 2. 已有 Provider 自定义模型 (providerId !== 'custom'): Model Name → API Key
  *
- * 凭据写入 ~/.zread/auth.json（pi-ai login），模型与 base_url 写入
+ * 凭据写入 ~/.zread-pi/auth.json（pi-ai login），模型与 base_url 写入
  * config.llm.providers[providerId]，由首页 s 键统一保存。
  */
 
@@ -318,7 +318,7 @@ export default class ConfigCustomProviderPage extends Screen {
     await migrateLegacyCredentials(this.app.config);
     this.app.config.setActiveModel(providerId, modelId);
 
-    // 2) 凭据：交给 pi-ai login 写入 ~/.zread/auth.json
+    // 2) 凭据：交给 pi-ai login 写入 ~/.zread-pi/auth.json
     this.saving = true;
     this.refresh();
     try {

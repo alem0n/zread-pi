@@ -3,7 +3,7 @@
  * 「蓝图生成 -> 并行页面生成」，不需要任何真实 API Key。
  *
  * 用途：验证流水线是否正常（扫描/AST/工具落盘/事件/并发），或在没有额度时做回归。
- * 真实模型请用 `bun run cli`（读 ~/.zread/config.yaml）。
+ * 真实模型请用 `bun run cli`（读 ~/.zread-pi/config.yaml）。
  *
  * 运行：bun run mock:wiki                     # 默认跑内置夹具 fixtures/hello-python
  *       bun run mock:wiki path/to/any/repo     # 也可指向任意目标仓库
@@ -148,13 +148,13 @@ const server = Bun.serve({
 });
 
 // ---------------------------------------------------------------------------
-// 2) 临时 HOME（~/.zread/config.yaml 指向 mock）
+// 2) 临时 HOME（~/.zread-pi/config.yaml 指向 mock）
 // ---------------------------------------------------------------------------
 
 const home = await mkdtemp(join(tmpdir(), "zread-pi-mock-home-"));
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
-	join(home, ".zread", "config.yaml"),
+	join(home, ".zread-pi", "config.yaml"),
 	[
 		"language: zh",
 		"doc_language: zh",

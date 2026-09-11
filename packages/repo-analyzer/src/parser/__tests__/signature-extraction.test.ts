@@ -28,7 +28,7 @@ async function initParsers(): Promise<void> {
     locateFile: (fileName: string) => join(treeSitterDir, fileName)
   });
 
-  const wasmDir = join(homedir(), '.zread', 'parsers');
+  const wasmDir = join(homedir(), '.zread-pi', 'parsers');
 
   const tsxWasm = readFileSync(join(wasmDir, 'tree-sitter-tsx.wasm'));
   const tsWasm = readFileSync(join(wasmDir, 'tree-sitter-typescript.wasm'));

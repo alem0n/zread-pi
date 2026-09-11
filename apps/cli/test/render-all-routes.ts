@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 const home = await mkdtemp(join(tmpdir(), "zread-routes-home-"));
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
-  join(home, ".zread", "config.yaml"),
+  join(home, ".zread-pi", "config.yaml"),
   [
     "language: zh",
     "doc_language: zh",

@@ -18,7 +18,7 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MODELS_DEV_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
 
 function getZreadDir(): string {
-  return path.join(os.homedir(), '.zread');
+  return path.join(os.homedir(), '.zread-pi');
 }
 
 function getCachePath(): string {

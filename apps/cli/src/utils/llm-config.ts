@@ -2,7 +2,7 @@
  * llm-config - CLI 侧的 LLM 配置迁移/兼容辅助
  *
  * 旧版配置把凭据放在 config.llm.api_key / base_url（只支持单个 Provider）。
- * 新版把凭据交给 pi-ai 的 ~/.zread/auth.json，把端点/模型放在
+ * 新版把凭据交给 pi-ai 的 ~/.zread-pi/auth.json，把端点/模型放在
  * config.llm.providers[providerId]。
  *
  * 在切换到新 Provider/模型之前，把旧字段安全迁移过去再清空，避免：
@@ -16,7 +16,7 @@ import type { ConfigStore } from "../state/config-store";
 /**
  * 迁移旧扁平字段：
  * 1. llm.base_url → 当前 Provider 的 per-provider base_url
- * 2. llm.api_key → ~/.zread/auth.json 里当前 Provider 的 api_key 凭据
+ * 2. llm.api_key → ~/.zread-pi/auth.json 里当前 Provider 的 api_key 凭据
  * 3. 清空 llm.api_key / llm.base_url
  */
 export async function migrateLegacyCredentials(configStore: ConfigStore): Promise<void> {

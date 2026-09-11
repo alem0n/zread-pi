@@ -164,9 +164,9 @@ const server = Bun.serve({
 const home = await mkdtemp(join(tmpdir(), "zread-pi-tui-gen-home-"));
 const repo = await mkdtemp(join(tmpdir(), "zread-pi-tui-gen-repo-"));
 
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
-  join(home, ".zread", "config.yaml"),
+  join(home, ".zread-pi", "config.yaml"),
   [
     "language: zh",
     "doc_language: zh",

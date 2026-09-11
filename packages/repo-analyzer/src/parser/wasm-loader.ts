@@ -12,7 +12,7 @@ const languageCache = new Map<string, Parser.Language>();
 let parserInitialized = false;
 
 function getLocalCachePath(): string {
-  return join(homedir(), '.zread', 'parsers');
+  return join(homedir(), '.zread-pi', 'parsers');
 }
 
 function ensureCacheDir(): void {
@@ -47,7 +47,7 @@ async function downloadWasmToCache(parserName: string): Promise<Uint8Array> {
 
     return wasmBuffer;
   } catch (error) {
-    throw new Error(`WASM download failed: ${parserName}\nPlease manually download to ~/.zread/parsers/`, { cause: error });
+    throw new Error(`WASM download failed: ${parserName}\nPlease manually download to ~/.zread-pi/parsers/`, { cause: error });
   }
 }
 

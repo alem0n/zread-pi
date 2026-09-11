@@ -12,7 +12,7 @@
 
 import { Divider } from "../../tui/components/divider";
 import { Select } from "../../tui/components/select";
-import { statusIcon, statusRow } from "../../tui/components/status";
+import { SPINNER_FRAMES, SPINNER_INTERVAL_MS, statusIcon, statusRow } from "../../tui/components/status";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { theme } from "../../theme";
@@ -27,6 +27,8 @@ export default class WikiGeneratePage extends Screen {
   private select!: Select<ArticleItem>;
   private selectedSlug: string | null = null;
   private ticker?: ReturnType<typeof setInterval>;
+  /** spinner 动画帧（loading 图标轮换用） */
+  private spinnerFrame = 0;
   /** 每个 slug 进入 retry 阶段的时间戳（用于倒计时） */
   private retryStartedAt = new Map<string, number>();
 
@@ -52,10 +54,16 @@ export default class WikiGeneratePage extends Screen {
       },
     });
 
-    // 重试倒计时需要每秒刷新
+    // 重试倒计时需要每秒刷新；loading 图标动画需要每帧刷新
     this.ticker = setInterval(() => {
-      if (this.syncRetryStates()) this.refresh();
-    }, 1000);
+      const hasRetrying = this.syncRetryStates();
+      if (this.hasLoadingItem()) {
+        this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
+        this.refresh();
+      } else if (hasRetrying) {
+        this.refresh();
+      }
+    }, SPINNER_INTERVAL_MS);
   }
 
   override async onEnter(): Promise<void> {
@@ -162,8 +170,11 @@ export default class WikiGeneratePage extends Screen {
             ? theme.error
             : theme.muted;
 
-    // 左栏：图标 + 标题
-    const left = statusIcon(status) + " " + this.t("wikiGenerate.catalogTitle");
+    // 左栏：图标 + 标题（loading 时图标轮换）
+    const left =
+      statusIcon(status, "default", this.spinnerFrame) +
+      " " +
+      this.t("wikiGenerate.catalogTitle");
 
     return [
       ...new Divider(this.t("wikiGenerate.catalogTitle")).render(width),
@@ -249,7 +260,7 @@ export default class WikiGeneratePage extends Screen {
       : style(" ", { color: theme.muted });
     const left =
       indicator +
-      statusIcon(status, isSelected ? "active" : "default") +
+      statusIcon(status, isSelected ? "active" : "default", this.spinnerFrame) +
       style(" " + page.title, { bold: isSelected });
 
     // 重试状态使用特殊逻辑（带倒计时）
@@ -286,6 +297,15 @@ export default class WikiGeneratePage extends Screen {
     const startedAt = this.retryStartedAt.get(slug);
     if (startedAt === undefined) return Math.ceil(delayMs / 1000);
     return Math.max(0, Math.ceil((delayMs - (Date.now() - startedAt)) / 1000));
+  }
+
+  /** 目录或任一文章是否处于 loading 状态（决定 spinner 是否需要转动） */
+  private hasLoadingItem(): boolean {
+    if (this.controller.state.catalog.status === "loading") return true;
+    const statusMap = this.controller.state.articles.pages;
+    return this.controller.state.wikiPages.some(
+      (page) => statusMap[page.slug]?.status === "loading",
+    );
   }
 
   /** 同步 retry 状态的倒计时起点；返回是否仍有页面在重试 */

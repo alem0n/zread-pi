@@ -8,18 +8,29 @@ import { theme } from "../../theme";
 
 export type Status = "waiting" | "loading" | "completed" | "failed";
 
+/** ink-spinner 的 dots 动画帧（loading 图标轮换用） */
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** spinner 动画帧间隔（毫秒） */
+export const SPINNER_INTERVAL_MS = 80;
+
 /**
  * 状态图标
- * - loading: 静态加载符号（避免全屏模式下定时重绘）
+ * - loading: 按 frame 轮换的加载动画（页面需定时刷新驱动）
  * - completed: ✓ 绿色
  * - failed: ✗ 红色
  * - waiting: ○ 灰色
  */
-export function statusIcon(status: Status, variant: "default" | "active" = "default"): string {
+export function statusIcon(
+  status: Status,
+  variant: "default" | "active" = "default",
+  frame = 0,
+): string {
   const isActive = variant === "active";
 
   if (status === "loading") {
-    return style("⠴", { color: isActive ? theme.primary : theme.warning });
+    const icon = SPINNER_FRAMES[frame % SPINNER_FRAMES.length];
+    return style(icon, { color: isActive ? theme.primary : theme.warning });
   }
   if (status === "completed") {
     return style("✓", { color: theme.success });

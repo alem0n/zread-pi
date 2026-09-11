@@ -3,11 +3,11 @@
  *
  * 职责：
  * - 用 pi-ai 的 40 个内置 provider（builtinProviders()）构建一个 Models 集合；
- * - 把 ~/.zread/config.yaml 里的 per-provider 配置叠加进去：
+ * - 把 ~/.zread-pi/config.yaml 里的 per-provider 配置叠加进去：
  *     · base_url 覆盖（自定义端点/代理）
  *     · 自定义模型（等价 pi models.json 的 models 数组合并语义）
  *     · 未内置的 provider（旧配置 openai-compatible / 自定义端点）动态注册
- * - 凭据走 ~/.zread/auth.json（pi CredentialStore），支持 OAuth 与 API Key，
+ * - 凭据走 ~/.zread-pi/auth.json（pi CredentialStore），支持 OAuth 与 API Key，
  *   并且可以同时登录多个 Provider；
  * - 暴露 CLI 配置界面需要的查询/刷新/登录/登出 API。
  *
@@ -121,7 +121,7 @@ function wrapProviderAuth(
           }
           // 旧版 config.yaml 的 api_key 次之（新流程不会再写入，但兼容老配置）
           if (legacyApiKey) {
-            return { auth: { apiKey: legacyApiKey, ...(baseUrl ? { baseUrl } : {}) }, source: '~/.zread/config.yaml' };
+            return { auth: { apiKey: legacyApiKey, ...(baseUrl ? { baseUrl } : {}) }, source: '~/.zread-pi/config.yaml' };
           }
           return applyBaseUrl(await original.resolve(input), baseUrl);
         },
@@ -312,7 +312,7 @@ export function reloadZreadCatalog(): ZreadCatalog {
 
 /**
  * 把 CLI 内存里的配置设为 catalog 的数据源（未保存的修改也能立即反映）；
- * 传 undefined 回到读取 ~/.zread/config.yaml。
+ * 传 undefined 回到读取 ~/.zread-pi/config.yaml。
  */
 export function setZreadCatalogConfig(config: AppConfig | undefined): ZreadCatalog {
   configOverride = config;
@@ -434,7 +434,7 @@ export async function refreshZreadProviderModels(
   }
 }
 
-/** 登录（pi-ai 的 api_key / oauth 流程），凭据写入 ~/.zread/auth.json */
+/** 登录（pi-ai 的 api_key / oauth 流程），凭据写入 ~/.zread-pi/auth.json */
 export async function loginZreadProvider(
   providerId: string,
   type: AuthType,

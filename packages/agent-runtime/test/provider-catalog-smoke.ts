@@ -3,7 +3,7 @@
  *
  * 覆盖：
  *  1. 列出 pi-ai 内置 Provider（含 OAuth / API Key 登录能力）
- *  2. login（api_key）写入 ~/.zread/auth.json，checkAuth 立即变为已配置
+ *  2. login（api_key）写入 ~/.zread-pi/auth.json，checkAuth 立即变为已配置
  *  3. 同时登录多个 Provider（互不覆盖）
  *  4. 为指定 Provider 添加自定义模型（models.json 合并语义）并出现在模型列表
  *  5. 未内置的自定义 Provider（openai-compatible 端点）可被注册
@@ -42,10 +42,10 @@ process.env.USERPROFILE = home;
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.OPENAI_API_KEY;
 
-const authPath = join(home, ".zread", "auth.json");
-await mkdir(join(home, ".zread"), { recursive: true });
+const authPath = join(home, ".zread-pi", "auth.json");
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
-	join(home, ".zread", "config.yaml"),
+	join(home, ".zread-pi", "config.yaml"),
 	[
 		"language: zh",
 		"doc_language: zh",
@@ -95,7 +95,7 @@ try {
 
 	const authFile = JSON.parse(await readFile(authPath, "utf-8")) as Record<string, { type: string; key?: string }>;
 	check(
-		"凭据落盘到 ~/.zread/auth.json",
+		"凭据落盘到 ~/.zread-pi/auth.json",
 		authFile.anthropic?.type === "api_key" && authFile.anthropic.key === "sk-ant-test-key",
 		JSON.stringify(authFile),
 	);

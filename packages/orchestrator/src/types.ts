@@ -42,7 +42,7 @@ export interface BlueprintResult {
 
 /**
  * Blueprint generation options
- * Note: LLM config is loaded from ~/.zread/config.yaml, not passed here
+ * Note: LLM config is loaded from ~/.zread-pi/config.yaml, not passed here
  */
 export interface BlueprintOptions {
   projectRoot?: string;

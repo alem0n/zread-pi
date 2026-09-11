@@ -24,12 +24,12 @@ function check(name: string, ok: boolean, detail?: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// 1) 准备临时 HOME（.zread/config.yaml）与目标仓库
+// 1) 准备临时 HOME（.zread-pi/config.yaml）与目标仓库
 // ---------------------------------------------------------------------------
 
 const home = await mkdtemp(join(tmpdir(), "zread-pi-home-"));
 const repo = await mkdtemp(join(tmpdir(), "zread-pi-repo-"));
-await mkdir(join(home, ".zread"), { recursive: true });
+await mkdir(join(home, ".zread-pi"), { recursive: true });
 await mkdir(join(repo, "src"), { recursive: true });
 await writeFile(
 	join(repo, "src", "greet.ts"),
@@ -131,7 +131,7 @@ const server = Bun.serve({
 });
 
 await writeFile(
-	join(home, ".zread", "config.yaml"),
+	join(home, ".zread-pi", "config.yaml"),
 	[
 		"language: en",
 		"doc_language: en",

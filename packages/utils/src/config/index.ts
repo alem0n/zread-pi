@@ -50,9 +50,9 @@ export function normalizeThinkingLevel(value: unknown): ThinkingLevel {
   return isThinkingLevel(value) ? value : 'off';
 }
 
-/** ~/.zread 目录（延迟计算，测试可以覆盖 HOME/USERPROFILE） */
+/** ~/.zread-pi 目录（延迟计算，测试可以覆盖 HOME/USERPROFILE） */
 export function getZreadDir(): string {
-  return join(homedir(), '.zread');
+  return join(homedir(), '.zread-pi');
 }
 
 /** 应用配置文件路径 */
@@ -175,7 +175,7 @@ export function getConfiguredProviderIds(config: AppConfig): string[] {
 /**
  * 检查配置是否为首次配置（LLM 未配置）
  *
- * 新版配置把凭据保存在 ~/.zread/auth.json，因此只要 provider/model 已选定
+ * 新版配置把凭据保存在 ~/.zread-pi/auth.json，因此只要 provider/model 已选定
  * 就视为已配置；旧版 config.yaml 里的 api_key 仍然兼容。
  */
 export function isFirstTimeConfig(config: AppConfig): boolean {

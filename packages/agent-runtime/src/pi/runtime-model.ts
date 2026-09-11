@@ -3,10 +3,10 @@
  * 解析为 pi-ai 的 Provider + Model，并暴露 streamSimple / completeSimple 供业务使用。
  *
  * 两条路径：
- * 1. catalog 路径（优先）：providerId 命中 pi-ai 内置 provider 或 ~/.zread/config.yaml
+ * 1. catalog 路径（优先）：providerId 命中 pi-ai 内置 provider 或 ~/.zread-pi/config.yaml
  *    里配置过的 provider 时，直接使用 provider-catalog 里的 Models 集合：
  *      · 真实模型元数据（contextWindow / maxTokens / cost / reasoning）
- *      · OAuth 凭据自动刷新，凭据来自 ~/.zread/auth.json
+ *      · OAuth 凭据自动刷新，凭据来自 ~/.zread-pi/auth.json
  *      · 用户自定义模型（llm.providers.<id>.models）自动合并
  * 2. 回退路径：providerId 未知（旧配置 / 第三方网关），沿用单模型 Provider：
  *      未登记 providerId 回退 OpenAI 兼容协议（旧实现会抛 "Unsupported provider"）。
@@ -49,11 +49,11 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
 
 export interface RuntimeModelOptions {
-	/** 显式 providerId（来自 ~/.zread/config.yaml 的 llm.provider） */
+	/** 显式 providerId（来自 ~/.zread-pi/config.yaml 的 llm.provider） */
 	providerId?: string;
 	/** 模型 id（来自 llm.model） */
 	modelId: string;
-	/** API Key（旧版扁平配置；新版凭据在 ~/.zread/auth.json） */
+	/** API Key（旧版扁平配置；新版凭据在 ~/.zread-pi/auth.json） */
 	apiKey?: string;
 	/** 自定义 baseURL（来自 llm.base_url） */
 	baseURL?: string;

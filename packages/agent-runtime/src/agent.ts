@@ -538,7 +538,7 @@ class AgentRuntimeImpl implements AgentInstance {
 		const override = options.runtimeOverride;
 		if (!modelId && !override) throw new Error("Agent option `model` is required");
 		if (!options.apiKey && !override) {
-			// 新版配置的凭据在 ~/.zread/auth.json（pi CredentialStore），
+			// 新版配置的凭据在 ~/.zread-pi/auth.json（pi CredentialStore），
 			// 只要 providerId 命中 catalog 就无需显式 apiKey。
 			const providerId =
 				options.providerId ??
