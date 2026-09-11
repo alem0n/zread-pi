@@ -6,7 +6,7 @@
  * - 与 wiki-generate/mapper.ts 共享基础事件映射逻辑
  */
 
-import type { ArticleEventPayload, TokenUsage } from '@open-zread/orchestrator';
+import type { ArticleEventPayload, TokenUsage } from '@zread-pi/orchestrator';
 import type { SyncCatalogState, SyncArticlesState, SyncPageState } from './types';
 import { initialSyncPageState } from './state';
 

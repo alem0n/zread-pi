@@ -3,11 +3,11 @@
  *
  * 链路：generateWikiCatalog()
  *   -> Orchestrator/createAgent（业务编排，原样保留）
- *   -> @open-zread/agent-runtime 适配层
+ *   -> @zread-pi/agent-runtime 适配层
  *   -> pi Agent 循环
  *   -> pi-ai openai-completions adapter -> 本地 mock OpenAI 服务
  *   -> 模型返回 generate_blueprint 工具调用
- *   -> 真实工具执行：generateWikiJson() 写出 .open-zread/wiki/wiki.json
+ *   -> 真实工具执行：generateWikiJson() 写出 .zread-pi/wiki/wiki.json
  *   -> 第二轮：模型返回收尾文本 -> SDKResultMessage(success)
  *
  * 运行：bun run packages/orchestrator/test/e2e-blueprint.ts
@@ -27,8 +27,8 @@ function check(name: string, ok: boolean, detail?: string): void {
 // 1) 准备临时 HOME（.zread/config.yaml）与目标仓库
 // ---------------------------------------------------------------------------
 
-const home = await mkdtemp(join(tmpdir(), "open-zread-home-"));
-const repo = await mkdtemp(join(tmpdir(), "open-zread-repo-"));
+const home = await mkdtemp(join(tmpdir(), "zread-pi-home-"));
+const repo = await mkdtemp(join(tmpdir(), "zread-pi-repo-"));
 await mkdir(join(home, ".zread"), { recursive: true });
 await mkdir(join(repo, "src"), { recursive: true });
 await writeFile(
@@ -169,7 +169,7 @@ const result = await generateWikiCatalog((event) => {
 // 4) 断言（正向场景：模型调用 generate_blueprint 产出 wiki.json）
 // ---------------------------------------------------------------------------
 
-const wikiJsonPath = join(repo, ".open-zread", "wiki", "wiki.json");
+const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
 let blueprint: Record<string, unknown> | undefined;
 try {
 	blueprint = JSON.parse(await readFile(wikiJsonPath, "utf-8")) as Record<string, unknown>;

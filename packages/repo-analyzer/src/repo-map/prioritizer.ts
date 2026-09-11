@@ -2,7 +2,7 @@
  * File Prioritizer - Calculate file priority scores for Repo Map
  */
 
-import type { SymbolInfo, FilePriority } from '@open-zread/types';
+import type { SymbolInfo, FilePriority } from '@zread-pi/types';
 import { REPO_MAP_CONFIG } from './constants.js';
 import { getDepth, estimateTokens } from './token-counter.js';
 

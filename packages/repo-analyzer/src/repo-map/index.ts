@@ -4,8 +4,8 @@
  * Replaces Dehydrator with a tree-structured output optimized for LLM comprehension.
  */
 
-import type { SymbolManifest, RepoMapOptions, RepoMapOutput, DirectoryTreeOutput, CoreSignaturesOutput, ModuleDetailsOutput, DirectoryTreeNode } from '@open-zread/types';
-import { logger, getCacheDir, writeTextFile } from '@open-zread/utils';
+import type { SymbolManifest, RepoMapOptions, RepoMapOutput, DirectoryTreeOutput, CoreSignaturesOutput, ModuleDetailsOutput, DirectoryTreeNode } from '@zread-pi/types';
+import { logger, getCacheDir, writeTextFile } from '@zread-pi/utils';
 import { join } from 'path';
 import { countReferences } from './reference-counter.js';
 import { REPO_MAP_CONFIG } from './constants.js';

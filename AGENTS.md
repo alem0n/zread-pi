@@ -1,4 +1,4 @@
-# AGENTS.md — open-zread-pi 上下文与开发规则
+# AGENTS.md — zread-pi 上下文与开发规则
 
 本文件是 AI 代理与人类开发者在本仓库工作的**唯一入口约定**：先读这里，再动手。
 与 `README.md`（怎么用）、`MIGRATION.md`（为什么这样迁移）配合使用；三者冲突时以本文件为准。
@@ -12,7 +12,7 @@
 
 ## 1. 这个仓库是什么
 
-**open_zread 的业务层运行在 pi 的 agent 内核之上。**
+**zread-pi 的业务层运行在 pi 的 agent 内核之上。**
 原来的 `packages/agent-sdk`（自研 QueryEngine、API 级重试、整文件会话）被 `packages/agent-runtime` 适配层取代，
 内部改由 `@earendil-works/pi-ai` + `@earendil-works/pi-agent-core` 驱动，**对外契约不变，业务逻辑零改动**。
 
@@ -49,7 +49,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 上下文压缩用 pi 的 `transformContext` + `compaction` | 每次请求前按 `model.contextWindow - reserveTokens` 判定，超限时调用 pi 的 `prepareCompaction` / `compact` 生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；`shouldStopAfterTurn` 在压缩无法腾出空间时优雅停止（`error_context_full`），不让 provider 报上下文溢出 |
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
-| 浏览文档：服务端返回的 URL 必须真实可访问 | 有构建产物（打包 `dist/browse` / 源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码运行且未构建时进程内启动 Vite dev server（`/api` 代理到 API 端口）。不再依赖用户另起 `browse:dev`，也不再返回没人监听的 5173；启动失败在 TUI 显示原因（`OPEN_ZREAD_BROWSE_DIST` / `OPEN_ZREAD_BROWSE_NO_OPEN` 供自定义与测试） |
+| 浏览文档：服务端返回的 URL 必须真实可访问 | 有构建产物（打包 `dist/browse` / 源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码运行且未构建时进程内启动 Vite dev server（`/api` 代理到 API 端口）。不再依赖用户另起 `browse:dev`，也不再返回没人监听的 5173；启动失败在 TUI 显示原因（`ZREAD_PI_BROWSE_DIST` / `ZREAD_PI_BROWSE_NO_OPEN` 供自定义与测试） |
 | `apps/browse` 不进根 workspaces | React 19（browse）与 React 18（ink）混装会让 CLI 启动即崩，见 §6.3 |
 
 ### 1.2 契约冻结点（破坏即需同步改业务层）
@@ -133,7 +133,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 4. **合并 `master` 一律由用户手动执行**：AI 不得自行执行 `git checkout master` / `git merge`，只能把分支、验证结果、版本升级建议与合并命令准备好，交用户执行。
 5. **每次合并都要按 §4.4 处理版本号**（主版本由用户定义），版本升级随分支提交。
 6. 禁止：`git push --force`、`git commit --no-verify`、`git reset --hard` 丢弃他人改动。
-7. 禁止提交生成物：`node_modules/`、`dist/`、`.open-zread/`、`__pycache__/`（已在 `.gitignore`）。
+7. 禁止提交生成物：`node_modules/`、`dist/`、`.zread-pi/`、`__pycache__/`（已在 `.gitignore`）。
 
 ### 4.1 标准流程
 
@@ -270,10 +270,10 @@ Refs: MIGRATION.md §4
 首次解析某种语言会从 CDN 下载 WASM 到 `~/.zread/parsers`。
 
 ### 6.5 生成的 Wiki 产物不入库
-流水线会在**目标仓库**写出 `.open-zread/wiki/**`；夹具里也一样。
+流水线会在**目标仓库**写出 `.zread-pi/wiki/**`；夹具里也一样。
 它已被两处 `.gitignore` 覆盖，跑完测试或试跑后无需提交。
 
-### 6.6 配置与凭据在 open_zread 侧
+### 6.6 配置与凭据在 zread-pi 侧
 - `~/.zread/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）——倒数第 1 轮会提示模型立即输出，超限后自动允许 1 轮宽限（`finalization.graceTurns`），仍不收敛才 `error_max_turns`。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
 - `~/.zread/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
 - `~/.zread/models-store.json`：动态 Provider 的模型目录缓存。
@@ -326,7 +326,7 @@ Refs: MIGRATION.md §4
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **open-zread-pi** (3515 symbols, 8730 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **zread-pi** (3515 symbols, 8730 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -349,10 +349,10 @@ This project is indexed by GitNexus as **open-zread-pi** (3515 symbols, 8730 rel
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/open-zread-pi/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/open-zread-pi/clusters` | All functional areas |
-| `gitnexus://repo/open-zread-pi/processes` | All execution flows |
-| `gitnexus://repo/open-zread-pi/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/zread-pi/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/zread-pi/clusters` | All functional areas |
+| `gitnexus://repo/zread-pi/processes` | All execution flows |
+| `gitnexus://repo/zread-pi/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

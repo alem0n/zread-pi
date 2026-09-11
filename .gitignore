@@ -5,7 +5,7 @@ dist-bin/
 *.tsbuildinfo
 
 # 生成的 Wiki 产物（在目标仓库里生成，不入库）
-.open-zread/
+.zread-pi/
 
 # 日志与临时文件
 *.log

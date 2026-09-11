@@ -33,7 +33,7 @@ const EMPTY_USAGE = {
 };
 
 /**
- * 把 open_zread 的归一化消息转换为 pi 的 Message。
+ * 把 zread-pi 的归一化消息转换为 pi 的 Message。
  * 注意：pi 的上下文估算会读取 assistant 消息的 usage，因此 assistant 分支
  * 必须产出完整的 AssistantMessage（含 usage/stopReason），无论 content 是字符串还是块数组。
  */

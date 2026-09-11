@@ -6,7 +6,7 @@
  * 用户没另起 Vite 时浏览器直接 ERR_CONNECTION_REFUSED。
  *
  * 覆盖：
- * 1. 静态资源模式（OPEN_ZREAD_BROWSE_DIST）：同一端口提供 SPA + API，URL 真实可访问
+ * 1. 静态资源模式（ZREAD_PI_BROWSE_DIST）：同一端口提供 SPA + API，URL 真实可访问
  * 2. 静态资源 / SPA fallback / 未知 API 404
  * 3. close() 之后端口不再可连（对应 ESC 退出服务器）
  * 4. BrowsePage（pi-tui）集成：显示「服务器已启动」+ 真实访问地址，ESC 停止
@@ -79,9 +79,9 @@ const PAGE = {
   associatedFiles: ["hello.py"],
 };
 
-await mkdir(join(repo, ".open-zread", "wiki", PAGE.section), { recursive: true });
+await mkdir(join(repo, ".zread-pi", "wiki", PAGE.section), { recursive: true });
 await writeFile(
-  join(repo, ".open-zread", "wiki", "wiki.json"),
+  join(repo, ".zread-pi", "wiki", "wiki.json"),
   JSON.stringify(
     {
       id: "browse-test",
@@ -95,7 +95,7 @@ await writeFile(
   "utf-8",
 );
 await writeFile(
-  join(repo, ".open-zread", "wiki", PAGE.section, PAGE.file),
+  join(repo, ".zread-pi", "wiki", PAGE.section, PAGE.file),
   "# 概览\n\n浏览文档用夹具页面。\n",
   "utf-8",
 );
@@ -108,8 +108,8 @@ await writeFile(
 );
 await writeFile(join(dist, "assets", "app.js"), 'console.log("browse-asset");\n', "utf-8");
 
-process.env.OPEN_ZREAD_BROWSE_DIST = dist;
-process.env.OPEN_ZREAD_BROWSE_NO_OPEN = "1";
+process.env.ZREAD_PI_BROWSE_DIST = dist;
+process.env.ZREAD_PI_BROWSE_NO_OPEN = "1";
 
 const { startWikiBrowseServer, hasWikiCatalog } = await import("../src/commands/browse-server");
 
@@ -277,7 +277,7 @@ app.exit();
 
 console.log("▶ 兜底路径（in-process Vite dev server）");
 
-delete process.env.OPEN_ZREAD_BROWSE_DIST;
+delete process.env.ZREAD_PI_BROWSE_DIST;
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const browseRoot = resolve(testDir, "..", "..", "browse");
@@ -315,7 +315,7 @@ if (sourceDistExists) {
 
 console.log("▶ 错误路径");
 
-process.env.OPEN_ZREAD_BROWSE_DIST = join(repo, "not-a-dist");
+process.env.ZREAD_PI_BROWSE_DIST = join(repo, "not-a-dist");
 let errorMessage = "";
 try {
   await startWikiBrowseServer(repo, { openBrowser: false });
@@ -323,8 +323,8 @@ try {
   errorMessage = error instanceof Error ? error.message : String(error);
 }
 check(
-  "OPEN_ZREAD_BROWSE_DIST 无效时抛出可读错误",
-  errorMessage.includes("OPEN_ZREAD_BROWSE_DIST") && errorMessage.includes("index.html"),
+  "ZREAD_PI_BROWSE_DIST 无效时抛出可读错误",
+  errorMessage.includes("ZREAD_PI_BROWSE_DIST") && errorMessage.includes("index.html"),
   errorMessage,
 );
 
@@ -332,8 +332,8 @@ check(
 // 清理
 // ---------------------------------------------------------------------------
 
-delete process.env.OPEN_ZREAD_BROWSE_DIST;
-delete process.env.OPEN_ZREAD_BROWSE_NO_OPEN;
+delete process.env.ZREAD_PI_BROWSE_DIST;
+delete process.env.ZREAD_PI_BROWSE_NO_OPEN;
 process.chdir(join(home, ".."));
 await rm(repo, { recursive: true, force: true });
 await rm(dist, { recursive: true, force: true });

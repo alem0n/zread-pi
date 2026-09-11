@@ -16,7 +16,7 @@ import type {
   ModelsStoreEntry,
   ModelsStoreOperationOptions,
 } from '@earendil-works/pi-ai';
-import { getZreadModelsStorePath } from '@open-zread/utils';
+import { getZreadModelsStorePath } from '@zread-pi/utils';
 
 type StoreData = Record<string, ModelsStoreEntry>;
 

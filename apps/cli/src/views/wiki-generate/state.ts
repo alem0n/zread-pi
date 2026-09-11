@@ -4,7 +4,7 @@
  * 无外部依赖，易于测试。
  */
 
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage } from '@zread-pi/types';
 import type {
   CatalogState,
   ArticlesState,

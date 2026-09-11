@@ -80,7 +80,7 @@ const check = (name: string, ok: boolean, detail?: string): void => {
 console.log("▶ 真实终端（ProcessTerminal）启动 / 退出检查");
 check("进入备用屏幕缓冲", stdout.includes("\x1b[?1049h"));
 check("渲染了项目信息框", frameText.includes("╭") && frameText.includes("╰"));
-check("渲染了项目名", frameText.includes("open-zread"));
+check("渲染了项目名", frameText.includes("zread-pi"));
 check("渲染了页面文案", frameText.includes("尚无文档目录"));
 check("渲染了选项", frameText.includes("生成文档") && frameText.includes("配置") && frameText.includes("退出"));
 

@@ -1,7 +1,7 @@
 /**
- * @open-zread/types
+ * @zread-pi/types
  *
- * Shared type definitions for the open-zread project.
+ * Shared type definitions for the zread-pi project.
  *
  * Modules:
  * - manifest: File manifest (scanner output)

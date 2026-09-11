@@ -2,7 +2,7 @@
  * cli-target-dir.ts —— CLI 目标目录参数（-d / --dir）回归
  *
  * 覆盖真实 CLI 进程（ProcessTerminal + 管道 stdin）+ mock LLM：
- * - `--dir <绝对路径>`：头部显示目标目录；扫描与 `.open-zread` 落盘都切到目标目录，调用目录不被写入
+ * - `--dir <绝对路径>`：头部显示目标目录；扫描与 `.zread-pi` 落盘都切到目标目录，调用目录不被写入
  * - `-d <相对路径>`：按「调用时的当前目录」解析（复用上一步产物，验证确实指向同一目录）
  * - `wiki --dir <路径>`：显式子命令写法同样生效
  * - 目录不存在 / 路径不是目录：退出码 1 + 单行干净错误信息（不进入备用屏幕）
@@ -195,8 +195,8 @@ const server = Bun.serve({
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const cliEntry = join(repoRoot, "apps", "cli", "src", "index.ts");
 
-const home = await mkdtemp(join(tmpdir(), "open-zread-dir-home-"));
-const workspace = await mkdtemp(join(tmpdir(), "open-zread-dir-work-"));
+const home = await mkdtemp(join(tmpdir(), "zread-pi-dir-home-"));
+const workspace = await mkdtemp(join(tmpdir(), "zread-pi-dir-work-"));
 const targetRepo = join(workspace, "target-repo");
 
 await mkdir(join(home, ".zread"), { recursive: true });
@@ -326,7 +326,7 @@ const canonicalTarget = await canonical(targetRepo);
   check("--dir 目录无 wiki 时状态为「尚无文档目录」", homeRendered);
 
   run.send("\r");
-  const wikiJsonPath = join(targetRepo, ".open-zread", "wiki", "wiki.json");
+  const wikiJsonPath = join(targetRepo, ".zread-pi", "wiki", "wiki.json");
   const generated = await waitFor(() => exists(wikiJsonPath), 40000, "目标目录生成 wiki.json");
   check("wiki.json 落盘到目标目录", generated, wikiJsonPath);
 
@@ -342,7 +342,7 @@ const canonicalTarget = await canonical(targetRepo);
 
   // 页面文件由并行 Agent 逐个 write_page 落盘，必须在「文章 2/2」之后再判定
   const pageFiles = PAGES.map((page) =>
-    join(targetRepo, ".open-zread", "wiki", page.section, page.file),
+    join(targetRepo, ".zread-pi", "wiki", page.section, page.file),
   );
   const pagesWritten = await waitFor(
     async () => (await Promise.all(pageFiles.map((file) => exists(file)))).every(Boolean),
@@ -353,7 +353,7 @@ const canonicalTarget = await canonical(targetRepo);
     check(`页面文件已生成：${page.section}/${page.file}`, await exists(pageFiles[index]));
   }
   check("全部页面文件在超时前落盘", pagesWritten);
-  check("调用目录未被写入 .open-zread", !(await exists(join(workspace, ".open-zread"))));
+  check("调用目录未被写入 .zread-pi", !(await exists(join(workspace, ".zread-pi"))));
   check("发生了真实的 mock LLM 请求", requestCount >= 4, `requests=${requestCount}`);
 
   const exitCode = await stop(run);

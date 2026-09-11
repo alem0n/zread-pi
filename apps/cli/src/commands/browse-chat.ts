@@ -2,10 +2,10 @@ import type {
   CreateMessageResponse,
   LLMProvider,
   NormalizedMessageParam,
-} from '@open-zread/agent-runtime';
-import { createProvider } from '@open-zread/agent-runtime';
-import type { AppConfig } from '@open-zread/types';
-import { loadConfig } from '@open-zread/utils';
+} from '@zread-pi/agent-runtime';
+import { createProvider } from '@zread-pi/agent-runtime';
+import type { AppConfig } from '@zread-pi/types';
+import { loadConfig } from '@zread-pi/utils';
 
 export interface BrowseChatMessage {
   role: 'user' | 'assistant';

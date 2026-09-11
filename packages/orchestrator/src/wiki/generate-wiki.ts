@@ -11,12 +11,12 @@
  */
 
 import pLimit from 'p-limit';
-import { fileExists, getWikiDir, joinPath, loadWikiBlueprint, logger } from '@open-zread/utils';
+import { fileExists, getWikiDir, joinPath, loadWikiBlueprint, logger } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
-import { FileEditTool, FileReadTool, GlobTool, GrepTool, type ToolDefinition } from '@open-zread/agent-runtime';
+import { FileEditTool, FileReadTool, GlobTool, GrepTool, type ToolDefinition } from '@zread-pi/agent-runtime';
 import { WritePageTool } from '../tools/page-tools.js';
 import PageAgentPrompt from '../prompts/page-agent';
-import type { WikiPage } from '@open-zread/types';
+import type { WikiPage } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
 /**
@@ -50,7 +50,7 @@ ${associatedFilesList}
 - \`section\`: "${page.section}"
 - \`title\`: "${page.title}"
 
-输出文件将写入: \`.open-zread/wiki/${page.section}/${page.file}\`
+输出文件将写入: \`.zread-pi/wiki/${page.section}/${page.file}\`
 
 请按照三步工作流执行，最后使用 write_page 输出文档（务必传入完整的 file 和 section 参数）。`;
 }
@@ -228,7 +228,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         const pageResult: PageResult = {
           slug: page.slug,
           success: true,
-          outputPath: `.open-zread/wiki/${page.section}/${page.file}`,
+          outputPath: `.zread-pi/wiki/${page.section}/${page.file}`,
           durationMs: Math.round(performance.now() - pageStartTime),
           tokenUsage: result.tokenUsage,
         };

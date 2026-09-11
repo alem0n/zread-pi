@@ -2,9 +2,9 @@
  * Output Tools - Generate and save wiki.json blueprint
  */
 
-import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@open-zread/agent-runtime'
-import { generateWikiJson, loadConfig } from '@open-zread/utils'
-import type { WikiPage } from '@open-zread/types'
+import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@zread-pi/agent-runtime'
+import { generateWikiJson, loadConfig } from '@zread-pi/utils'
+import type { WikiPage } from '@zread-pi/types'
 import type { TechStackSummary } from '../types.js'
 
 /**
@@ -14,7 +14,7 @@ import type { TechStackSummary } from '../types.js'
  */
 export const GenerateBlueprintTool: ToolDefinition = {
   name: 'generate_blueprint',
-  description: '生成 Wiki 蓝图 JSON 文件，保存到 .open-zread/wiki 目录。',
+  description: '生成 Wiki 蓝图 JSON 文件，保存到 .zread-pi/wiki 目录。',
   inputSchema: {
     type: 'object',
     properties: {
@@ -143,7 +143,7 @@ export const ValidateBlueprintTool: ToolDefinition = {
       const projectRoot = input.projectRoot as unknown as string | undefined
       const { stat, readdir } = await import('fs/promises')
       const { join } = await import('path')
-      const { getProjectRoot } = await import('@open-zread/utils')
+      const { getProjectRoot } = await import('@zread-pi/utils')
 
       const root = projectRoot || getProjectRoot()
 

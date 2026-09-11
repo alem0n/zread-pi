@@ -1,5 +1,5 @@
 {
-  "name": "@open-zread/cli",
+  "name": "@zread-pi/cli",
   "version": "1.2.2",
   "description": "一行命令，把整个项目变成高质量的 Wiki 文档库。AI 帮你读代码、理逻辑、写文档。",
   "keywords": [
@@ -18,11 +18,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bb-boy680/open-zread.git"
+    "url": "git+https://github.com/alem0n/zread-pi.git"
   },
-  "homepage": "https://github.com/bb-boy680/open-zread#readme",
+  "homepage": "https://github.com/alem0n/zread-pi#readme",
   "bugs": {
-    "url": "https://github.com/bb-boy680/open-zread/issues"
+    "url": "https://github.com/alem0n/zread-pi/issues"
   },
   "engines": {
     "node": ">=18"
@@ -35,7 +35,7 @@
     "dist"
   ],
   "bin": {
-    "open-zread": "./dist/index.js"
+    "zread-pi": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "scripts": {
@@ -52,11 +52,11 @@
     "open": "^10.1.2"
   },
   "devDependencies": {
-    "@open-zread/agent-runtime": "workspace:*",
-    "@open-zread/orchestrator": "workspace:*",
-    "@open-zread/repo-analyzer": "workspace:*",
-    "@open-zread/types": "workspace:*",
-    "@open-zread/utils": "workspace:*",
+    "@zread-pi/agent-runtime": "workspace:*",
+    "@zread-pi/orchestrator": "workspace:*",
+    "@zread-pi/repo-analyzer": "workspace:*",
+    "@zread-pi/types": "workspace:*",
+    "@zread-pi/utils": "workspace:*",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0",
     "@types/express": "^5.0.6"

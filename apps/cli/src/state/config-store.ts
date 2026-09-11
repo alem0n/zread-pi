@@ -9,8 +9,8 @@
  * 新增：per-provider 配置与自定义模型（同时配置多个 Provider）。
  */
 
-import type { AppConfig, CustomModelConfig, LlmProviderConfig } from "@open-zread/types";
-import { DEFAULT_CONFIG, isFirstTimeConfig, loadConfig, saveConfig } from "@open-zread/utils";
+import type { AppConfig, CustomModelConfig, LlmProviderConfig } from "@zread-pi/types";
+import { DEFAULT_CONFIG, isFirstTimeConfig, loadConfig, saveConfig } from "@zread-pi/utils";
 
 export class ConfigStore {
   config: AppConfig = structuredClone(DEFAULT_CONFIG);

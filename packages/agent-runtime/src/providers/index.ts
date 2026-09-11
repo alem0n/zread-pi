@@ -1,7 +1,7 @@
 /**
  * LLM Provider Factory（pi 版）
  *
- * 保留旧 @open-zread/agent-runtime 的导出面：
+ * 保留旧 @zread-pi/agent-runtime 的导出面：
  *   createProvider(providerIdOrApiType, { apiKey, baseURL }) => LLMProvider
  */
 

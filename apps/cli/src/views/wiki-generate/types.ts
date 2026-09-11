@@ -8,8 +8,8 @@
  * - 聚合状态：WikiGenerateState
  */
 
-import type { WikiPage } from '@open-zread/types';
-import type { TokenUsage } from '@open-zread/orchestrator';
+import type { WikiPage } from '@zread-pi/types';
+import type { TokenUsage } from '@zread-pi/orchestrator';
 
 // ==================== 基础状态类型 ====================
 
@@ -34,8 +34,8 @@ export type ArticleEventType =
 
 // ==================== 导出外部类型 ====================
 
-export type { WikiPage } from '@open-zread/types';
-export type { TokenUsage, ArticleEventPayload } from '@open-zread/orchestrator';
+export type { WikiPage } from '@zread-pi/types';
+export type { TokenUsage, ArticleEventPayload } from '@zread-pi/orchestrator';
 
 // ==================== 目录状态 ====================
 

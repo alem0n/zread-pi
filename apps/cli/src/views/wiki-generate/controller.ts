@@ -7,7 +7,7 @@
  * - useWikiGenerate：编排两者（目录完成后 reload wiki.json 再启动文章生成）
  */
 
-import { parseFiles, scanFiles } from "@open-zread/repo-analyzer";
+import { parseFiles, scanFiles } from "@zread-pi/repo-analyzer";
 import {
   fileExists,
   getWikiDir,
@@ -17,13 +17,13 @@ import {
   removeDir,
   saveCachedManifest,
   saveCachedSymbols,
-} from "@open-zread/utils";
+} from "@zread-pi/utils";
 import {
   generateWikiCatalog,
   generateWikiContent,
   type ArticleEventPayload,
   type CatalogEvent,
-} from "@open-zread/orchestrator";
+} from "@zread-pi/orchestrator";
 import { articleEventToState, catalogEventToState } from "./mapper";
 import { createInitialArticlesState, initialCatalogState } from "./state";
 import type { WikiStore } from "../../state/wiki-store";

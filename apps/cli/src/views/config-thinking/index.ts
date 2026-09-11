@@ -12,9 +12,9 @@
  */
 
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
-import type { ThinkingLevel } from "@open-zread/types";
-import { THINKING_LEVELS } from "@open-zread/utils";
-import { getZreadThinkingLevels, setZreadCatalogConfig } from "@open-zread/agent-runtime";
+import type { ThinkingLevel } from "@zread-pi/types";
+import { THINKING_LEVELS } from "@zread-pi/utils";
+import { getZreadThinkingLevels, setZreadCatalogConfig } from "@zread-pi/agent-runtime";
 import { Divider } from "../../tui/components/divider";
 import { Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";

@@ -3,7 +3,7 @@ import { mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 
-const WIKI_DIR = '.open-zread/wiki';
+const WIKI_DIR = '.zread-pi/wiki';
 const CURRENT_DIR = joinPath(WIKI_DIR, 'current');
 const VERSIONS_DIR = joinPath(WIKI_DIR, 'versions');
 

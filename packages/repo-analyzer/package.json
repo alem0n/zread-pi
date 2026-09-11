@@ -1,5 +1,5 @@
 {
-  "name": "@open-zread/repo-analyzer",
+  "name": "@zread-pi/repo-analyzer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,8 +18,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@open-zread/types": "workspace:*",
-    "@open-zread/utils": "workspace:*",
+    "@zread-pi/types": "workspace:*",
+    "@zread-pi/utils": "workspace:*",
     "ignore": "^5.2.0",
     "glob": "^10.0.0",
     "crypto-hash": "^1.3.0",

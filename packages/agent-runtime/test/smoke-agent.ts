@@ -31,7 +31,7 @@ const models = createModels();
 models.setProvider(faux.provider);
 const model = faux.getModel("faux-model") ?? faux.models[0];
 
-const workdir = await mkdtemp(join(tmpdir(), "open-zread-smoke-"));
+const workdir = await mkdtemp(join(tmpdir(), "zread-pi-smoke-"));
 const targetFile = join(workdir, "out.md");
 
 faux.setResponses([

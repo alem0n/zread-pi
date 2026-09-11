@@ -5,13 +5,13 @@
  * 按键：↑↓ 选择 | Enter 进入 | s 保存（有改动时）
  */
 
-import type { AppConfig } from "@open-zread/types";
+import type { AppConfig } from "@zread-pi/types";
 import { Divider } from "../../tui/components/divider";
 import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { thinkingLevelLabel } from "../../utils/thinking";
-import { DEFAULT_MAX_TURNS } from "@open-zread/utils";
+import { DEFAULT_MAX_TURNS } from "@zread-pi/utils";
 
 interface ConfigItem {
   key: string;

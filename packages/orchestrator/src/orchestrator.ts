@@ -4,8 +4,8 @@
  * Coordinates single Blueprint Agent to generate wiki.json blueprint.
  */
 
-import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@open-zread/agent-runtime';
-import { loadWikiBlueprint } from '@open-zread/utils';
+import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool } from '@zread-pi/agent-runtime';
+import { loadWikiBlueprint } from '@zread-pi/utils';
 import { createAgent } from './agents/create-agent';
 import GenerateCatalog from './prompts/generate-catalog';
 import { GenerateBlueprintTool, ValidateBlueprintTool } from './tools/output-tools.js';

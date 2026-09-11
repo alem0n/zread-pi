@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel } from '@open-zread/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel } from '@zread-pi/types';
 import { ensureDir } from '../file-io';
 
 /**

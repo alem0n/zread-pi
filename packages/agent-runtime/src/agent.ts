@@ -1,5 +1,5 @@
 /**
- * createAgent —— open_zread 业务层唯一依赖的 Agent 入口。
+ * createAgent —— zread-pi 业务层唯一依赖的 Agent 入口。
  *
  * 对外契约与旧 agent-sdk 完全一致：
  *   const agent = createAgent({ model, apiKey, baseURL, tools, systemPrompt, maxTurns, hooks, retryConfig })
@@ -48,7 +48,7 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-s
 import { createRuntimeModel, inferProviderId, type RuntimeModel } from "./pi/runtime-model.js";
 import { hasZreadProvider } from "./pi/provider-catalog.js";
 import { computeBackoff, isRetryableMessage, sleep, type RetryConfig } from "./retry.js";
-import type { ThinkingLevel } from "@open-zread/types";
+import type { ThinkingLevel } from "@zread-pi/types";
 import type {
 	ContentBlock,
 	PermissionMode,
@@ -163,7 +163,7 @@ function toCompactionEntries(effective: AgentMessage[], state: CompactionState |
 	if (state) {
 		entries.push({
 			type: "compaction",
-			id: "open-zread-compaction",
+			id: "zread-pi-compaction",
 			parentId: null,
 			seq: 0,
 			timestamp: state.timestamp,
@@ -178,8 +178,8 @@ function toCompactionEntries(effective: AgentMessage[], state: CompactionState |
 		const message = effective[index];
 		entries.push({
 			type: "message",
-			id: `open-zread-entry-${index}`,
-			parentId: index === 0 ? null : `open-zread-entry-${index - 1}`,
+			id: `zread-pi-entry-${index}`,
+			parentId: index === 0 ? null : `zread-pi-entry-${index - 1}`,
 			seq: index,
 			timestamp: typeof message.timestamp === "number" ? message.timestamp : Date.now(),
 			message,
@@ -270,7 +270,7 @@ export interface AgentInstance {
 }
 
 // ---------------------------------------------------------------------------
-// 工具桥接：ToolDefinition（open_zread 契约）→ AgentTool（pi 契约）
+// 工具桥接：ToolDefinition（zread-pi 契约）→ AgentTool（pi 契约）
 // ---------------------------------------------------------------------------
 
 interface ToolBridgeContext {
@@ -552,7 +552,7 @@ class AgentRuntimeImpl implements AgentInstance {
 
 		const cwd = options.cwd ?? process.cwd();
 
-		// 运行时模型：默认由 open_zread 的 LLM 配置构建；测试可注入 pi 原生 Model/streamFn
+		// 运行时模型：默认由 zread-pi 的 LLM 配置构建；测试可注入 pi 原生 Model/streamFn
 		let model: PiModel<any>;
 		let streamBase: BaseStreamFn;
 		let apiTypeForContext: ApiType;
@@ -817,7 +817,7 @@ class AgentRuntimeImpl implements AgentInstance {
 					stoppedByMaxTurns = true;
 					return true;
 				},
-				sessionId: `open-zread-${Date.now()}`,
+				sessionId: `zread-pi-${Date.now()}`,
 				toolExecution: "parallel",
 			});
 			agentRef = agent;
@@ -869,7 +869,7 @@ class AgentRuntimeImpl implements AgentInstance {
 			queue.push({
 				type: "system",
 				subtype: "init",
-				session_id: `open-zread-${startedAt}`,
+				session_id: `zread-pi-${startedAt}`,
 				tools: toolDefinitions.map((tool) => tool.name),
 				model: modelId ?? String(model.id),
 				cwd,

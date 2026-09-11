@@ -47,12 +47,12 @@ interface MessageMarker {
 const HISTORY_VERSION = 1;
 const MAX_HISTORY_SESSIONS = 10;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-const MESSAGE_START_PREFIX = '<!-- open-zread-message ';
-const MESSAGE_CONTENT_MARKER = '<!-- open-zread-content -->';
-const MESSAGE_END_MARKER = '<!-- /open-zread-message -->';
+const MESSAGE_START_PREFIX = '<!-- zread-pi-message ';
+const MESSAGE_CONTENT_MARKER = '<!-- zread-pi-content -->';
+const MESSAGE_END_MARKER = '<!-- /zread-pi-message -->';
 
 function chatDir(projectPath: string): string {
-  return path.join(projectPath, '.open-zread', 'chat');
+  return path.join(projectPath, '.zread-pi', 'chat');
 }
 
 function sessionsDir(projectPath: string): string {
@@ -195,7 +195,7 @@ function isMessageMarker(value: unknown): value is MessageMarker {
 function parseMessages(body: string): BrowseChatHistoryMessage[] {
   const messages: BrowseChatHistoryMessage[] = [];
   const pattern =
-    /<!-- open-zread-message ([^\n]+) -->[\s\S]*?<!-- open-zread-content -->\n?([\s\S]*?)\n?<!-- \/open-zread-message -->/g;
+    /<!-- zread-pi-message ([^\n]+) -->[\s\S]*?<!-- zread-pi-content -->\n?([\s\S]*?)\n?<!-- \/zread-pi-message -->/g;
   for (const match of body.matchAll(pattern)) {
     try {
       const marker = JSON.parse(match[1]) as unknown;

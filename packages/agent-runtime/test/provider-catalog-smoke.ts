@@ -15,7 +15,7 @@
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "@open-zread/utils";
+import { loadConfig } from "@zread-pi/utils";
 import {
 	createRuntimeModel,
 	getZreadModel,
@@ -35,7 +35,7 @@ function check(name: string, ok: boolean, detail?: string): void {
 	console.log(`${ok ? "  ✅" : "  ❌"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-const home = await mkdtemp(join(tmpdir(), "open-zread-catalog-home-"));
+const home = await mkdtemp(join(tmpdir(), "zread-pi-catalog-home-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 // 避免宿主环境变量把「未配置」判定污染

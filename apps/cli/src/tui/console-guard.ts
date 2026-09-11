@@ -8,7 +8,7 @@
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { getLogFile } from "@open-zread/utils";
+import { getLogFile } from "@zread-pi/utils";
 
 type ConsoleMethod = "log" | "info" | "warn" | "error" | "debug" | "trace";
 

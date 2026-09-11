@@ -10,7 +10,7 @@
  * - 旧凭据在之后再被当成「显式 apiKey」覆盖新 Provider 的登录结果。
  */
 
-import { getZreadCatalog } from "@open-zread/agent-runtime";
+import { getZreadCatalog } from "@zread-pi/agent-runtime";
 import type { ConfigStore } from "../state/config-store";
 
 /**

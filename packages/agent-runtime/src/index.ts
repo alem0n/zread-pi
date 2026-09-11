@@ -1,7 +1,7 @@
 /**
- * @open-zread/agent-runtime
+ * @zread-pi/agent-runtime
  *
- * open_zread 的 Agent 运行时层：对外暴露原先由 agent-sdk 提供的公共契约，
+ * zread-pi 的 Agent 运行时层：对外暴露原先由 agent-sdk 提供的公共契约，
  * 内部实现由 pi 提供（@earendil-works/pi-ai + @earendil-works/pi-agent-core）。
  *
  * 迁移对照：

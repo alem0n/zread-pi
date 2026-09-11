@@ -49,7 +49,7 @@ export function getProjectRoot(): string {
 }
 
 export function getOutputDir(): string {
-  return join(getProjectRoot(), '.open-zread');
+  return join(getProjectRoot(), '.zread-pi');
 }
 
 export function getCacheDir(): string {

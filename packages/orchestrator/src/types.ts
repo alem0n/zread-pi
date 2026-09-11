@@ -2,8 +2,8 @@
  * Blueprint Generation Types
  */
 
-import type { FileManifest, SymbolManifest } from '@open-zread/types';
-import type { TokenUsage } from '@open-zread/agent-runtime';
+import type { FileManifest, SymbolManifest } from '@zread-pi/types';
+import type { TokenUsage } from '@zread-pi/agent-runtime';
 
 /**
  * Tech stack summary (parsed from Repo Map or package.json)

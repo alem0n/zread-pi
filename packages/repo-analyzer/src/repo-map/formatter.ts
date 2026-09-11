@@ -2,7 +2,7 @@
  * Repo Map Formatter - Format tree structure for LLM readability
  */
 
-import type { SymbolInfo, DirectoryTreeNode, RepoMapOutput } from '@open-zread/types';
+import type { SymbolInfo, DirectoryTreeNode, RepoMapOutput } from '@zread-pi/types';
 import { REPO_MAP_CONFIG } from './constants.js';
 
 /**

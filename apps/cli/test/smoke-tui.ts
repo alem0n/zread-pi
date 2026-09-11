@@ -54,8 +54,8 @@ const settle = async (ms = 40): Promise<void> => {
 // 1) 临时 HOME + 目标仓库（避免读写真实 ~/.zread）
 // ---------------------------------------------------------------------------
 
-const home = await mkdtemp(join(tmpdir(), "open-zread-tui-home-"));
-const repo = await mkdtemp(join(tmpdir(), "open-zread-tui-repo-"));
+const home = await mkdtemp(join(tmpdir(), "zread-pi-tui-home-"));
+const repo = await mkdtemp(join(tmpdir(), "zread-pi-tui-repo-"));
 
 await mkdir(join(home, ".zread"), { recursive: true });
 await writeFile(
@@ -88,7 +88,7 @@ const { App } = await import("../src/tui/app");
 const { routes } = await import("../src/routes");
 const { ProcessTerminal } = await import("@earendil-works/pi-tui");
 const { getVersion } = await import("../src/utils/display");
-const { setZreadCatalogConfig } = await import("@open-zread/agent-runtime");
+const { setZreadCatalogConfig } = await import("@zread-pi/agent-runtime");
 
 // 项目版本（仓库根 package.json，AGENTS.md §4.4 唯一来源）
 const projectVersion = (
@@ -190,7 +190,7 @@ console.log("▶ TUI 冒烟测试");
     stripAnsi(raw[0]).startsWith("  ╭") && stripAnsi(raw[0]).endsWith("╮"),
     indent(stripAnsi(raw[0] ?? "")),
   );
-  checkContains("标题行包含项目名与版本", text, `open-zread ${projectVersion}`);
+  checkContains("标题行包含项目名与版本", text, `zread-pi ${projectVersion}`);
   checkContains("标题行包含提供商", text, "提供商: openai-compatible");
   checkContains("标题行包含模型", text, "模型: gpt-4o-mini");
   checkContains("标题行包含思考深度", text, "思考深度: 关闭 (off)");
@@ -414,7 +414,7 @@ console.log("▶ TUI 冒烟测试");
 
 // --- 用例 4d：未选择模型时展示「全部等级可选」提示 ---
 {
-  const bareHome = await mkdtemp(join(tmpdir(), "open-zread-tui-bare-"));
+  const bareHome = await mkdtemp(join(tmpdir(), "zread-pi-tui-bare-"));
   await mkdir(join(bareHome, ".zread"), { recursive: true });
   await writeFile(
     join(bareHome, ".zread", "config.yaml"),
@@ -782,7 +782,7 @@ console.log("▶ TUI 冒烟测试");
 
 // --- 用例 10：wiki 生成页的文章列表分页（长列表）---
 {
-  const wikiDir = join(repo, ".open-zread", "wiki");
+  const wikiDir = join(repo, ".zread-pi", "wiki");
   const pages = [];
   for (let i = 1; i <= 40; i++) {
     pages.push({
@@ -832,7 +832,7 @@ console.log("▶ TUI 冒烟测试");
 // --- 用例 11：console 接管（TUI 期间不往终端写东西）---
 {
   const { captureConsoleToLog } = await import("../src/tui/console-guard");
-  const { getLogFile } = await import("@open-zread/utils");
+  const { getLogFile } = await import("@zread-pi/utils");
   const { readFile } = await import("node:fs/promises");
 
   const restore = captureConsoleToLog();

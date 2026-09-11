@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import type { ArticleEventPayload, TokenUsage } from '@open-zread/orchestrator';
+import type { ArticleEventPayload, TokenUsage } from '@zread-pi/orchestrator';
 import {
   syncCatalogEventToState,
   syncArticleEventToState,

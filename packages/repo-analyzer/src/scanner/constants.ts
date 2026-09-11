@@ -4,7 +4,7 @@ export const SCANNER_CONFIG = {
   ignore_patterns: [
     'node_modules',
     '.git',
-    '.open-zread',
+    '.zread-pi',
     'dist',
     'build',
     'out',

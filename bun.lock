@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "open-zread-pi",
+      "name": "zread-pi",
       "devDependencies": {
         "@types/node": "^22.20.2",
         "bun-types": "^1.3.12",
@@ -13,10 +13,10 @@
       },
     },
     "apps/cli": {
-      "name": "@open-zread/cli",
+      "name": "@zread-pi/cli",
       "version": "1.2.2",
       "bin": {
-        "open-zread": "./dist/index.js",
+        "zread-pi": "./dist/index.js",
       },
       "dependencies": {
         "@earendil-works/pi-tui": "^0.85.1",
@@ -26,35 +26,35 @@
         "open": "^10.1.2",
       },
       "devDependencies": {
-        "@open-zread/agent-runtime": "workspace:*",
-        "@open-zread/orchestrator": "workspace:*",
-        "@open-zread/repo-analyzer": "workspace:*",
-        "@open-zread/types": "workspace:*",
-        "@open-zread/utils": "workspace:*",
+        "@zread-pi/agent-runtime": "workspace:*",
+        "@zread-pi/orchestrator": "workspace:*",
+        "@zread-pi/repo-analyzer": "workspace:*",
+        "@zread-pi/types": "workspace:*",
+        "@zread-pi/utils": "workspace:*",
         "@types/express": "^5.0.6",
         "@types/node": "^20.0.0",
         "typescript": "^5.0.0",
       },
     },
     "packages/agent-runtime": {
-      "name": "@open-zread/agent-runtime",
+      "name": "@zread-pi/agent-runtime",
       "version": "0.1.0",
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.85.1",
         "@earendil-works/pi-ai": "0.85.1",
-        "@open-zread/types": "workspace:*",
-        "@open-zread/utils": "workspace:*",
+        "@zread-pi/types": "workspace:*",
+        "@zread-pi/utils": "workspace:*",
       },
     },
     "packages/orchestrator": {
-      "name": "@open-zread/orchestrator",
+      "name": "@zread-pi/orchestrator",
       "version": "0.1.0",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.52.0",
-        "@open-zread/agent-runtime": "workspace:*",
-        "@open-zread/repo-analyzer": "workspace:*",
-        "@open-zread/types": "workspace:*",
-        "@open-zread/utils": "workspace:*",
+        "@zread-pi/agent-runtime": "workspace:*",
+        "@zread-pi/repo-analyzer": "workspace:*",
+        "@zread-pi/types": "workspace:*",
+        "@zread-pi/utils": "workspace:*",
         "p-limit": "^6.1.0",
         "zod": "^3.23.0",
       },
@@ -65,11 +65,11 @@
       },
     },
     "packages/repo-analyzer": {
-      "name": "@open-zread/repo-analyzer",
+      "name": "@zread-pi/repo-analyzer",
       "version": "0.1.0",
       "dependencies": {
-        "@open-zread/types": "workspace:*",
-        "@open-zread/utils": "workspace:*",
+        "@zread-pi/types": "workspace:*",
+        "@zread-pi/utils": "workspace:*",
         "crypto-hash": "^1.3.0",
         "glob": "^10.0.0",
         "ignore": "^5.2.0",
@@ -82,7 +82,7 @@
       },
     },
     "packages/types": {
-      "name": "@open-zread/types",
+      "name": "@zread-pi/types",
       "version": "0.1.0",
       "devDependencies": {
         "tsup": "^8.5.1",
@@ -90,10 +90,10 @@
       },
     },
     "packages/utils": {
-      "name": "@open-zread/utils",
+      "name": "@zread-pi/utils",
       "version": "0.1.0",
       "dependencies": {
-        "@open-zread/types": "workspace:*",
+        "@zread-pi/types": "workspace:*",
         "yaml": "^2.3.0",
       },
       "devDependencies": {
@@ -271,17 +271,17 @@
 
     "@napi-rs/lzma-linux-x64-gnu": ["@napi-rs/lzma-linux-x64-gnu@1.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ=="],
 
-    "@open-zread/agent-runtime": ["@open-zread/agent-runtime@workspace:packages/agent-runtime"],
+    "@zread-pi/agent-runtime": ["@zread-pi/agent-runtime@workspace:packages/agent-runtime"],
 
-    "@open-zread/cli": ["@open-zread/cli@workspace:apps/cli"],
+    "@zread-pi/cli": ["@zread-pi/cli@workspace:apps/cli"],
 
-    "@open-zread/orchestrator": ["@open-zread/orchestrator@workspace:packages/orchestrator"],
+    "@zread-pi/orchestrator": ["@zread-pi/orchestrator@workspace:packages/orchestrator"],
 
-    "@open-zread/repo-analyzer": ["@open-zread/repo-analyzer@workspace:packages/repo-analyzer"],
+    "@zread-pi/repo-analyzer": ["@zread-pi/repo-analyzer@workspace:packages/repo-analyzer"],
 
-    "@open-zread/types": ["@open-zread/types@workspace:packages/types"],
+    "@zread-pi/types": ["@zread-pi/types@workspace:packages/types"],
 
-    "@open-zread/utils": ["@open-zread/utils@workspace:packages/utils"],
+    "@zread-pi/utils": ["@zread-pi/utils@workspace:packages/utils"],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
 
@@ -785,25 +785,25 @@
 
     "@aws-sdk/credential-provider-sso/@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1129.0", "", { "dependencies": { "@aws-sdk/core": "^3.978.0", "@aws-sdk/nested-clients": "^3.997.45", "@aws-sdk/types": "^3.974.5", "@smithy/core": "^3.33.3", "@smithy/types": "^4.17.2", "tslib": "^2.6.2" } }, "sha512-Sbl3rpzQdsG4ZK2zh0JWUYyZPKKorJlVOddA2T0DVbKJFrsW8J6wgnslxxUH04+WaBMr4A1HzJZvZX0xUvkniA=="],
 
-    "@open-zread/cli/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
+    "@zread-pi/cli/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
 
-    "@open-zread/cli/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "@zread-pi/cli/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
-    "@open-zread/orchestrator/@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.52.0", "", { "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-d4c+fg+xy9e46c8+YnrrgIQR45CZlAi7PwdzIfDXDM6ACxEZli1/fxhURsq30ZpMZy6LvSkr41jGq5aF5TD7rQ=="],
+    "@zread-pi/orchestrator/@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.52.0", "", { "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-d4c+fg+xy9e46c8+YnrrgIQR45CZlAi7PwdzIfDXDM6ACxEZli1/fxhURsq30ZpMZy6LvSkr41jGq5aF5TD7rQ=="],
 
-    "@open-zread/orchestrator/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "@zread-pi/orchestrator/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
-    "@open-zread/repo-analyzer/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
+    "@zread-pi/repo-analyzer/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
 
-    "@open-zread/repo-analyzer/ignore": ["ignore@5.3.2", "", {}, "sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g=="],
+    "@zread-pi/repo-analyzer/ignore": ["ignore@5.3.2", "", {}, "sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g=="],
 
-    "@open-zread/repo-analyzer/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "@zread-pi/repo-analyzer/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
-    "@open-zread/types/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "@zread-pi/types/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
-    "@open-zread/utils/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
+    "@zread-pi/utils/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
 
-    "@open-zread/utils/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "@zread-pi/utils/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "body-parser/content-type": ["content-type@2.1.0", "", {}, "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=="],
 

@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { loadConfigSync } from "@open-zread/utils";
+import { loadConfigSync } from "@zread-pi/utils";
 import { getVersion } from "./utils";
 import { enterTargetDir } from "./utils/target-dir";
 import { runConfig } from "./commands/config";
@@ -16,10 +16,10 @@ const t = lang === "en" ? enUS : zhCN;
 const program = new Command();
 
 program
-  .name("open-zread")
+  .name("zread-pi")
   .version(getVersion(), "-v, --version", t.cli.version)
   .helpOption("-h, --help", t.cli.help)
-  // 全局选项：对 wiki / config / browse 都生效（含默认命令的 `open-zread -d <path>` 写法）
+  // 全局选项：对 wiki / config / browse 都生效（含默认命令的 `zread-pi -d <path>` 写法）
   .option("-d, --dir <path>", t.cli.dirDesc);
 
 /**
@@ -36,7 +36,7 @@ function applyTargetDir(): boolean {
   return true;
 }
 
-// 默认命令：Wiki 文档生成（直接运行 open-zread 即可）
+// 默认命令：Wiki 文档生成（直接运行 zread-pi 即可）
 program
   .command("wiki", { isDefault: true })
   .description(t.cli.wikiDesc)

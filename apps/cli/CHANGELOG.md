@@ -1,4 +1,4 @@
-# @open-zread/cli
+# @zread-pi/cli
 
 ## 1.2.2
 
@@ -8,10 +8,10 @@
 
   **Bug Fixes:**
 
-  - **cli**: Move `@open-zread/agent-sdk` from `dependencies` to `devDependencies` to prevent `workspace:*` from being published to npm
+  - **cli**: Move `@zread-pi/agent-sdk` from `dependencies` to `devDependencies` to prevent `workspace:*` from being published to npm
     - The package is bundled into `dist` by tsup (`noExternal: [/.*/]`), so it is not needed as a runtime dependency
-    - Previously `workspace:*` remained in the `dependencies` field of the published `package.json`, causing `npm i -g @open-zread/cli` to fail with `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"`
-    - Fixes [#46](https://github.com/bb-boy680/open-zread/issues/46)
+    - Previously `workspace:*` remained in the `dependencies` field of the published `package.json`, causing `npm i -g @zread-pi/cli` to fail with `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"`
+    - Fixes [#46](https://github.com/alem0n/zread-pi/issues/46)
 
 ## 1.2.1
 
@@ -25,7 +25,7 @@
     - Add Mermaid syntax validation to the `write_page` tool that rejects flowchart node labels containing structural characters (`()`, `{}`, `|`, `<>`) without quotes
     - Return `is_error` on invalid Mermaid so the Page Agent can revise and retry instead of silently saving broken Markdown
     - Add prompt guidance requiring quoted labels (`A["节点文本"]`) and syntax self-check, especially for labels like `O(n) 说明`
-    - Fixes [#43](https://github.com/bb-boy680/open-zread/pull/43)
+    - Fixes [#43](https://github.com/alem0n/zread-pi/pull/43)
 
 ## 1.2.0
 
@@ -35,7 +35,7 @@
 
   ### Added
 
-  - Added a Chatbot to the browser preview for asking questions based on the current Wiki content. ([#40](https://github.com/bb-boy680/open-zread/pull/40))
+  - Added a Chatbot to the browser preview for asking questions based on the current Wiki content. ([#40](https://github.com/alem0n/zread-pi/pull/40))
   - Added text-selection context support, enabling follow-up questions around selected Wiki snippets.
   - Added CLI browser chat services and chat history APIs to power the preview Chatbot.
 
@@ -81,15 +81,15 @@
   ### Installation
 
   ```bash
-  npm install -g @open-zread/cli
+  npm install -g @zread-pi/cli
   # or
-  bun install -g @open-zread/cli
+  bun install -g @zread-pi/cli
   ```
 
   After installing, run:
 
   ```bash
-  open-zread
+  zread-pi
   ```
 
   On first use, you'll be guided through LLM Provider and API Key configuration.

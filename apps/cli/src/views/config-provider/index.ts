@@ -1,7 +1,7 @@
 /**
  * Config Provider Page - pi-ai 提供商选择（pi-tui 版）
  *
- * 数据来源：@open-zread/agent-runtime 的 listZreadProviders()
+ * 数据来源：@zread-pi/agent-runtime 的 listZreadProviders()
  *   = pi-ai 的 40 个内置 Provider（含 OAuth/API Key 登录方式）
  *   + ~/.zread/config.yaml 里配置过的自定义 Provider
  *
@@ -14,7 +14,7 @@
  */
 
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
-import { listZreadProviders, type ZreadProviderSummary } from "@open-zread/agent-runtime";
+import { listZreadProviders, type ZreadProviderSummary } from "@zread-pi/agent-runtime";
 import { barIndicator, computeItemWindow, scrollIndicator } from "../../tui/components/select";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";

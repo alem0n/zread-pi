@@ -1,5 +1,5 @@
 /**
- * pi 运行时桥接：把 open_zread 的 LLM 配置（providerId / model / apiKey / baseURL）
+ * pi 运行时桥接：把 zread-pi 的 LLM 配置（providerId / model / apiKey / baseURL）
  * 解析为 pi-ai 的 Provider + Model，并暴露 streamSimple / completeSimple 供业务使用。
  *
  * 两条路径：
@@ -102,7 +102,7 @@ export function inferProviderId(options: {
 	return "anthropic";
 }
 
-/** providerId -> open_zread 的双协议语义（anthropic-messages | openai-completions） */
+/** providerId -> zread-pi 的双协议语义（anthropic-messages | openai-completions） */
 export function resolveApiType(providerId: string, apiType?: ApiType): ApiType {
 	if (apiType) return apiType;
 	return ANTHROPIC_PROVIDER_IDS.has(providerId.toLowerCase()) ? "anthropic-messages" : "openai-completions";
@@ -222,7 +222,7 @@ export function createRuntimeModel(options: RuntimeModelOptions): RuntimeModel {
 				resolve: async ({ signal }) => {
 					signal.throwIfAborted();
 					if (!options.apiKey) return undefined;
-					return { auth: { apiKey: options.apiKey, baseUrl }, source: "open-zread config" };
+					return { auth: { apiKey: options.apiKey, baseUrl }, source: "zread-pi config" };
 				},
 			},
 		},

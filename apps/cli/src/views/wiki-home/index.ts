@@ -9,8 +9,8 @@ import { Divider } from "../../tui/components/divider";
 import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
-import { fileExists, getWikiDir, joinPath } from "@open-zread/utils";
-import type { WikiOutput, WikiPage } from "@open-zread/types";
+import { fileExists, getWikiDir, joinPath } from "@zread-pi/utils";
+import type { WikiOutput, WikiPage } from "@zread-pi/types";
 
 type SelectItem = { value: string; label: string };
 

@@ -2,7 +2,7 @@
  * 目标目录（-d / --dir）
  *
  * 业务层的全部路径都以 `process.cwd()` 为根：RepoAnalyzer 的扫描（scanFiles/parseFiles）、
- * `.open-zread` 的落盘（packages/utils 的 getProjectRoot()/getWikiDir()）、Agent 的 cwd
+ * `.zread-pi` 的落盘（packages/utils 的 getProjectRoot()/getWikiDir()）、Agent 的 cwd
  * （orchestrator 的 create-agent.ts）、TUI 头部显示的目录（tui/layout.ts）都是如此。
  *
  * 因此「指定目录」只需在 CLI 进入 TUI 之前切一次工作目录（进程级 chdir），

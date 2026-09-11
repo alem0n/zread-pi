@@ -10,7 +10,7 @@
  */
 
 import { matchesKey } from "@earendil-works/pi-tui";
-import { getZreadProvider, loginZreadProvider, setZreadCatalogConfig } from "@open-zread/agent-runtime";
+import { getZreadProvider, loginZreadProvider, setZreadCatalogConfig } from "@zread-pi/agent-runtime";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";

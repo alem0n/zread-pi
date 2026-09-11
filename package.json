@@ -1,10 +1,10 @@
 {
-  "name": "open-zread-pi",
-  "version": "0.5.0",
+  "name": "zread-pi",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
-  "description": "open_zread 业务层（cli / Orchestrator / Browse / RepoAnalyzer / Types）运行在 pi 的 agent 内核（pi-ai + pi-agent-core）之上；原 agent-sdk 由 packages/agent-runtime 适配层取代。",
+  "description": "zread-pi 业务层（cli / Orchestrator / Browse / RepoAnalyzer / Types）运行在 pi 的 agent 内核（pi-ai + pi-agent-core）之上；原 agent-sdk 由 packages/agent-runtime 适配层取代。",
   "workspaces": [
     "apps/cli",
     "packages/*",

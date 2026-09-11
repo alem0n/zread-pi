@@ -1,5 +1,5 @@
 /**
- * provider-catalog —— 把 pi-ai 的 Provider/Model/login 能力接进 open_zread。
+ * provider-catalog —— 把 pi-ai 的 Provider/Model/login 能力接进 zread-pi。
  *
  * 职责：
  * - 用 pi-ai 的 40 个内置 provider（builtinProviders()）构建一个 Models 集合；
@@ -38,8 +38,8 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
-import type { CustomModelConfig, LlmProviderConfig, AppConfig, ThinkingLevel } from '@open-zread/types';
-import { DEFAULT_CONFIG, loadConfigSync, THINKING_LEVELS } from '@open-zread/utils';
+import type { CustomModelConfig, LlmProviderConfig, AppConfig, ThinkingLevel } from '@zread-pi/types';
+import { DEFAULT_CONFIG, loadConfigSync, THINKING_LEVELS } from '@zread-pi/utils';
 import { FileCredentialStore } from './auth-store.js';
 import { FileModelsStore } from './models-store.js';
 
@@ -199,7 +199,7 @@ function createConfiguredProvider(
         signal.throwIfAborted();
         const key = credential?.key ?? legacy.apiKey ?? undefined;
         if (!key) return undefined;
-        return { auth: { apiKey: key, ...(baseUrl ? { baseUrl } : {}) }, source: 'open-zread config' };
+        return { auth: { apiKey: key, ...(baseUrl ? { baseUrl } : {}) }, source: 'zread-pi config' };
       },
     },
   };
