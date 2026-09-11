@@ -69,6 +69,10 @@ function getTreeSitterDir(): string {
   const __filename = fileURLToPath(import.meta.url);
   const currentDir = dirname(__filename);
 
+  // standalone 二进制：wasm 文件与可执行文件同目录（CI 产物 zip 布局）
+  const exeDir = dirname(process.execPath);
+  if (existsSync(join(exeDir, 'tree-sitter.wasm'))) return exeDir;
+
   // 打包后：wasm 文件和 index.js 在同一目录
   if (existsSync(join(currentDir, 'tree-sitter.wasm'))) return currentDir;
 

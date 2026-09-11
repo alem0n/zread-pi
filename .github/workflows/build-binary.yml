@@ -1,0 +1,107 @@
+# 构建 open-zread standalone 二进制并发布 zip 产物
+#
+# 产物布局（wasm 必须与二进制同目录，运行时按可执行文件同目录查找，见
+# packages/repo-analyzer/src/parser/wasm-loader.ts 与 apps/cli/src/commands/browse-server.ts）：
+#   open-zread-v<version>-<os>-<arch>.zip
+#   ├── open-zread(.exe)
+#   ├── tree-sitter.wasm
+#   ├── mappings.wasm
+#   └── browse/          # 「浏览文档」前端静态资源
+#
+# 触发方式：
+#   1. 推送 tag（v*）→ 构建并创建 Release，附上三个平台的 zip
+#   2. workflow_dispatch → 手动构建，zip 上传到 workflow artifacts
+name: build-binary
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-latest
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: macos-arm64
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # pi 内核 dist 产物不入库，必须先构建（顺序：telemetry → chord → ai → agent → tui）
+      - name: Build vendor (pi dist)
+        run: bun run vendor:build
+
+      # workspace 包 exports 指向 dist/，按依赖顺序 tsup 构建
+      - name: Build workspace packages (types → utils → repo-analyzer → orchestrator)
+        shell: bash
+        run: |
+          set -e
+          for pkg in types utils repo-analyzer orchestrator; do
+            echo "building packages/$pkg"
+            (cd "packages/$pkg" && bun run build)
+          done
+
+      # browse 前端静态资源（独立安装，见 AGENTS.md §6.3）
+      - name: Build browse frontend
+        run: |
+          bun run browse:install
+          bun run browse:build
+
+      # CLI tsup 产物：dist/index.js + tree-sitter.wasm + mappings.wasm + dist/browse
+      - name: Build CLI bundle
+        run: cd apps/cli && bun run build
+
+      - name: Compile binary + package zip
+        run: bun run tools/build-binary.ts --target ${{ matrix.target }}
+
+      - name: Smoke test binary
+        shell: bash
+        run: |
+          cd dist-bin/open-zread-v*-*/
+          if [ -f open-zread.exe ]; then ./open-zread.exe --version; else ./open-zread --version; fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-zread-${{ matrix.target }}
+          path: dist-bin/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist-bin
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-bin/*.zip
+          generate_release_notes: true

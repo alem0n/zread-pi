@@ -89,6 +89,10 @@ function resolveBrowseWebDist(): string | null {
     return resolved;
   }
 
+  // standalone 二进制：browse 静态资源与可执行文件同目录（browse/ 子目录，CI 产物 zip 布局）
+  const exeDist = path.resolve(path.dirname(process.execPath), "browse");
+  if (existsSync(path.join(exeDist, "index.html"))) return exeDist;
+
   const packagedDist = path.resolve(MODULE_DIR, "browse");
   if (existsSync(path.join(packagedDist, "index.html"))) return packagedDist;
 
