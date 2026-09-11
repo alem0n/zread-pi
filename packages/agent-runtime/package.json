@@ -16,6 +16,8 @@
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "@zread-pi/types": "workspace:*",
-    "@zread-pi/utils": "workspace:*"
+    "@zread-pi/utils": "workspace:*",
+    "diff": "8.0.4",
+    "ignore": "^5.2.0"
   }
 }

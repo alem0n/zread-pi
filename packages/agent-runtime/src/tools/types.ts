@@ -2,7 +2,7 @@
  * Tool interface and helper utilities
  */
 
-import type { ToolDefinition, ToolInputSchema, ToolContext, ToolResult, ToolInputParams, JsonValue } from '../types.js'
+import type { ToolDefinition, ToolInputSchema, ToolContext, ToolResult, ToolInputParams, JsonValue, ToolResultContent } from '../types.js'
 
 /**
  * Safely extract a string from ToolInputParams.
@@ -69,13 +69,34 @@ export function getValue(input: ToolInputParams, key: string): JsonValue | undef
 }
 
 /**
+ * `defineTool({ call })` 允许返回的结构化结果：
+ *  - `string`                          → content = 字符串，无 details
+ *  - `{ data, is_error? }`             → 旧业务层风格（write_page / generate_blueprint 等）
+ *  - `{ content, details?, is_error?}` → 需要回传图片块或结构化元信息时使用
+ */
+export type ToolCallReturn =
+  | {
+      data: string
+      is_error?: boolean
+      details?: JsonValue
+      content?: never
+    }
+  | {
+      /** 完整内容块（需要回传图片时使用） */
+      content: ToolResultContent
+      data?: string
+      is_error?: boolean
+      details?: JsonValue
+    }
+
+/**
  * Helper to create a tool definition with sensible defaults.
  */
 export function defineTool(config: {
   name: string
   description: string
   inputSchema: ToolInputSchema
-  call: (input: ToolInputParams, context: ToolContext) => Promise<string | { data: string; is_error?: boolean }>
+  call: (input: ToolInputParams, context: ToolContext) => Promise<string | ToolCallReturn>
   isReadOnly?: boolean
   isConcurrencySafe?: boolean
   prompt?: string | ((context: ToolContext) => Promise<string>)
@@ -93,13 +114,16 @@ export function defineTool(config: {
     async call(input: ToolInputParams, context: ToolContext): Promise<ToolResult> {
       try {
         const result = await config.call(input, context)
-        const output = typeof result === 'string' ? result : result.data
-        const isError = typeof result === 'object' && result.is_error
+        if (typeof result === 'string') {
+          return { type: 'tool_result', tool_use_id: '', content: result, is_error: false }
+        }
+        const hasContent = 'content' in result && result.content !== undefined
         return {
           type: 'tool_result',
           tool_use_id: '', // filled by engine
-          content: output,
-          is_error: isError || false,
+          content: hasContent ? result.content! : result.data,
+          is_error: result.is_error ?? false,
+          ...(result.details !== undefined ? { details: result.details } : {}),
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)

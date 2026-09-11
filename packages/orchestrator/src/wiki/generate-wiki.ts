@@ -13,7 +13,7 @@
 import pLimit from 'p-limit';
 import { fileExists, getWikiDir, joinPath, loadWikiBlueprint, logger } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
-import { FileEditTool, FileReadTool, GlobTool, GrepTool, type ToolDefinition } from '@zread-pi/agent-runtime';
+import { FileEditTool, FileReadTool, GlobTool, GrepTool, LsTool, type ToolDefinition } from '@zread-pi/agent-runtime';
 import { WritePageTool } from '../tools/page-tools.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import type { WikiPage } from '@zread-pi/types';
@@ -153,6 +153,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             FileEditTool,
             GlobTool,
             GrepTool,
+            LsTool,
             writePageTool
           ],
           prompts: buildPagePrompt(page),

@@ -26,13 +26,13 @@
         "open": "^10.1.2",
       },
       "devDependencies": {
+        "@types/express": "^5.0.6",
+        "@types/node": "^20.0.0",
         "@zread-pi/agent-runtime": "workspace:*",
         "@zread-pi/orchestrator": "workspace:*",
         "@zread-pi/repo-analyzer": "workspace:*",
         "@zread-pi/types": "workspace:*",
         "@zread-pi/utils": "workspace:*",
-        "@types/express": "^5.0.6",
-        "@types/node": "^20.0.0",
         "typescript": "^5.0.0",
       },
     },
@@ -44,6 +44,8 @@
         "@earendil-works/pi-ai": "0.85.1",
         "@zread-pi/types": "workspace:*",
         "@zread-pi/utils": "workspace:*",
+        "diff": "8.0.4",
+        "ignore": "^5.2.0",
       },
     },
     "packages/orchestrator": {
@@ -271,18 +273,6 @@
 
     "@napi-rs/lzma-linux-x64-gnu": ["@napi-rs/lzma-linux-x64-gnu@1.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ=="],
 
-    "@zread-pi/agent-runtime": ["@zread-pi/agent-runtime@workspace:packages/agent-runtime"],
-
-    "@zread-pi/cli": ["@zread-pi/cli@workspace:apps/cli"],
-
-    "@zread-pi/orchestrator": ["@zread-pi/orchestrator@workspace:packages/orchestrator"],
-
-    "@zread-pi/repo-analyzer": ["@zread-pi/repo-analyzer@workspace:packages/repo-analyzer"],
-
-    "@zread-pi/types": ["@zread-pi/types@workspace:packages/types"],
-
-    "@zread-pi/utils": ["@zread-pi/utils@workspace:packages/utils"],
-
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
@@ -390,6 +380,18 @@
     "@types/send": ["@types/send@1.2.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-arsCikDvlU99zl1g69TcAB3mzZPpxgw0UQnaHeC1Nwb015xp8bknZv5rIfri9xTOcMuaVgvabfIRA7PSZVuZIQ=="],
 
     "@types/serve-static": ["@types/serve-static@2.2.0", "", { "dependencies": { "@types/http-errors": "*", "@types/node": "*" } }, "sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ=="],
+
+    "@zread-pi/agent-runtime": ["@zread-pi/agent-runtime@workspace:packages/agent-runtime"],
+
+    "@zread-pi/cli": ["@zread-pi/cli@workspace:apps/cli"],
+
+    "@zread-pi/orchestrator": ["@zread-pi/orchestrator@workspace:packages/orchestrator"],
+
+    "@zread-pi/repo-analyzer": ["@zread-pi/repo-analyzer@workspace:packages/repo-analyzer"],
+
+    "@zread-pi/types": ["@zread-pi/types@workspace:packages/types"],
+
+    "@zread-pi/utils": ["@zread-pi/utils@workspace:packages/utils"],
 
     "accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 
@@ -784,6 +786,8 @@
     "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "@aws-sdk/credential-provider-sso/@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1129.0", "", { "dependencies": { "@aws-sdk/core": "^3.978.0", "@aws-sdk/nested-clients": "^3.997.45", "@aws-sdk/types": "^3.974.5", "@smithy/core": "^3.33.3", "@smithy/types": "^4.17.2", "tslib": "^2.6.2" } }, "sha512-Sbl3rpzQdsG4ZK2zh0JWUYyZPKKorJlVOddA2T0DVbKJFrsW8J6wgnslxxUH04+WaBMr4A1HzJZvZX0xUvkniA=="],
+
+    "@zread-pi/agent-runtime/ignore": ["ignore@5.3.2", "", {}, "sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g=="],
 
     "@zread-pi/cli/@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
 

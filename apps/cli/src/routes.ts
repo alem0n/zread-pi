@@ -17,6 +17,8 @@ import ConfigProviderDetailPage from "./views/config-provider-detail";
 import ConfigProviderPage from "./views/config-provider";
 import ConfigRetryPage from "./views/config-retry";
 import ConfigThinkingPage from "./views/config-thinking";
+import ConfigToolDetailPage from "./views/config-tools/detail";
+import ConfigToolsPage from "./views/config-tools";
 import WikiGeneratePage from "./views/wiki-generate";
 import WikiHomePage from "./views/wiki-home";
 import WikiSyncPage from "./views/wiki-sync";
@@ -37,6 +39,9 @@ export const routes: RouteDefinition[] = [
   { pattern: "/config/retry", create: () => new ConfigRetryPage() },
   { pattern: "/config/thinking", create: () => new ConfigThinkingPage() },
   { pattern: "/config/max-turns", create: () => new ConfigMaxTurnsPage() },
+  // 外部工具（rg / fd）：列表 → 详情（安装/卸载/启用开关 + 安装进度条）
+  { pattern: "/config/tools", create: () => new ConfigToolsPage() },
+  { pattern: "/config/tools/:toolId", create: () => new ConfigToolDetailPage() },
 
   // ========== Wiki 模块路由 ===========
   { pattern: "/wiki", create: () => new WikiHomePage() },

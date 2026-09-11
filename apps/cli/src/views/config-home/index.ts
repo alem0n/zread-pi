@@ -11,7 +11,7 @@ import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { thinkingLevelLabel } from "../../utils/thinking";
-import { DEFAULT_MAX_TURNS } from "@zread-pi/utils";
+import { DEFAULT_MAX_TURNS, getToolStatuses } from "@zread-pi/utils";
 
 interface ConfigItem {
   key: string;
@@ -22,6 +22,15 @@ interface ConfigItem {
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "failed";
+
+/**
+ * 外部工具就绪数量的缓存。
+ *
+ * `configItems[].getValue` 在每次渲染时都会被调用，而工具状态需要 spawn 子进程探测，
+ * 不能放在那里；因此由页面在 init() / onEnter() 时刷新这两个值。
+ */
+let cachedReadyTools = 0;
+let cachedToolCount = 0;
 
 // 配置项定义（动态获取值，使用翻译函数）
 const configItems: ConfigItem[] = [
@@ -64,6 +73,15 @@ const configItems: ConfigItem[] = [
     route: "/config/max-turns",
   },
   {
+    // 外部工具：展示就绪数量（rg / fd），详情见 /config/tools。
+    // 注意：getValue 会在每次渲染时被调用，而状态探测要 spawn 子进程，
+    // 因此这里只读页面初始化/返回时缓存的值（见 ConfigHomePage.toolsSummary）。
+    key: "tools",
+    labelKey: "tools.homeLabel",
+    getValue: (_config, t) => t("tools.readyRatio", { ready: cachedReadyTools, total: cachedToolCount }),
+    route: "/config/tools",
+  },
+  {
     key: "concurrency.max_concurrent",
     labelKey: "config.maxConcurrency",
     getValue: (config, _t) => String(config.concurrency.max_concurrent),
@@ -100,6 +118,25 @@ export default class ConfigHomePage extends Screen {
       return true;
     }
     return this.select.handleInput(data);
+  }
+
+  protected override init(): void {
+    this.refreshToolsSummary();
+  }
+
+  override onEnter(): void {
+    // 从 /config/tools 返回时状态可能已变化（刚安装/卸载）
+    this.refreshToolsSummary();
+    this.refresh();
+  }
+
+  /** 刷新外部工具就绪数量（含子进程探测，只在进入页面时执行一次） */
+  private refreshToolsSummary(): void {
+    const statuses = getToolStatuses();
+    cachedToolCount = statuses.length;
+    cachedReadyTools = statuses.filter(
+      (status) => status.state === "system" || status.state === "managed",
+    ).length;
   }
 
   override onDestroy(): void {

@@ -114,6 +114,11 @@ export interface SDKToolResultMessage {
     tool_use_id: string
     tool_name: string
     output: string
+    /**
+     * 工具结果的结构化元信息（截断信息、diff、命中上限等）。**不进入模型上下文**。
+     * 契约扩展点：见 MIGRATION.md §3「工具结果 details」。
+     */
+    details?: JsonValue
   }
 }
 
@@ -244,6 +249,13 @@ export interface ToolContext {
   model?: string
   /** Parent agent's API type */
   apiType?: import('./providers/types.js').ApiType
+  /**
+   * 当前模型是否支持图片输入（`model.input` 包含 `image`）。
+   *
+   * `undefined` 表示无法判定（例如自定义 streamFn 未提供模型信息）；
+   * 读取图片的工具在无法判定时**不发送 image 内容块**，避免请求被 provider 拒绝。
+   */
+  supportsImages?: boolean
 }
 
 export interface ToolResult {
@@ -251,6 +263,12 @@ export interface ToolResult {
   tool_use_id: string
   content: ToolResultContent
   is_error?: boolean
+  /**
+   * 结构化元信息（截断信息、diff、命中上限等）。
+   * **不会进入模型上下文**（pi 的 `details` 与 `content` 分离），仅供钩子 / UI 消费。
+   * 契约扩展点：见 MIGRATION.md §3「工具结果 details」。
+   */
+  details?: JsonValue
 }
 
 // --------------------------------------------------------------------------

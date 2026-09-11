@@ -41,7 +41,11 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 适配层保持 `agent-sdk` 的**同名同签名**契约 | 业务侧 22 处 import 机械替换即可，行为可回退对比 |
 | 重试放在 `streamFn` 层，且只在"未产出内容"时重试 | pi 的 Agent 循环刻意不内置重试；这样失败尝试不会写进会话记录 |
 | 钩子映射到 pi 的 `beforeToolCall` / `afterToolCall` | 与旧 `PreToolUse` / `PostToolUse` 语义一一对应，UI 进度事件零改动 |
-| 5 个文件工具**原样复制**而非改用 pi 内置工具 | 保持工具名/schema/提示文本不变，避免 LLM 行为漂移 |
+| 5 个文件工具**原样复制**而非改用 pi 内置工具 | 保持工具名/schema/提示文本不变，避免 LLM 行为漂移（**已由 §1.3 的工具层重写取代，工具名仍不变**） |
+| 工具层按上游 pi 重写，新增 `Ls` | 旧工具是从 `agent-sdk` 原样拷来的糙版：`Glob` 依赖 Node 实验 API 且有 `spawn('bash')` 兜底（Windows 上等于不可用）、`Grep` 全量缓冲且 rg/grep 两分支输出不一致、`Read` 的图片只回一句字节数、`Edit` 在 CRLF 检出上必然匹配失败、`Write`/`Edit` 无同文件串行化（并行页面生成会丢更新）。现按上游实现重写，补齐 `Ls`（旧 `Read` 对目录的提示点名 `Bash`，而本仓库没有 Bash 工具），详见 §1.3 |
+| rg / fd：**探测常驻、安装显式** | 上游会在工具缺失时静默联网下载并解包（tar/zip + chmod + Windows `tar.exe`/PowerShell 分支）。本仓库拆成两件事：① agent 运行期只探测（缺失时退回纯 JS 兜底，见 `file-walk.ts`），绝不隐式联网；② 安装只在用户显式动作（配置界面 `/config/tools` 或 `bun run tools:install`）时发生，解包用**纯 JS**（`zlib` + 自写 tar/zip 解析），不依赖 tar/unzip/PowerShell。 |
+| 外部工具配置只存「是否启用」 | `config.yaml` 只记用户意图（`tools.<id>.enabled`）；「装没装 / 装在哪 / 什么版本」属于运行时探测到的事实（托管目录 `~/.zread-pi/bin` 与系统 PATH），不落配置，避免配置与实际文件系统状态不一致 |
+| 工具结果新增可选 `details` 与图片内容块 | 截断信息 / diff / 命中上限需要结构化回传（不进模型上下文）；图片按 magic number 判型后以 image 块回传（仅当 `model.input` 含 `image`）。均为**新增可选字段**，旧调用点零改动 |
 | 配置界面改用 pi-ai 的 Provider/登录/模型目录 | 不再自维护 provider registry；API Key 统一走 `Models.login('api_key')`，凭据落 `~/.zread-pi/auth.json`，天然支持多 Provider；Provider 详情页把 API Key 与模型选择并列在同一页面（不再有 OAuth 订阅选项）；自定义模型按 pi models.json 合并语义叠加 |
 | 思考深度（thinking level）直接沿用 pi 的 7 档 | 配置界面新增 `/config/thinking`（`llm.thinking_level`，默认 off）；受支持等级由 pi-ai `getSupportedThinkingLevels` 计算，模型不支持时分界清楚标注、请求时由 pi 自动 clamp；运行时 `createAgent({ thinkingLevel })` 透传为 `options.reasoning` |
 | 最大轮次进配置（不再硬编码） | 配置界面新增 `/config/max-turns`（`agent.max_turns`，1-100，默认 30）；Orchestrator 的 `create-agent.ts` 读配置下发，`generate-wiki` 不再写死 `maxTurns: 30` |
@@ -65,8 +69,52 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 - `SDKMessage` 联合类型与 `CatalogEvent` 时序（`requesting → responding → tool_start → tool_result → complete`）；`result.subtype` 新增 `error_context_full`（上下文将满时优雅停止）
 - `TokenUsage` 字段名、`BlueprintResult.durationMs / tokenUsage`
-- 工具名：`Read` / `Write` / `Edit` / `Glob` / `Grep` / `write_page` / `generate_blueprint`（提示词里写死了）
+- 工具名：`Read` / `Write` / `Edit` / `Glob` / `Grep` / `write_page` / `generate_blueprint`（提示词里写死了）；`Ls` 为新增工具名（见 §1.3）
+- 工具结果新增**可选**字段（不破坏旧调用方）：`ToolResult.details` / `SDKToolResultMessage.result.details`（截断、diff、命中上限等元信息，不进入模型上下文）、`ToolResult.content` 允许内容块数组（图片回传）、`ToolContext.supportsImages`
 - `AppConfig.llm` 的旧扁平字段（`provider/model/api_key/base_url`）仍可读；新增 `providers` 映射（`LlmProviderConfig`）与 `CustomModelConfig`；新增 `agent.max_turns`（旧配置缺省 30）。旧配置必须能直接启动（运行时自动迁移/回退）
+
+---
+
+## 1.3 工具层（第六步：对齐上游 pi）
+
+落点：`packages/agent-runtime/src/tools/`（共享设施 + 5 个工具 + 新增 `Ls`）。
+
+| 工具 | 状态 | 要点 |
+| --- | --- | --- |
+| `Ls` | **新增** | 目录列举：大小写不敏感排序、目录补 `/`、含 dotfile、条目/字节双上限；`Read` 的目录报错已改为点名 `Ls` |
+| `Glob` | 替换 | 系统 `fd` 优先，无 fd 时纯 JS 遍历兜底；输出**相对搜索根的 POSIX 路径**并按字典序排序；尊重 `.gitignore`/`.ignore`/`.fdignore`（非 git 仓库内也生效）；跳过 `.git`/`node_modules`/`.zread-pi`；`limit` 可调 |
+| `Grep` | 替换 | rg `--json` **流式**解析 + 命中上限立刻 kill；无 rg 时纯 JS 兜底（同输出格式）；新增 `ignoreCase`/`literal`/`context`/`limit`；长行截断 500 字符；保留 `output_mode`（content / files_with_matches / count） |
+| `Read` | 替换 | 图片按 **magic number** 判型，模型支持图片时回传 image 块（否则文本说明）；`offset` 1-based；2000 行 / 50KB 双上限 + `Use offset=N to continue.`；目录报错点名 `Ls`；非图片二进制不灌乱码 |
+| `Write` | 替换 | 同文件并发写串行化（`withFileMutationQueue`）；`details.created` 标记新建/覆盖；参数 `file_path`/`content` 不变 |
+| `Edit` | 替换 | BOM/CRLF 归一化 + fuzzy 兜底；支持 `edits[]` 多段不相邻替换；`replace_all` 保留；回传 diff / patch / 首行变更行号；同文件并发编辑串行化；`file_path`/`old_string`/`new_string` 仍可用（并接受上游 `path`/`edits`/`oldText`/`newText`） |
+| 输出截断 | 复用 | 直接用 vendor `@earendil-works/pi-agent-core` 已导出的 `truncateHead`/`truncateLine`/`formatSize` 等纯函数（`tools/truncate.ts` 薄封装 + 统一提示文案） |
+
+约束：**不得重命名工具**（提示词与测试依赖名字）；新增/改行为必须补 `bun run test:tools` 断言；
+移植上游实现时**逐条保留平台适配分支**（Windows 路径分隔符、macOS 文件名变体、gitignore 语义）。
+移植自 `vendor/pi` 或上游 `pi/packages/**` 的文件必须在文件头注明来源（走「复制 + 改写」，不改 vendor）。
+
+### 1.4 外部工具安装与配置界面（第七步：rg / fd）
+
+| 位置 | 内容 |
+| --- | --- |
+| `packages/utils/src/tools/registry.ts` | **工具注册表（扩展点）**：新增工具只需加一条 `ToolSpec`（id / 仓库 / 资产名规则 / 版本探测参数组 / 用途），配置界面、安装器、状态探测、`tools:install` 全部自动跟上 |
+| `packages/utils/src/tools/installer.ts` | 状态探测（`resolveToolBinary` / `getToolStatus`）、安装（解析版本 → 下载 → 校验指纹 → 解包 → 落盘 → **可执行性校验**，全程进度回调）、卸载、安装台账、变更广播（`onToolsChanged`） |
+| `packages/utils/src/tools/archive.ts` | 纯 JS 解包（`.tar.gz` / `.zip`），带 zip-slip 防护（拒绝绝对路径 / `..` 越界） |
+| `packages/types` 的 `ToolConfig`/`ToolsConfig` | `config.yaml` 的 `tools.<id>.enabled`（旧配置缺省 `true`，无需迁移） |
+| CLI `/config/tools` | 列表页（总体就绪进度条 + 每个工具状态）+ 详情页（状态/版本/路径/用途、Enter 安装、d 卸载、t 启用/停用、**安装进度条**：百分比 + 字节数 + 阶段）；列表与详情均为注册表驱动 |
+| CLI `bun run tools:install` | 无头入口：列状态 / 安装（可指定版本）/ 卸载；与配置界面走同一份实现 |
+| 环境变量 | `ZREAD_PI_TOOLS_DIR`（托管目录，默认 `~/.zread-pi/bin`）、`ZREAD_PI_TOOLS_BASE_URL`（下载镜像，目录结构需与 GitHub Releases 一致）、`ZREAD_PI_<ID>_PATH`（显式指定二进制，测试用） |
+| 供应链 | 只从固定仓库 HTTPS 下载；ripgrep 发布 `<asset>.sha256` 时先校验指纹再解包（fd 不发布，工具中不引入自签名的伪验证）；安装后必须能执行才算成功，否则删除半成品并报错 |
+
+**可用性 ≠ 版本识别（硬约束）**：后续接入的工具可能没有 `--version`（或把版本写到 stderr、退出码非 0、版本格式不是 x.y.z）。因此：
+
+- 工具是否可用**只看进程能否启动**（`BinaryProbeResult.runnable`），解析不出版本号**绝不**降级为「未安装」；
+  同理，**输出过大（ENOBUFS）/ 超时也不算不可用**（除 ENOENT/EACCES/ENOEXEC 等启动类错误外都算已启动）；
+- 版本探测按多组参数依次尝试（缺省 `[['--version'], ['-V'], ['version']]`，可由 `ToolSpec.versionProbeArgs` 覆盖），
+  且在**专用空目录** + 短超时 + 关闭 stdin 下执行（避免把「版本参数」当模式/路径参数的工具去扫用户仓库）；
+- 「当初装的是哪个版本」由**安装台账**（`~/.zread-pi/tools-state.json`）记录，不依赖探测结果；
+  探测版本与台账不一致时只在 UI 提示（`versionMismatch`），不影响使用；二进制被手动删除后台账作废（状态回 `missing`）；
+- UI 对「版本未知」的文案是「未识别（不影响使用）」，有台账时展示台账版本（如 `15.2.0 · 未识别`）。
 
 ---
 
@@ -80,7 +128,7 @@ Windows 下推荐在 Git Bash 或 WSL 中操作（PowerShell/CMD 亦可跑 `bun 
 bun install                # 安装依赖
 bun run vendor:build       # 构建 pi 内核产物（全新 clone 后必须执行一次）
 bun run typecheck          # tsc --noEmit（apps/cli/src + apps/cli/test + packages/*/src）
-bun run test               # typecheck + 9 个测试套件（离线，无需 API Key）
+bun run test               # typecheck + 11 个测试套件（离线，无需 API Key）
 bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终端启动 + 目标目录参数 + mock LLM 生成/同步
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
 bun run browse:install     # 预览站依赖（apps/browse 独立安装）
@@ -93,6 +141,8 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | --- | --- | --- |
 | `test:catalog` | pi-ai Provider 目录、api_key 登录写 auth.json、多 Provider、自定义模型、未内置 Provider、runtime model、思考深度支持列表、旧配置补 `agent.max_turns` 默认值、logout | 32/32 |
 | `test:agent` | pi 循环、工具执行、钩子、流式事件、429 重试、usage、thinkingLevel 透传、maxTurns | 11/11 |
+| `test:tools` | 工具层专项：截断设施、glob 语义（与 fd `--glob` 对齐）、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与 image 块穿过桥接层进入模型上下文、外部工具启用开关→二进制解析联动 | 95/95 |
+| `test:installer` | 外部工具：注册表与资产名（已对真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化、安装全流程（本地 mock Releases + 注入探测，含进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关 | 70/70 |
 | `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 收尾提示 + 宽限轮（最后一轮/宽限轮输出 → success，不收敛 → `error_max_turns`，`graceTurns=0` = 旧行为） | 35/35 |
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |
@@ -100,7 +150,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json`；模型不产出蓝图时必须报错（不再假装目录完成） | 7/7 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验；页面未落盘（未调用 `write_page` / 写入路径不符 / Mermaid 拦截）必须记失败并发出 `page_error` | 8/8 |
 | `test:browse` | 「浏览文档」服务器 + pi-tui 浏览页：静态资源/API 同端口、SPA fallback、未知 API 404、`close()` 后可连性；页面显示真实地址、ESC 停止；源码无产物时进程内 Vite 兜底；无效资源目录报错 | 28/28（有 `apps/browse/dist` 时兜底 4 项自动跳过） |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/版本号与项目版本同步 151 项）、`render-all-routes.ts`（全部 16 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项）、`browse-server.ts`（浏览文档服务 + 页面，28 项） | 151 + 16 + 9 + 25 + 19 + 28 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页/外部工具页/版本号与项目版本同步 185 项）、`render-all-routes.ts`（全部 19 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项）、`browse-server.ts`（浏览文档服务 + 页面，24~28 项：有 `apps/browse/dist` 时兜底 4 项自动跳过） | 185 + 19 + 9 + 25 + 19 + 24 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -115,7 +165,9 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | 业务层（orchestrator / repo-analyzer / utils / types / browse） | `bun run typecheck` + `bun run test` | 若触及 wiki 产物结构，额外跑 `bun run mock:wiki` 并核对 `wiki.json` 与页面文件 |
 | 配置结构 / Provider 目录（types 的 `LLMConfig`、agent-runtime 的 `pi/*`） | `bun run typecheck` + `bun run test:catalog` + `bun run test` | 旧 `config.yaml`（仅扁平字段）必须仍可启动；`auth.json` 损坏需自愈 |
 | CLI TUI（`apps/cli/src/**`） | `bun run typecheck` + `bun run test:tui` | 布局/快捷键/文案改动必须同步 `smoke-tui.ts` 的断言；列表分页行为（窗口/位置指示/PageUp·PageDown·Home·End）也归该套断言覆盖 |
-| 适配层 `packages/agent-runtime/**` | `bun run test`（全部 8 套）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
+| 适配层 `packages/agent-runtime/**` | `bun run test`（全部套件）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
+| 工具层 `packages/agent-runtime/src/tools/**` | `bun run typecheck` + `bun run test:tools` + `bun run test` | 新增/改工具行为必须补 `test:tools` 断言；工具改名会破坏提示词，**不要改** |
+| 外部工具层 `packages/utils/src/tools/**`（注册表 / 安装器 / 归档） | `bun run typecheck` + `bun run test:installer` + `bun run test` | 新增工具只需加一条 `ToolSpec` 并补 `test:installer` 断言（含资产名，需对过真实 release 列表） |
 | pi vendor 源码（`vendor/pi/**/src`） | `vendor:src` → 改 → `vendor:dist` → `vendor:build` → `bun run test` | 见 §6.1；**不要手改 `dist/`** |
 | 依赖变更 | `bun install` 后一并提交 `bun.lock`，并在 commit body 说明原因 | 不要把 `node_modules` 带进仓库 |
 | 文档（`*.md`） | 至少 `bun run typecheck` | 若文档描述了命令，需实际执行一遍确认命令可用；命令示例必须跨平台可复制（见 §6.8） |
@@ -274,7 +326,8 @@ Refs: MIGRATION.md §4
 它已被两处 `.gitignore` 覆盖，跑完测试或试跑后无需提交。
 
 ### 6.6 配置与凭据在 zread-pi 侧
-- `~/.zread-pi/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）——倒数第 1 轮会提示模型立即输出，超限后自动允许 1 轮宽限（`finalization.graceTurns`），仍不收敛才 `error_max_turns`。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
+- `~/.zread-pi/config.yaml`：非敏感配置。`llm.provider/model` 是当前生效项；`llm.providers.<id>` 保存每个 Provider 的 `base_url` / `api` / `auth_type` / 自定义模型 / 上次选择的模型；`llm.thinking_level` 是 pi 思考深度（缺省 `off`，配置界面 `/config/thinking` 维护）；`agent.max_turns` 是每次 Agent 运行的最大工作轮次（1-100，缺省 30，配置界面 `/config/max-turns` 维护）；`tools.<id>.enabled` 是外部工具（rg / fd）的启用开关（缺省 `true`，配置界面 `/config/tools` 维护，见 §1.4）。旧扁平 `llm.api_key`/`llm.base_url` 仍可读。
+- `~/.zread-pi/bin/`：zread-pi 托管安装的外部工具（rg / fd）；探测顺序为「环境变量指定 → 托管目录 → 系统 PATH」，用户停用时直接不用（强制内置纯 JS 实现）。
 - `~/.zread-pi/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
 - `~/.zread-pi/models-store.json`：动态 Provider 的模型目录缓存。
 - 适配层把这份配置翻译成 pi 的 Provider + Model（内置 Provider 直接用 `builtinProviders()`；未内置的用 `createProvider()` 动态注册；自定义模型按 pi models.json 语义合并）。
@@ -289,6 +342,11 @@ Refs: MIGRATION.md §4
 - **CLI 的真机交互（键盘/鼠标/中文输入）仅做了自动化回归**：`test:tui` 用假终端注入按键 + 真实 ProcessTerminal 启动检查；
   真机 IME 定位、Windows 终端下的 Shift+Enter、剪贴板等仍需人工确认。
 - **MCP / Skill / Task / Team / LSP / Cron 等能力未迁移**（原 `agent-sdk` 有，pi 文档无 MCP）。
+- **`Bash` / `PowerShell` 等 shell 执行工具未迁移**（第六步只做「文件与搜索」工具）：因此工具文案一律不引用 shell
+  （旧 `Read` 对目录曾提示「Use Bash with 'ls'」，现已改为点名 `Ls`）。若要引入 shell 能力，**先定方案再实现**
+  （沙箱/审批/超时/输出截断/Windows 分支，见 `MIGRATION.md` §9.6）。
+- **rg / fd 不会在 agent 运行期自动下载**（有意为之，见 §1.1）；缺失时走纯 JS 兜底，能力不降级但速度较差。
+  安装必须由用户显式触发：配置界面 `/config/tools`（带进度条）或 `bun run tools:install -- <rg|fd>`（无头环境）。
 - **会话语义差异**：旧 `saveSession/loadSession/tag/fork` 未迁移；pi 侧是 JSONL 会话树 + SQLite。
 
 ### 6.8 跨平台约束（Windows / Linux / macOS 等价可用）
@@ -311,6 +369,8 @@ Refs: MIGRATION.md §4
 2. 用 pi 的 usage ledger + 真实 `Model.cost` 替代旧 `estimateCost`。
 3. 需要聊天/会话时接 pi 的 `JsonlStorage` 会话树，而不是回填旧实现。
 4. 需要子代理/权限弹窗/计划模式时，走 pi 扩展 API（`registerTool` / `tool_call` 事件阻断）。
+5. 工具层可选补强（未决，见 `MIGRATION.md` §9.6）：`Read` 图片缩放（上游 `processImage`）、`Grep` 的 `type` 参数、
+   rg/fd 自动下载、以及「先用方案再实现」的 shell 执行能力。
 
 ---
 

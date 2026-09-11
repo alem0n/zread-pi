@@ -187,6 +187,64 @@ export interface TranslationKeys {
     current: string;
     footer: string;
   };
+  tools: {
+    /** 配置首页的条目名与列表页标题 */
+    title: string;
+    homeLabel: string;
+    intro: string;
+    ready: string;
+    readyRatio: string;
+    /** 状态 */
+    stateSystem: string;
+    stateManaged: string;
+    stateMissing: string;
+    stateDisabled: string;
+    /** 详情页字段 */
+    fieldState: string;
+    fieldVersion: string;
+    fieldPath: string;
+    fieldUsedBy: string;
+    fieldManagedDir: string;
+    fieldEnabled: string;
+    notInstalled: string;
+    /** 版本未知（探测不到版本号，不影响使用） */
+    versionUnknown: string;
+    /** 台账版本与探测版本不一致时的提示 */
+    versionMismatch: string;
+    /** 版本探测输出（诊断用） */
+    probeOutput: string;
+    probeArgs: string;
+    managedHint: string;
+    systemHint: string;
+    missingHint: string;
+    disabledHint: string;
+    notInstallable: string;
+    enabled: string;
+    disabled: string;
+    /** 安装相位 */
+    phaseResolving: string;
+    phaseDownloading: string;
+    phaseExtracting: string;
+    phaseVerifying: string;
+    phaseDone: string;
+    /** 动作与结果 */
+    installing: string;
+    installDone: string;
+    installDoneNoVersion: string;
+    installFailed: string;
+    uninstallDone: string;
+    uninstallNothing: string;
+    unsavedHint: string;
+    /** Footer */
+    listFooter: string;
+    detailFooter: string;
+    busyFooter: string;
+    /** 用途说明（按工具 id） */
+    usage: {
+      rg: string;
+      fd: string;
+    };
+  };
   common: {
     escBack: string;
     saveAndBack: string;
