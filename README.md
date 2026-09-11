@@ -272,6 +272,32 @@ unknown providerId 仍然回退为 OpenAI 兼容协议（旧实现会直接抛 `
 
 ---
 
+## 二进制构建（GitHub Actions）
+
+`.github/workflows/build-binary.yml` 在三平台构建 standalone 二进制并打 zip：
+推送 `v*` tag 自动构建并创建 Release；也可在 Actions 页面手动触发（workflow_dispatch）。
+
+产物布局（**wasm 必须与二进制同目录**，运行时按可执行文件同目录查找，见
+`packages/repo-analyzer/src/parser/wasm-loader.ts`）：
+
+```text
+open-zread-v<版本>-<os>-<arch>.zip
+├── open-zread(.exe)
+├── tree-sitter.wasm
+├── mappings.wasm
+└── browse/            # 「浏览文档」前端静态资源
+```
+
+本地手动构建（前置：vendor:build → workspace 包 tsup → browse:build → apps/cli build）：
+
+```bash
+bun run build:binary -- --target windows-x64   # linux-x64 | macos-arm64 等经交叉编译产出
+```
+
+支持目标：windows-x64 / linux-x64 / linux-arm64 / macos-x64 / macos-arm64（bun compile 交叉编译）。
+
+---
+
 ## 未迁移（当前业务链路未使用）
 
 原 `agent-sdk` 的以下能力**没有**搬过来，需要时再按需补：

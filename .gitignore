@@ -1,6 +1,7 @@
 # 依赖与构建产物
 node_modules/
 dist/
+dist-bin/
 *.tsbuildinfo
 
 # 生成的 Wiki 产物（在目标仓库里生成，不入库）
