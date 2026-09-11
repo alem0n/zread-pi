@@ -18,6 +18,6 @@
     "@zread-pi/types": "workspace:*",
     "@zread-pi/utils": "workspace:*",
     "diff": "8.0.4",
-    "ignore": "^5.2.0"
+    "ignore": "^7.0.8"
   }
 }
