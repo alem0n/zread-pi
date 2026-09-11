@@ -172,6 +172,19 @@ export class App {
     return Math.max(3, this.terminalRows - this.layoutOverhead);
   }
 
+  /**
+   * 终端原生「忙」指示（OSC 9;4，任务栏/标签页进度）。
+   *
+   * 用于安装下载这类长任务；不支持的终端会忽略该序列（已 try/catch）。
+   */
+  setBusy(active: boolean): void {
+    try {
+      this.tui.terminal.setProgress(active);
+    } catch {
+      // 终端不支持时静默忽略
+    }
+  }
+
   requestRender(): void {
     if (this.stopped) return;
     this.tui.requestRender();

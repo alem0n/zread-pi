@@ -241,6 +241,8 @@ console.log("▶ TUI 冒烟测试");
   checkContains("配置项：最大轮次（含默认值）", configText, "最大轮次 (默认: 30)");
   checkContains("配置项：最大并发数（含默认值）", configText, "最大并发数 (默认: 1)");
   checkContains("配置项：最大重试次数", configText, "最大重试次数 (默认: 0)");
+  checkContains("配置项：外部工具", configText, "外部工具");
+  checkContains("配置项值：外部工具就绪比例", configText, "就绪");
   checkContains("配置项值：provider · model", configText, "openai-compatible · gpt-4o-mini");
   checkContains("配置首页 Footer", configText, "ESC 退出 | ↑↓ 选择 | Enter 确认 | s 保存");
 
@@ -897,6 +899,82 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("\x1b[13;1:3u");
   await settle(80);
   check("Kitty Enter 松开不重复导航", app.location?.pathname === "/config", `pathname=${app.location?.pathname}`);
+
+  app.exit();
+}
+
+// --- 用例 4f：外部工具配置页（/config/tools → 详情页：启用开关 + 安装进度条）---
+{
+  const { app, terminal } = createApp(["/config/tools"]);
+  await app.start();
+  await settle();
+
+  const listText = screenText(app);
+  checkContains("工具列表页：标题", listText, "外部工具");
+  checkContains("工具列表页：安装目录", listText, ".zread-pi");
+  checkContains("工具列表页：用途说明", listText, "ripgrep / fd");
+  checkContains("工具列表页：总体进度条", listText, "就绪");
+  check(
+    "工具列表页：进度条带填充/空白字符",
+    listText.includes("█") || listText.includes("░"),
+    indent(listText.split("\n").find((line) => line.includes("就绪")) ?? ""),
+  );
+  checkContains("工具列表页：rg 条目", listText, "rg (ripgrep)");
+  checkContains("工具列表页：fd 条目", listText, "fd (fd)");
+  checkContains("工具列表页：rg 用途", listText, "Grep（文件内容搜索）");
+  checkContains("工具列表页：fd 用途", listText, "Glob（文件名搜索）");
+  checkContains("工具列表页 Footer", listText, "Enter 管理");
+
+  // Enter 进入 rg 详情
+  terminal.send("\r");
+  await settle(60);
+  check("工具列表页：Enter 进入详情页", app.location?.pathname === "/config/tools/rg", `pathname=${app.location?.pathname}`);
+
+  const detailText = screenText(app);
+  checkContains("工具详情页：标题", detailText, "ripgrep (rg)");
+  checkContains("工具详情页：状态字段", detailText, "状态: ");
+  checkContains("工具详情页：版本字段", detailText, "版本: ");
+  checkContains("工具详情页：路径字段", detailText, "路径: ");
+  checkContains("工具详情页：用途字段", detailText, "用于: Grep（文件内容搜索）");
+  checkContains("工具详情页：安装目录字段", detailText, "安装目录: ");
+  checkContains("工具详情页：启用状态", detailText, "已启用");
+  check(
+    "工具详情页：渲染进度条",
+    detailText.includes("█") || detailText.includes("░"),
+    indent(detailText.split("\n").find((line) => line.includes("%")) ?? ""),
+  );
+  checkContains("工具详情页 Footer", detailText, "Enter 安装/重装");
+
+  // t：停用（写当前配置，不落盘）
+  terminal.send("t");
+  await settle(60);
+  const disabledText = screenText(app);
+  checkContains("t 停用：状态变为已停用", disabledText, "已停用");
+  checkContains("t 停用：提示未保存", disabledText, "有未保存的修改");
+  check("t 停用：写入内存配置", app.config.isToolEnabled("rg") === false, String(app.config.isToolEnabled("rg")));
+
+  // 再按 t 恢复（确认是切换而非单向）
+  terminal.send("t");
+  await settle(60);
+  check("再按 t：恢复启用", app.config.isToolEnabled("rg") === true);
+
+  // t 停用 + s 保存 → 落盘 config.yaml 的 tools 段，并返回列表页
+  terminal.send("t");
+  await settle(40);
+  terminal.send("s");
+  await settle(600);
+  check("s 保存后返回列表页", app.location?.pathname === "/config/tools", `pathname=${app.location?.pathname}`);
+  const toolsYaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 tools 段", toolsYaml, "tools:");
+  checkContains("config.yaml 写入 tools.rg.enabled: false", toolsYaml, "enabled: false");
+
+  // 返回列表页后状态应刷新为「已停用」
+  const refreshed = screenText(app);
+  checkContains("返回列表页后刷新为已停用", refreshed, "已停用");
+
+  // 恢复现场：重新启用并保存（不影响后续用例）
+  app.config.setToolEnabled("rg", true);
+  await app.config.save();
 
   app.exit();
 }

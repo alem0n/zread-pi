@@ -11,7 +11,7 @@ import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { thinkingLevelLabel } from "../../utils/thinking";
-import { DEFAULT_MAX_TURNS } from "@zread-pi/utils";
+import { DEFAULT_MAX_TURNS, getToolStatus, toolIds } from "@zread-pi/utils";
 
 interface ConfigItem {
   key: string;
@@ -62,6 +62,21 @@ const configItems: ConfigItem[] = [
     getValue: (config, _t) => String(config.agent?.max_turns ?? DEFAULT_MAX_TURNS),
     default: String(DEFAULT_MAX_TURNS),
     route: "/config/max-turns",
+  },
+  {
+    // 外部工具：展示就绪数量（rg / fd），详情见 /config/tools
+    key: "tools",
+    labelKey: "tools.homeLabel",
+    getValue: (config, t) => {
+      const ids = toolIds();
+      const enabled = ids.filter((id) => config.tools?.[id]?.enabled ?? true).length;
+      const installed = ids.filter((id) => {
+        const status = getToolStatus(id);
+        return status?.state === "system" || status?.state === "managed";
+      }).length;
+      return `${t("tools.readyRatio", { ready: installed, total: ids.length })} · ${enabled}/${ids.length} ${t("tools.enabled")}`;
+    },
+    route: "/config/tools",
   },
   {
     key: "concurrency.max_concurrent",

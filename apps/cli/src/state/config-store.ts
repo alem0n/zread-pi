@@ -103,6 +103,21 @@ export class ConfigStore {
     this.setProviderConfig(providerId, { model: modelId });
   }
 
+  // ==================== 外部工具（rg / fd …） ====================
+
+  /** 读取某个外部工具的启用状态（旧配置缺少 tools 段时默认启用） */
+  isToolEnabled(toolId: string): boolean {
+    return this.config.tools?.[toolId]?.enabled ?? true;
+  }
+
+  /** 切换/设置某个外部工具的启用状态（由 /config/tools 页面维护） */
+  setToolEnabled(toolId: string, enabled: boolean): void {
+    this.config.tools = {
+      ...(this.config.tools ?? {}),
+      [toolId]: { enabled },
+    };
+  }
+
   /**
    * 凭据已交给 ~/.zread-pi/auth.json（pi CredentialStore），
    * 清掉 config.yaml 里的旧扁平 api_key/base_url，避免旧值覆盖新登录结果。
