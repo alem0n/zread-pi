@@ -923,6 +923,11 @@ console.log("▶ TUI 冒烟测试");
   checkContains("工具列表页：fd 条目", listText, "fd (fd)");
   checkContains("工具列表页：rg 用途", listText, "Grep（文件内容搜索）");
   checkContains("工具列表页：fd 用途", listText, "Glob（文件名搜索）");
+  check(
+    "工具列表页：用途文案不重复拼接 Agent 工具名",
+    !listText.includes("Grep · Grep") && !listText.includes("Glob · Glob"),
+    indent(listText.split("\n").find((line) => line.includes("搜索")) ?? ""),
+  );
   checkContains("工具列表页 Footer", listText, "Enter 管理");
 
   // Enter 进入 rg 详情
@@ -937,7 +942,7 @@ console.log("▶ TUI 冒烟测试");
   checkContains("工具详情页：路径字段", detailText, "路径: ");
   checkContains("工具详情页：用途字段", detailText, "用于: Grep（文件内容搜索）");
   checkContains("工具详情页：安装目录字段", detailText, "安装目录: ");
-  checkContains("工具详情页：启用状态", detailText, "已启用");
+  checkContains("工具详情页：启用状态", detailText, "启用状态: 已启用");
   check(
     "工具详情页：渲染进度条",
     detailText.includes("█") || detailText.includes("░"),

@@ -303,7 +303,7 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
   **rg/fd 与纯 JS 兜底两条路径结果一致**（同时在「非 git 仓库」与「git 仓库内」两种搜索根上覆盖
   `.gitignore` 语义）、同文件 16 路并发编辑不丢更新、`details` 与 image 块真的穿过桥接层进入模型上下文。
 - 回归：`bun run test`（typecheck + catalog 32/32、agent 11/11、tools 95/95、installer 55/55、agent:http 7/7、provider 5/5、
-  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 181+19+9+25+19+24）；`bun run mock:wiki`（completed=4 failed=0）。
+  analyzer 5/5、blueprint 7/7、pages 8/8、context 35/35、tui 182+19+9+25+19+24）；`bun run mock:wiki`（completed=4 failed=0）。
 
 ### 9.6 未决项（需要人类拍板）
 
@@ -361,7 +361,7 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
   配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：阶段齐全 / 百分比单调 / 指纹不匹配拒绝解包 /
   校验失败不留下半成品）、卸载、启用开关。
 - `bun run test:tools`（95 项）：追加「启用开关 → `findSearchBinary` → 纯 JS 兜底」的联动与缓存失效断言。
-- `bun run test:tui`（181 项）：新增工具列表页与详情页的布局、导航、启用/停用/保存、进度条字符断言；
+- `bun run test:tui`（182 项）：新增工具列表页与详情页的布局、导航、启用/停用/保存、进度条字符断言；
   `render-all-routes` 覆盖到 19 条路由（无超宽行）。
 - **真机验证**（本次手动执行，非 CI）：对真实 GitHub Releases 安装并执行成功——
   `ripgrep 15.2.0 (rev e89fff89ac)`、`fd 10.5.0`；卸载后状态回落到 `system`/`missing`。

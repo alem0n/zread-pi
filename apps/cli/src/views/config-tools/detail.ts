@@ -104,7 +104,13 @@ export default class ConfigToolDetailPage extends Screen {
     lines.push(field(t("tools.fieldPath"), status.path ?? "-"));
     lines.push(field(t("tools.fieldUsedBy"), t(`tools.usage.${status.id}`) || status.usedBy.join(" / ")));
     lines.push(field(t("tools.fieldManagedDir"), getManagedBinDir()));
-    lines.push(field(t("tools.enabled"), status.enabled ? t("tools.enabled") : t("tools.disabled"), status.enabled ? theme.success : theme.muted));
+    lines.push(
+      field(
+        t("tools.fieldEnabled"),
+        status.enabled ? t("tools.enabled") : t("tools.disabled"),
+        status.enabled ? theme.success : theme.muted,
+      ),
+    );
 
     // 进度条：安装中显示实时进度；空闲时显示「就绪度」（就绪 100% / 未就绪 0%）
     lines.push("");

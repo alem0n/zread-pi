@@ -200,6 +200,7 @@ export const zhCN: TranslationKeys = {
     fieldPath: '路径',
     fieldUsedBy: '用于',
     fieldManagedDir: '安装目录',
+    fieldEnabled: '启用状态',
     notInstalled: '未安装',
     managedHint: '按 d 可卸载（仅删除 zread-pi 安装的副本）',
     systemHint: '使用系统 PATH 中的版本；需要在 zread-pi 内管理时可覆盖安装',

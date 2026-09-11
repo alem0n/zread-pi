@@ -200,6 +200,7 @@ export const enUS: TranslationKeys = {
     fieldPath: 'Path',
     fieldUsedBy: 'Used by',
     fieldManagedDir: 'Install dir',
+    fieldEnabled: 'Enabled',
     notInstalled: 'not installed',
     managedHint: 'Press d to uninstall (only the zread-pi copy is removed)',
     systemHint: 'Using the system PATH build; install a managed copy to upgrade it independently',

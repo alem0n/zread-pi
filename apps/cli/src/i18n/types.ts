@@ -205,6 +205,7 @@ export interface TranslationKeys {
     fieldPath: string;
     fieldUsedBy: string;
     fieldManagedDir: string;
+    fieldEnabled: string;
     notInstalled: string;
     managedHint: string;
     systemHint: string;
