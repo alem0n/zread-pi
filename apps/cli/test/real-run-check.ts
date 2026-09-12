@@ -4,6 +4,10 @@
  * 覆盖：非 mock 终端路径（ProcessTerminal + TuiAltScreen）能正常启动、渲染完整一帧，
  * 并在收到 ctrl+c 时退出（退出码 0 + 退出备用屏幕缓冲）。
  *
+ * 注意：CLI 在**空目标目录**里启动（--dir 指向临时目录）。
+ * 若直接在仓库根跑，本仓库自己生成的 .zread-pi/wiki 会让首页变成「已就绪」分支
+ * （文案/选项与断言不符），断言结果就取决于渲染时序了。
+ *
  * 运行：bun run test:tui
  */
 
@@ -13,6 +17,8 @@ import { join } from "node:path";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 
 const home = await mkdtemp(join(tmpdir(), "zread-real-run-home-"));
+// 空目标目录：保证首页处于「尚无文档目录」状态，与断言无关仓库自身是否已生成过文档
+const project = await mkdtemp(join(tmpdir(), "zread-real-run-project-"));
 await mkdir(join(home, ".zread-pi"), { recursive: true });
 await writeFile(
   join(home, ".zread-pi", "config.yaml"),
@@ -32,7 +38,7 @@ await writeFile(
   "utf-8",
 );
 
-const child = Bun.spawn(["bun", "run", "apps/cli/src/index.ts"], {
+const child = Bun.spawn(["bun", "run", "apps/cli/src/index.ts", "--dir", project], {
   cwd: process.cwd(),
   env: { ...process.env, HOME: home, USERPROFILE: home, TERM: "xterm-256color" },
   stdin: "pipe",
@@ -96,6 +102,7 @@ const exitCode = await Promise.race([
 await readStdout.catch(() => undefined);
 const stderr = await readStderr.catch(() => "");
 await rm(home, { recursive: true, force: true });
+await rm(project, { recursive: true, force: true });
 
 check("ctrl+c 后进程退出", exitCode !== "timeout", `exitCode=${String(exitCode)}`);
 check("退出码为 0", exitCode === 0, `exitCode=${String(exitCode)}`);

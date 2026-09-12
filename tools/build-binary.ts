@@ -12,7 +12,7 @@
  *   bun install
  *   bun run vendor:build
  *   cd packages/types && bun run build && cd ../..   # 依次 types → utils → repo-analyzer → orchestrator
- *   bun run browse:install && bun run browse:build
+ *   bun run browse:build
  *   cd apps/cli && bun run build && cd ../..         # tsup 产物 dist/index.js + wasm + browse
  *
  * 用法：
@@ -116,7 +116,7 @@ function main(): void {
       '未找到 apps/cli/dist/index.js。请先完成前置构建：\n'
       + '  bun run vendor:build\n'
       + '  cd packages/types && bun run build（依次 types/utils/repo-analyzer/orchestrator）\n'
-      + '  bun run browse:install && bun run browse:build\n'
+      + '  bun run browse:build\n'
       + '  cd apps/cli && bun run build',
     );
   }

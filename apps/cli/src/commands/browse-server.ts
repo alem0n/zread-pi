@@ -125,8 +125,9 @@ async function startViteDevServer(apiOrigin: string): Promise<ViteDevServerHandl
       [
         "未找到前端资源，也无法启动 Vite（apps/browse 依赖缺失）。",
         "请任选一种方式：",
-        "  1) bun run browse:install && bun run browse:build",
-        `  2) 设置 ${WEB_DIST_ENV} 指向已构建的静态资源目录`,
+        "  1) 在仓库根运行 bun install（安装 apps/browse 依赖）后重试",
+        "  2) 运行 bun run browse:build 生成静态产物（免 Vite 启动）",
+        `  3) 设置 ${WEB_DIST_ENV} 指向已构建的静态资源目录`,
       ].join("\n"),
     );
   }
@@ -442,7 +443,7 @@ export async function startWikiBrowseServer(
   if (!webDist && isPackagedBuild()) {
     throw new Error(
       `前端打包文件未找到: ${path.resolve(MODULE_DIR, "browse")}；` +
-        "请在仓库根运行 bun run browse:install && bun run browse:build 后重新打包 CLI",
+        "请在仓库根运行 bun install 与 bun run browse:build 后重新打包 CLI",
     );
   }
 

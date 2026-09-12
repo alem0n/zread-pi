@@ -28,7 +28,7 @@ zread-pi/
 │  └─ types/             ← 保留：共享类型（provider/model 配置结构有新增字段）
 ├─ apps/
 │  ├─ cli/               ← 保留：TUI（**pi-tui 实现**，不再依赖 Ink/React；仅 browse-chat 的 provider 改为 pi 实现）
-│  └─ browse/            ← 保留：React 19 + Vite 预览站（**独立安装**，见下方说明）
+│  └─ browse/            ← 保留：React 19 + Vite 预览站（依赖随根 `bun install` 安装，见「工程细节 1」）
 ├─ fixtures/hello-python/ ← 测试夹具：极简 Python 项目（离线全链路试跑的目标）
 ├─ vendor/pi/packages/   ← pi 内核源码（ai / agent / telemetry / chord / tui，上游零改动）
 └─ tools/                ← vendor 管理模式切换脚本
@@ -69,10 +69,10 @@ bun run cli browse --dir /path/to/repo           # 预览站也看该目录的�
 #
 # 「浏览文档」返回的地址一定真实可访问，并自动打开浏览器：
 #   有构建产物（apps/browse/dist 或打包后的 dist/browse）→ API + 静态资源同端口；
-#   源码运行且未构建 → 进程内自动启动 Vite dev server（/api 代理到 API 端口）。
+#   源码运行且未构建 → 进程内自动启动 Vite dev server（依赖随根 `bun install` 安装；/api 代理到 API 端口）。
 #   启动失败（端口占用/资源缺失）时页面直接显示原因，不再静默显示一个打不开的地址。
 
-# 5) 预览站（独立 React 19 环境，见「工程细节 1」）bun run browse:install      # 首次：安装 apps/browse 依赖
+# 5) 预览站（React 19 + Vite，依赖随根 bun install 安装，见「工程细节 1」）
 bun run browse:build        # 可选：构建静态产物（打包 CLI / 免 Vite 预览）
 bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 ```
@@ -248,12 +248,14 @@ zread-pi browse -d /path/to/repo    # 预览站也读这份产物
 
 ## 需要知道的三个工程细节
 
-### 1. `apps/browse` 独立安装（历史原因：React 18/19 隔离）
+### 1. `apps/browse` 依赖并入根 workspaces（历史隔离已解除）
 迁移到 pi-tui 之前，`apps/cli`（Ink 4 + React 18）与 `apps/browse`（React 19 + Vite）混装时，bun 会为 `ink` 的 `react-reconciler` 选到 React 19 变体，导致 CLI 启动即崩：
 `TypeError: undefined is not an object (evaluating 'ReactSharedInternals.ReactCurrentOwner')`。
-因此 **`apps/browse` 不列入根 workspaces**，单独 `bun install`（`bun run browse:install`）。它不引用任何 `@zread-pi/*` 包，隔离无副作用。
 
-> 现状：CLI 已不再依赖 React/Ink，该冲突不再存在；但本次迁移刻意不改动 browse 的安装方式（保持零风险）。如后续要合并，只需把它加回根 `workspaces` 并验证 CLI 启动。
+CLI 换成 pi-tui 后已不再依赖 React/Ink，该冲突不再存在；因此 **`apps/browse` 已重新列入根 `workspaces`**，
+一次根 `bun install` 即可装齐 Vite/React，「浏览文档」源码运行可直接走进程内 Vite 兜底，
+不再需要额外的 `bun run browse:install`（漏跑会以「未找到前端资源，也无法启动 Vite」失败）。
+它不引用任何 `@zread-pi/*` 包，并入后与其它 workspace 包无耦合。
 
 ### 2. vendor 管理模式（src ⇄ dist）
 `vendor/pi/packages/*` 是 pi 上游源码快照，两种消费方式：

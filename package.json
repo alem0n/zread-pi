@@ -1,12 +1,13 @@
 {
   "name": "zread-pi",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
   "description": "zread-pi 业务层（cli / Orchestrator / Browse / RepoAnalyzer / Types）运行在 pi 的 agent 内核（pi-ai + pi-agent-core）之上；原 agent-sdk 由 packages/agent-runtime 适配层取代。",
   "workspaces": [
     "apps/cli",
+    "apps/browse",
     "packages/*",
     "vendor/pi/packages/*"
   ],
@@ -26,7 +27,6 @@
     "vendor:src": "bun run tools/patch-vendor.ts",
     "vendor:dist": "bun run tools/patch-vendor-dist.ts",
     "vendor:build": "bun run tsc -p vendor/pi/packages/telemetry/tsconfig.build.json && bun run tsc -p vendor/pi/packages/chord/tsconfig.build.json && bun run tsc -p vendor/pi/packages/ai/tsconfig.app.json && bun run tsc -p vendor/pi/packages/agent/tsconfig.build.json && bun run tsc -p vendor/pi/packages/tui/tsconfig.build.json",
-    "browse:install": "cd apps/browse && bun install",
     "browse:build": "cd apps/browse && bun run build",
     "browse:dev": "cd apps/browse && bun run dev",
     "test:blueprint": "bun run packages/orchestrator/test/e2e-blueprint.ts",

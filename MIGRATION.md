@@ -65,8 +65,9 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 1. **MCP 缺失**：pi 文档无 MCP 能力。当前 wiki 链路不需要；若 `cli`/browse-chat 需要用户配置的 MCP 工具，应把 `agent-sdk/src/mcp/client.ts` + `tool-helper.ts` 作为独立小包保留并适配成 pi 工具（pi 支持运行时 `registerTool`）。
 2. **会话能力缺口**：tag/rename/list/fork 在 pi 文档中无直接对应，需用值存储/自定义条目实现或放弃。
-3. **React 18/19 混装**：原因为 Ink（React 18）与 browse（React 19）冲突，见 README §工程细节 1。
-   CLI 换成 pi-tui 后已不再依赖 React，该风险降级为历史约束（browse 仍独立安装）。
+3. **React 18/19 混装（已解除）**：原因为 Ink（React 18）与 browse（React 19）冲突，见 README §工程细节 1。
+   CLI 换成 pi-tui 后已不再依赖 React，`apps/browse` 已重新列入根 workspaces（依赖随根 `bun install`）；
+   修复了源码运行「浏览文档」因漏跑 `bun run browse:install` 而报「未找到前端资源，也无法启动 Vite」的问题。
 4. **pi 内核版本**：vendor 快照为 0.85.1（与 npm 发布版同版本号）。升级 pi 时需重跑 `bun run vendor:build` 与 `bun run test`。
    `ai` 包现在编译到 `providers/all.ts` + `auth/oauth/*` + `providers/data/*.json`（为了配置界面的 Provider 目录与 pi-ai 登录能力，见 §8）；升级后需同步更新 data JSON。
 5. **真机联调**：全部测试使用离线 faux / 本地 mock HTTP；**尚未用真实 API Key 跑过完整 wiki 生成**。建议首次验证：`bun run cli config` 配好 key → 在目标仓库执行 `bun run cli`，重点观察 retry 事件与长上下文（大仓库）下的 usage/压缩表现（压缩触发时会收到 `system/compact_boundary`）。
@@ -140,7 +141,8 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 3. **`parseFiles` 期间的卡顿**：Tree-sitter 首次解析会同步下载/初始化 WASM，主线程被占用时加载动画无法刷新（迁移前同样存在）；本次未改 repo-analyzer。
 4. **pi-tui 与上游同版本（0.85.1）**：后续升级需重跑 `bun run vendor:build && bun run test:tui`。
 5. **`tui` 包的构建差异**：上游用 `tsgo`，本仓库用 `tsc` 并把 target/lib 提到 ES2024（原因见 README §工程细节 2）。
-6. **`apps/browse` 仍在 workspaces 之外**：CLI 已无 React 依赖，理论上可合并；本次迁移刻意不动。
+6. **`apps/browse` 已并入根 workspaces**：CLI 无 React 依赖后合并没有冲突；根 `bun install` 即装齐浏览站依赖，
+   源码运行「浏览文档」直接走进程内 Vite 兜底（此前为独立安装，漏跑 `browse:install` 会导致启动失败）。
 
 ---
 

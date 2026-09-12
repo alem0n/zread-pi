@@ -55,7 +55,7 @@ export default defineConfig(() => {
       } else {
         console.warn(
           '[cli] 未找到 apps/browse/dist；打包产物将缺少「浏览文档」前端资源。' +
-            '请先运行 bun run browse:build（首次还需 bun run browse:install）。',
+            '请先运行 bun install 与 bun run browse:build。',
         )
       }
 
