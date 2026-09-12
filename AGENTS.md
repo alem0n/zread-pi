@@ -52,6 +52,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 轮次收尾：提示 + 宽限轮 | 倒数第 1 轮向模型注入收尾提示（steering user 消息，按文档语言点名输出工具 `write_page` / `generate_blueprint`），超限后允许 1 轮宽限（`finalization.graceTurns`，0=旧行为）；上下文将满时不给宽限，仍不收敛才 `error_max_turns`；`max_turns=0` = 不限制轮次（不发提示、不因轮次停止） |
 | 上下文压缩用 pi 的 `transformContext` + `compaction` | 每次请求前按 `model.contextWindow - reserveTokens` 判定，超限时调用 pi 的 `prepareCompaction` / `compact` 生成摘要（发出 `system/compact_boundary`），用「摘要 + 保留的近期消息」继续；`shouldStopAfterTurn` 在压缩无法腾出空间时优雅停止（`error_context_full`），不让 provider 报上下文溢出 |
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
+| 项目家目录只在一处定义 + 新增全局记忆 `history` | 家目录（`~/.zread-pi`）此前散落在 utils / agent-runtime / repo-analyzer 多处 `homedir()` 拼接中，现在统一到 `packages/utils/src/project-home.ts`（`ZREAD_PI_HOME` 可覆盖，测试隔离用）。开始生成文档（蓝图 / 页面两个入口）时把项目绝对路径写入 `<家目录>/history`：ZRH1 二进制（追加 O(1) / 顺序遍历 O(n) / 墓碑随机删除 O(1)，按需 compact，上限 1000 条）；`zread-pi history` 并发检查各项目 `.zread-pi` 是否还在，删除失效记录后展示剩余；重复生成同一项目去重只留最近一条 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
 | 浏览文档：服务端返回的 URL 必须真实可访问 | 有构建产物（打包 `dist/browse` / 源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码运行且未构建时进程内启动 Vite dev server（`/api` 代理到 API 端口）。不再依赖用户另起 `browse:dev`，也不再返回没人监听的 5173；启动失败在 TUI 显示原因（`ZREAD_PI_BROWSE_DIST` / `ZREAD_PI_BROWSE_NO_OPEN` 供自定义与测试） |
 | `apps/browse` 不进根 workspaces | React 19（browse）与 React 18（ink）混装会让 CLI 启动即崩，见 §6.3 |
@@ -128,13 +129,14 @@ Windows 下推荐在 Git Bash 或 WSL 中操作（PowerShell/CMD 亦可跑 `bun 
 bun install                # 安装依赖
 bun run vendor:build       # 构建 pi 内核产物（全新 clone 后必须执行一次）
 bun run typecheck          # tsc --noEmit（apps/cli/src + apps/cli/test + packages/*/src）
-bun run test               # typecheck + 11 个测试套件（离线，无需 API Key）
+bun run test               # typecheck + 12 个测试套件（离线，无需 API Key）
 bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终端启动 + 目标目录参数 + mock LLM 生成/同步
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
 bun run browse:install     # 预览站依赖（apps/browse 独立安装）
 bun run browse:build       # 预览站静态产物（打包 CLI / 免 Vite 预览）
 bun run cli                # 真机 CLI（需 ~/.zread-pi/config.yaml）
 bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=当前目录）
+bun run cli history        # 查看全局记忆：清理已失效项目并列出剩余（-c 指定并发，默认 8）
 ```
 
 | 命令 | 覆盖内容 | 期望 |
@@ -143,6 +145,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | `test:agent` | pi 循环、工具执行、钩子、流式事件、429 重试、usage、thinkingLevel 透传、maxTurns | 11/11 |
 | `test:tools` | 工具层专项：截断设施、glob 语义（与 fd `--glob` 对齐）、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与 image 块穿过桥接层进入模型上下文、外部工具启用开关→二进制解析联动 | 95/95 |
 | `test:installer` | 外部工具：注册表与资产名（已对真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化、安装全流程（本地 mock Releases + 注入探测，含进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关 | 70/70 |
+| `test:history` | 全局记忆：ZRH1 二进制结构（头部 / 追加 / 顺序遍历 / 偏移稳定 / 墓碑随机删除 / 去重移到末尾 / 压缩 / maxRecords 淘汰 / 半截尾部修复 / 损坏自愈 / UTF-8 与超长路径）、`ZREAD_PI_HOME` 唯一定义点、`pruneHistory` 并发检查 `.zread-pi` 并删除失效记录、`mapWithConcurrency` 保序；`zread-pi history` 命令（空记忆 / 清理 / 幂等 / `-c` / 损坏文件 / 帮助） | 55 + 24 |
 | `test:context` | 上下文压缩：`transformContext` + pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续、压缩无法腾出空间/关闭压缩时 `error_context_full`、`maxTurns` 收尾提示 + 宽限轮（最后一轮/宽限轮输出 → success，不收敛 → `error_max_turns`，`graceTurns=0` = 旧行为，`maxTurns=0` = 不限制轮次） | 39/39 |
 | `test:agent:http` | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径） | 5/5 |
@@ -150,7 +153,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | `test:blueprint` | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json`；模型不产出蓝图时必须报错（不再假装目录完成） | 7/7 |
 | `test:pages` | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验；页面未落盘（未调用 `write_page` / 写入路径不符 / Mermaid 拦截）必须记失败并发出 `page_error` | 8/8 |
 | `test:browse` | 「浏览文档」服务器 + pi-tui 浏览页：静态资源/API 同端口、SPA fallback、未知 API 404、`close()` 后可连性；页面显示真实地址、ESC 停止；源码无产物时进程内 Vite 兜底；无效资源目录报错 | 28/28（有 `apps/browse/dist` 时兜底 4 项自动跳过） |
-| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页（含 `0` = 不限制写回与落盘）/外部工具页/版本号与项目版本同步 187 项）、`render-all-routes.ts`（全部 19 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 19 项）、`browse-server.ts`（浏览文档服务 + 页面，24~28 项：有 `apps/browse/dist` 时兜底 4 项自动跳过） | 187 + 19 + 9 + 25 + 19 + 24 |
+| `test:tui` | `smoke-tui.ts`（布局/按键/输入框/长列表分页/终端自适应/按键重绘与 Kitty 松开过滤/Provider 详情页 API Key+模型焦点切换/多 Provider/自定义模型/思考深度页/最大轮次页（含 `0` = 不限制写回与落盘）/外部工具页/版本号与项目版本同步 187 项）、`render-all-routes.ts`（全部 19 个路由渲染不报错、无超宽行）、`real-run-check.ts`（真实 ProcessTerminal 启动/退出 9 项）、`cli-target-dir.ts`（`-d/--dir`：绝对/相对路径、`wiki --dir` 写法、产物落盘到目标目录、调用目录不被写入、缺省行为、无效目录报错 25 项）、`mock-generate.ts`（生成 + 同步全链路 + 全局记忆写入断言 21 项）、`browse-server.ts`（浏览文档服务 + 页面，24~28 项：有 `apps/browse/dist` 时兜底 4 项自动跳过） | 187 + 21 + 9 + 25 + 19 + 24 |
 | `mock:wiki [path]` | 蓝图 + 页面全链路（mock LLM，请求可数） | `completed=N failed=0` |
 
 > **硬性要求**：任何改动都必须实际运行对应验证并贴出真实输出。
@@ -168,6 +171,7 @@ bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=�
 | 适配层 `packages/agent-runtime/**` | `bun run test`（全部套件）+ 新增/更新针对性断言 | 契约面改动必须同步 `MIGRATION.md` §3/§4 |
 | 工具层 `packages/agent-runtime/src/tools/**` | `bun run typecheck` + `bun run test:tools` + `bun run test` | 新增/改工具行为必须补 `test:tools` 断言；工具改名会破坏提示词，**不要改** |
 | 外部工具层 `packages/utils/src/tools/**`（注册表 / 安装器 / 归档） | `bun run typecheck` + `bun run test:installer` + `bun run test` | 新增工具只需加一条 `ToolSpec` 并补 `test:installer` 断言（含资产名，需对过真实 release 列表） |
+| 项目家目录 / 全局记忆（`packages/utils/src/project-home.ts`、`packages/utils/src/history/**`、CLI `history` 命令） | `bun run typecheck` + `bun run test:history` + `bun run test` | 目录名 / 位置改动只改 `project-home.ts`；history 二进制布局变更必须升 `HISTORY_VERSION` 并补断言与读取兼容（当前只支持 v1） |
 | pi vendor 源码（`vendor/pi/**/src`） | `vendor:src` → 改 → `vendor:dist` → `vendor:build` → `bun run test` | 见 §6.1；**不要手改 `dist/`** |
 | 依赖变更 | `bun install` 后一并提交 `bun.lock`，并在 commit body 说明原因 | 不要把 `node_modules` 带进仓库 |
 | 文档（`*.md`） | 至少 `bun run typecheck` | 若文档描述了命令，需实际执行一遍确认命令可用；命令示例必须跨平台可复制（见 §6.8） |
@@ -330,6 +334,8 @@ Refs: MIGRATION.md §4
 - `~/.zread-pi/bin/`：zread-pi 托管安装的外部工具（rg / fd）；探测顺序为「环境变量指定 → 托管目录 → 系统 PATH」，用户停用时直接不用（强制内置纯 JS 实现）。
 - `~/.zread-pi/auth.json`：pi-ai 格式凭据（`{ "<providerId>": Credential }`），由 `Models.login()` 写入，可同时保存多个 Provider；配置界面只走 api_key，OAuth 凭据需手动写入（运行时仍会自动刷新）。
 - `~/.zread-pi/models-store.json`：动态 Provider 的模型目录缓存。
+- `~/.zread-pi/history`：全局记忆（ZRH1 二进制；开始生成文档时写入，`zread-pi history` 清理并展示，见 §1.1）。
+- `ZREAD_PI_HOME`：覆盖项目家目录位置（默认 `~/.zread-pi`），测试隔离与同机多套配置用；路径本身只在 `packages/utils/src/project-home.ts` 定义。
 - 适配层把这份配置翻译成 pi 的 Provider + Model（内置 Provider 直接用 `builtinProviders()`；未内置的用 `createProvider()` 动态注册；自定义模型按 pi models.json 语义合并）。
 - 上下文压缩阈值不在 `config.yaml`，而是由适配层按 `model.contextWindow` + pi 默认值（`reserveTokens=16384` / `keepRecentTokens=20000`）自动判定；测试可通过 `createAgent({ compaction })` 调参。
 - **未登记的 providerId 回退 OpenAI 兼容协议**（旧实现会抛 `Unsupported provider`）——这是有意的健壮性增强。

@@ -406,3 +406,60 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 2. **无增量进度与断点续传**：下载失败需重来（资产只有 1~2MB，暂不做 Range 续传）。
 3. **不支持 zip64 / 7z / xz 资产**：当前两个工具的资产不需要；新增工具若用这些格式需扩展 `archive.ts`。
 4. **未做版本升级提示的自动检查**：详情页只在用户点安装时才解析 latest（避免 UI 打开即联网）。
+
+---
+
+## 11. 全局记忆 + 项目家目录唯一定义（第九步）
+
+### 11.1 目标
+
+1. 把字符串 `~/.zread-pi` 收敛为「项目家目录」的唯一定义点：改家目录名 / 位置只改一处；
+2. 新增「全局记忆」：每当开始生成文档，把项目绝对路径写入 `<项目家目录>/history`；
+3. 用一个二进制数据结构存这些路径（高效遍历 / 末尾插入 / 随机删除）；
+4. 新增启动参数 `zread-pi history`：遍历记录，删除那些项目目录下已没有 `.zread-pi` 的记录，再展示剩余项；
+5. 遍历允许并发（I/O 等待型任务）。
+
+### 11.2 改动清单
+
+| 位置 | 内容 |
+| --- | --- |
+| `packages/utils/src/project-home.ts` | 家目录唯一定义点：`ZREAD_PI_DIR_NAME`（`.zread-pi`）、`ZREAD_PI_HOME_ENV`（`ZREAD_PI_HOME`）、`getProjectHome()`、`projectHomePath()`。全部家目录路径（config / auth / models-store / logs / parsers / bin / tools-state / history）改为从这里派生 |
+| `packages/utils/src/history/binary-log.ts` | ZRH1 二进制结构：定长头部 + 变长记录（tag / length / UTF-8 payload）；追加 O(1)、顺序遍历 O(n)、墓碑随机删除 O(1)、阈值自动 compact、半截尾部修复、损坏抛 `HistoryFormatError` |
+| `packages/utils/src/history/index.ts` | 全局记忆语义层：`rememberProject`（去重移到末尾）、`readHistory`、`forgetProject`、`clearHistory`、`pruneHistory`（并发检查 `<项目>/.zread-pi` 并删除失效项，默认并发 8） |
+| `packages/utils/src/history/concurrency.ts` | `mapWithConcurrency`（零依赖固定并发、结果保序） |
+| `packages/orchestrator/src/wiki/memory.ts` + 两个生成入口 | `generateWikiCatalog()` / `generateWikiContent()` 开始时 `await rememberCurrentProject()`；写入失败只告警，不阻断生成 |
+| `apps/cli/src/commands/history.ts` + `index.ts` + i18n | `zread-pi history [-c <n>]`：清理 + 展示；中英文案齐全 |
+
+### 11.3 二进制格式决策（为什么是「追加日志 + 墓碑」）
+
+历史记录的模式只有三种：追加、顺序遍历、随机删除。因此选最直接的组合：
+
+```text
+头部 16B: magic "ZRH1" | version u16=1 | flags u16 | headerSize u32 | reserved u32
+记录:      tag u8 (1=有效 / 0=墓碑) | length u32 (UTF-8 字节数) | path[length]
+```
+
+- **不选定长槽位**：槽位大小必须覆盖最长路径（Windows 长路径上限 32767B），要么浪费空间，要么
+  截断路径 —— 路径必须无损，所以变长；
+- **不选 B 树 / 哈希索引**：历史量级小（上限 1000 条）且模式简单，索引只会带来写放大与损坏面；
+- **删除留墓碑**：随机删除只改 1 个字节，不搬移后续记录；墓碑数 ≥ 16 且墓碑字节 ≥ 存活字节时
+  自动 `compact()`（写临时文件 + rename 原子替换）；记录超限淘汰最旧，文件体积有界；
+- **损坏 / 半截写入**：进程在 append 中途被杀会留下半截尾部记录，打开时按 `length` 判定并截断，
+  只丢最后一条；magic / version 不符则备份为 `history.corrupt-<ts>` 后重建（记忆可丢，生成不能被阻塞）；
+- **不跨进程加锁**：同一时刻两个 CLI 写同一份记忆属于异常用法；同进程内每次读改写经 Promise 串行链。
+
+### 11.4 验证
+
+- `bun run test:history`（新增，55 + 24 项，离线）：二进制头部 / 追加 / 遍历 / 偏移 / 墓碑删除 / 去重 /
+  压缩 / 淘汰 / 半截修复 / 损坏自愈 / 超长与 NUL 拒绝；`pruneHistory` 并发清理；`ZREAD_PI_HOME` 覆盖；
+  `zread-pi history` 空记忆、清理、幂等、`-c`、损坏文件自愈、帮助信息。
+- `bun run test` 全量回归：`mock-generate.ts` 增加「开始生成文档写入全局记忆」与「蓝图 + 页面只留一条」断言。
+- 项目家目录改名回归路径：`grep homedir()` / `.zread-pi` 只剩 `project-home.ts` 的定义与注释。
+
+### 11.5 风险与未决
+
+1. **跨进程并发写**未加锁：两个进程同时 remember 时后写覆盖（历史最多丢最近几条，可接受）；
+   若将来做多实例共享，再考虑文件锁 / 原子追加目录。
+2. **格式只有 v1**：读取遇到未知 version 会走「备份 + 重建」；将来扩展布局时需保留旧版本读取或显式迁移。
+3. **`.zread-pi` 存在性作为失效判据**：项目还在但用户手动删了产物目录时记录会被清掉 —— 这符合
+   「memory 只记生成过的项目」的语义；若将来想按项目目录本身判活，需改 `hasLocalOutput`。
