@@ -417,7 +417,8 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 2. 新增「全局记忆」：每当开始生成文档，把项目绝对路径写入 `<项目家目录>/history`；
 3. 用一个二进制数据结构存这些路径（高效遍历 / 末尾插入 / 随机删除）；
 4. 新增启动参数 `zread-pi history`：遍历记录，删除那些项目目录下已没有 `.zread-pi` 的记录，再展示剩余项；
-5. 遍历允许并发（I/O 等待型任务）。
+5. 遍历允许并发（I/O 等待型任务）；
+6. 后续增量：打开目标目录时如果发现已有生成好的文档且路径不在名单里，自动补录（§11.5）。
 
 ### 11.2 改动清单
 
@@ -429,6 +430,7 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 | `packages/utils/src/history/concurrency.ts` | `mapWithConcurrency`（零依赖固定并发、结果保序） |
 | `packages/orchestrator/src/wiki/memory.ts` + 两个生成入口 | `generateWikiCatalog()` / `generateWikiContent()` 开始时 `await rememberCurrentProject()`；写入失败只告警，不阻断生成 |
 | `apps/cli/src/commands/history.ts` + `index.ts` + i18n | `zread-pi history [-c <n>]`：清理 + 展示；中英文案齐全 |
+| `apps/cli/src/app.ts` + `utils/generated-docs.ts` | **打开旧项目自动登记**：`runApp()` 启动时判断目标目录是否已有完整文档（与首页共用 `countGeneratedPages`），缺录时 `ensureProjectRecorded()` 补一条 |
 
 ### 11.3 二进制格式决策（为什么是「追加日志 + 墓碑」）
 
@@ -450,13 +452,25 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 
 ### 11.4 验证
 
-- `bun run test:history`（新增，55 + 24 项，离线）：二进制头部 / 追加 / 遍历 / 偏移 / 墓碑删除 / 去重 /
-  压缩 / 淘汰 / 半截修复 / 损坏自愈 / 超长与 NUL 拒绝；`pruneHistory` 并发清理；`ZREAD_PI_HOME` 覆盖；
-  `zread-pi history` 空记忆、清理、幂等、`-c`、损坏文件自愈、帮助信息。
+- `bun run test:history`（新增，61 + 24 + 10 项，离线）：二进制头部 / 追加 / 遍历 / 偏移 / 墓碑删除 / 去重 /
+  压缩 / 淘汰 / 半截修复 / 损坏自愈 / 超长与 NUL 拒绝；`pruneHistory` 并发清理；`ensureProjectRecorded`
+  仅缺录不刷位置；`ZREAD_PI_HOME` 覆盖；`zread-pi history` 空记忆、清理、幂等、`-c`、损坏文件自愈、帮助；
+  老旧项目自动登记（完整文档补录 / 已在名单不挪位 / 不完整不登记 / `--dir` 登记目标目录）。
 - `bun run test` 全量回归：`mock-generate.ts` 增加「开始生成文档写入全局记忆」与「蓝图 + 页面只留一条」断言。
 - 项目家目录改名回归路径：`grep homedir()` / `.zread-pi` 只剩 `project-home.ts` 的定义与注释。
 
-### 11.5 风险与未决
+### 11.5 打开旧项目自动登记（后续增量）
+
+- **触发**：`runApp()` 启动时（默认 wiki / config / browse 三条命令共用，在 `applyTargetDir()` 切换 cwd 之后）。
+- **判据**：`<目标目录>/.zread-pi/wiki/wiki.json` 可解析、`pages` 非空、且全部页面已落盘；
+  复用首页的 `countGeneratedPages`（即 UI 的「文档已生成 (N 篇)」），不另造一套判定。
+- **写入**：`ensureProjectRecorded()` —— 已在名单中**不做任何写入**（不刷位置、不重复），
+  仅在缺录时追加；与生成时 `rememberProject()` 的「移到最近」语义区分开。
+- **容错**：wiki.json 损坏 / 读取失败 / 记忆不可写时静默忽略，不阻断 TUI 启动。
+- **决策**：没有采用「只要 wiki.json 存在就登记」的更宽松判据 —— 与首页状态保持一致，
+  避免把中途失败 / 半成品项目误记为「已生成」；部分生成的项目仍可通过继续生成时写入记忆。
+
+### 11.6 风险与未决
 
 1. **跨进程并发写**未加锁：两个进程同时 remember 时后写覆盖（历史最多丢最近几条，可接受）；
    若将来做多实例共享，再考虑文件锁 / 原子追加目录。

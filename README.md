@@ -139,6 +139,9 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 
 每次**开始生成文档**（蓝图 / 页面两个入口）都会把当前项目路径写入 `<项目家目录>/history`
 （默认 `~/.zread-pi/history`），同一项目重复生成只保留最近一条（去重并移到末尾）。
+另外，用 zread-pi 打开一个**已经生成好文档**的老旧目录时（wiki.json 可解析、页面非空且全部落盘，
+即首页的「文档已生成 (N 篇)」），若路径不在名单里会自动补录一条；已在名单中则不改动顺序、不重复写入 ——
+老项目无需重新生成即可被历史记录收录。
 `zread-pi history` 并发检查每条记录对应项目下的 `.zread-pi` 是否还存在（不存在 = 项目已删除 / 产物已清理），
 删除失效记录后按最近使用顺序展示剩余项；`-c/--concurrency` 可调整检查并发数（默认 8）。
 
@@ -163,7 +166,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `test:agent` | pi Agent 循环、工具执行、钩子、流式事件、**429 重试**、usage 映射、thinkingLevel → reasoning 透传、maxTurns | 11/11 |
 | `test:tools` | **工具层专项**：截断设施、glob 语义、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与图片内容块穿过桥接层进入模型上下文、外部工具启用开关 → 二进制解析联动 | 95/95 |
 | `test:installer` | **外部工具安装**：注册表与资产名（对过真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关、**版本探测与可用性解耦**（多组参数回退 / 识别不出版本仍可用 / 安装台账与不一致提示） | 70/70 |
-| `test:history` | **全局记忆**：ZRH1 二进制结构（头部 / 追加 / 顺序遍历 / 偏移稳定 / 墓碑随机删除 / 去重移到末尾 / 压缩 / maxRecords 淘汰 / 半截尾部修复 / 损坏自愈 / UTF-8 与超长路径）、`ZREAD_PI_HOME` 唯一定义点、`pruneHistory` 并发检查 `.zread-pi` 并删除失效记录、`mapWithConcurrency` 保序；**`zread-pi history` 命令**（空记忆 / 清理 / 幂等 / `-c` / 损坏文件 / 帮助信息） | 55 + 24 |
+| `test:history` | **全局记忆**：ZRH1 二进制结构（头部 / 追加 / 顺序遍历 / 偏移稳定 / 墓碑随机删除 / 去重移到末尾 / 压缩 / maxRecords 淘汰 / 半截尾部修复 / 损坏自愈 / UTF-8 与超长路径）、`ZREAD_PI_HOME` 唯一定义点、`pruneHistory` 并发检查 `.zread-pi` 并删除失效记录、`ensureProjectRecorded` 仅缺录不刷位置、`mapWithConcurrency` 保序；**`zread-pi history` 命令**（空记忆 / 清理 / 幂等 / `-c` / 损坏文件 / 帮助信息）；**老旧项目自动登记**（完整文档 → 补录、已在名单 → 不重复不挪位、不完整 / 无文档 → 不登记、`--dir` 登记目标目录） | 61 + 24 + 10 |
 | `test:context` | **上下文压缩 + 优雅停止**：`transformContext` 调用 pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续成功；单个巨大 turn（压缩无法腾出空间）与 `compaction.enabled=false` 时产出 `error_context_full`；`maxTurns` 收尾提示 + 宽限轮：模型最后一轮/宽限轮输出 → success，仍不收敛 → `error_max_turns`，`graceTurns=0` 回到旧行为，**`maxTurns=0` = 不限制轮次**（不发收尾提示、不因轮次停止） | 39/39 |
 | `test:agent:http` | 真实 HTTP/SSE 路径：baseURL + apiKey 注入、增量 tool_call 参数解析、第二轮请求 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径）、system 透传、usage | 5/5 |
