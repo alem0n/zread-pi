@@ -114,10 +114,17 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 
 <p align="center">
   <img src="./static/config-tui.png" width="48%" alt="Provider 配置页">
-  <img src="./static/gen-document-tui.png" width="48%" alt="并行生成进度页">
+  <img src="./static/ai-model-tui.png" width="48%" alt="模型选择页">
 </p>
 <p align="center">
-  <em>在终端内完成 Provider / API Key / 模型配置；N 个并行页面 Agent 实时产出结构化 Markdown。</em>
+  <em>在终端内完成 Provider / API Key / 模型选择 —— 内置 40 个 Provider，也可添加自定义端点与自定义模型。</em>
+</p>
+
+<p align="center">
+  <img src="./static/gen-document-tui.png" width="90%" alt="并行生成进度页">
+</p>
+<p align="center">
+  <em>N 个并行页面 Agent 读真实代码，实时产出结构化 Markdown。</em>
 </p>
 
 <p align="center">
