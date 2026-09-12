@@ -12,9 +12,8 @@
   <img src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-%E7%AD%89%E4%BB%B7%E5%8F%AF%E7%94%A8-2a9d99?style=flat-square" alt="Platforms">
 </p>
 
-<!-- TODO(图片): 放置 TUI 主界面截图（生成进度页），建议路径 ./static/zread-pi.png，宽度 90% -->
 <p align="center">
-  <img src="./static/zread-pi.png" width="90%" alt="zread-pi 终端界面（待补充截图）">
+  <img src="./static/index-tui.png" width="90%" alt="zread-pi 终端界面">
 </p>
 
 ---
@@ -110,6 +109,23 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `PageUp/Down` `Home/End` | 长列表翻页            |
 | `r`              | 刷新（模型目录 / 重跑检测）   |
 | `Ctrl+C`         | 强制退出                      |
+
+## 截图
+
+<p align="center">
+  <img src="./static/config-tui.png" width="48%" alt="Provider 配置页">
+  <img src="./static/gen-document-tui.png" width="48%" alt="并行生成进度页">
+</p>
+<p align="center">
+  <em>在终端内完成 Provider / API Key / 模型配置；N 个并行页面 Agent 实时产出结构化 Markdown。</em>
+</p>
+
+<p align="center">
+  <img src="./static/help-tui.png" width="90%" alt="帮助页">
+</p>
+<p align="center">
+  <em>内置帮助页 —— 命令与快捷键一览。</em>
+</p>
 
 ## 工作原理
 
@@ -218,9 +234,8 @@ your-project/
 
 每页都是内嵌 Mermaid 图表的纯 Markdown —— GitHub、GitLab、Docusaurus、Notion、你自己的静态站点都能直接渲染。
 
-<!-- TODO(图片): 放置「浏览文档」Web 阅读器截图，建议路径 ./static/browse.png -->
 <p align="center">
-  <img src="./static/browse.png" width="90%" alt="本地 Web 阅读器（待补充截图）">
+  <img src="./static/index-browse.png" width="90%" alt="本地 Web 阅读器">
 </p>
 
 ## 使用场景
