@@ -177,11 +177,19 @@ export function MermaidPreviewModal({ open, onOpenChange, content }: MermaidPrev
     }
   };
 
+  // 非模态：弹窗打开时右侧聊天面板保持可交互，
+  // 点聊天区域 / 切焦点不触发 Radix 的 outside 交互关闭（关闭只走 X 按钮或 Esc）。
+  const keepOpenOnOutside = (event: Event) => event.preventDefault();
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <Dialog.Portal>
         <Dialog.Overlay className="mermaid-preview-overlay" />
-        <Dialog.Content className="mermaid-preview-content">
+        <Dialog.Content
+          className="mermaid-preview-content"
+          onPointerDownOutside={keepOpenOnOutside}
+          onFocusOutside={keepOpenOnOutside}
+        >
           <div className="mermaid-preview-shell">
             <div className="mermaid-preview-toolbar">
               <div className="mermaid-preview-zoom">{Math.round(scale * 100)}%</div>
