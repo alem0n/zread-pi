@@ -1,3 +1,5 @@
+import { ZREAD_PI_DIR_NAME } from '@zread-pi/utils';
+
 export const WASM_CDN_URL = 'https://cdn.jsdelivr.net/npm/tree-sitter-wasms@0.1.13/out';
 
 export const WASM_FILE_MAP: Record<string, string> = {
@@ -18,4 +20,5 @@ export const WASM_FILE_MAP: Record<string, string> = {
   kotlin: 'tree-sitter-kotlin.wasm',
 };
 
-export const PARSER_CACHE_DIR = '~/.zread-pi/parsers';
+// 人工可读的缓存位置提示（真实路径由 @zread-pi/utils 的 projectHomePath('parsers') 计算）
+export const PARSER_CACHE_DIR = `~/${ZREAD_PI_DIR_NAME}/parsers`;

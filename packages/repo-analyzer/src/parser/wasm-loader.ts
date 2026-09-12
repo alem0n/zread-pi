@@ -1,18 +1,18 @@
 import { join, dirname } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import Parser from 'web-tree-sitter';
-import { WASM_CDN_URL, WASM_FILE_MAP } from './constants';
+import { WASM_CDN_URL, WASM_FILE_MAP, PARSER_CACHE_DIR } from './constants';
 import { LANGUAGE_TO_PARSER } from './language-map';
-import { logger } from '@zread-pi/utils';
+import { logger, projectHomePath } from '@zread-pi/utils';
 
 const languageCache = new Map<string, Parser.Language>();
 
 let parserInitialized = false;
 
 function getLocalCachePath(): string {
-  return join(homedir(), '.zread-pi', 'parsers');
+  // 项目家目录唯一定义点在 @zread-pi/utils（project-home.ts）
+  return projectHomePath('parsers');
 }
 
 function ensureCacheDir(): void {
@@ -47,7 +47,7 @@ async function downloadWasmToCache(parserName: string): Promise<Uint8Array> {
 
     return wasmBuffer;
   } catch (error) {
-    throw new Error(`WASM download failed: ${parserName}\nPlease manually download to ~/.zread-pi/parsers/`, { cause: error });
+    throw new Error(`WASM download failed: ${parserName}\nPlease manually download to ${PARSER_CACHE_DIR}/`, { cause: error });
   }
 }
 

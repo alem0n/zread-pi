@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
+import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
 import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
 import { ensureDir } from '../file-io';
+import { getProjectHome, projectHomePath } from '../project-home.js';
 import { toolIds } from '../tools/registry';
 
 /**
@@ -75,14 +75,17 @@ export function normalizeToolsConfig(value: unknown): ToolsConfig {
   return result;
 }
 
-/** ~/.zread-pi 目录（延迟计算，测试可以覆盖 HOME/USERPROFILE） */
+/**
+ * @deprecated 使用 `getProjectHome()`（`project-home.ts` 是项目家目录的唯一定义点）。
+ * 保留同名导出仅为兼容既有调用方。
+ */
 export function getZreadDir(): string {
-  return join(homedir(), '.zread-pi');
+  return getProjectHome();
 }
 
 /** 应用配置文件路径 */
 export function getConfigPath(): string {
-  return join(getZreadDir(), 'config.yaml');
+  return projectHomePath('config.yaml');
 }
 
 /**
@@ -92,12 +95,12 @@ export function getConfigPath(): string {
  * 因此可以同时保存多个 Provider 的 API Key / OAuth token。
  */
 export function getZreadAuthPath(): string {
-  return join(getZreadDir(), 'auth.json');
+  return projectHomePath('auth.json');
 }
 
 /** 动态模型目录缓存路径（pi ModelsStore 落盘位置） */
 export function getZreadModelsStorePath(): string {
-  return join(getZreadDir(), 'models-store.json');
+  return projectHomePath('models-store.json');
 }
 
 /**

@@ -1,8 +1,7 @@
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
 import type { ProviderRegistryData } from './types.js';
 import { FALLBACK_PROVIDERS } from './fallback.js';
+import { projectHomePath } from '../project-home.js';
 
 const CACHE_FILENAME = 'providers.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -17,12 +16,8 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
  */
 const MODELS_DEV_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
 
-function getZreadDir(): string {
-  return path.join(os.homedir(), '.zread-pi');
-}
-
 function getCachePath(): string {
-  return path.join(getZreadDir(), CACHE_FILENAME);
+  return projectHomePath(CACHE_FILENAME);
 }
 
 async function isCacheValid(): Promise<boolean> {
@@ -39,8 +34,7 @@ async function isCacheValid(): Promise<boolean> {
 }
 
 async function saveCache(data: ProviderRegistryData): Promise<void> {
-  const zreadDir = getZreadDir();
-  await fs.mkdir(zreadDir, { recursive: true });
+  await fs.mkdir(projectHomePath(), { recursive: true });
   await fs.writeFile(getCachePath(), JSON.stringify(data, null, 2), 'utf-8');
 }
 

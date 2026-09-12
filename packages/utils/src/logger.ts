@@ -1,8 +1,8 @@
 import { appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { projectHomePath } from './project-home.js';
 
-const LOG_DIR = join(homedir(), '.zread-pi', 'logs');
+const LOG_DIR = projectHomePath('logs');
 const LOG_FILE = join(LOG_DIR, `zread-pi-${new Date().toISOString().slice(0, 10)}.log`);
 
 function ensureLogDir(): void {
