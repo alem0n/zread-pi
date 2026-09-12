@@ -258,17 +258,20 @@ body {
   height: auto;
 }
 
-.mermaid-preview-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(245, 243, 240, 0.88);
-  backdrop-filter: blur(8px);
-}
-
+.mermaid-preview-overlay,
 .mermaid-preview-content {
   position: fixed;
   inset: 24px;
+  /* 让出右侧聊天面板宽度 + 16px 间隙；聊天折叠时 --chat-panel-open 为 0，回到全屏。
+     变量由 MainLayout 同步到 documentElement（Radix Portal 挂在 body 下，继承不到包裹层）。 */
+  right: max(24px, calc(var(--chat-panel-width, 400px) * var(--chat-panel-open, 1) + 16px));
   outline: none;
+  z-index: 50; /* 高于 chat-widget 的 40，保证重叠时弹窗在上 */
+}
+
+.mermaid-preview-overlay {
+  background: rgba(245, 243, 240, 0.88);
+  backdrop-filter: blur(8px);
 }
 
 .mermaid-preview-shell {
@@ -853,6 +856,12 @@ body {
     max-height: 68vh;
     border: var(--border-whisper);
     border-radius: 16px;
+  }
+
+  /* 窄屏下聊天是底部浮窗，不参与左右分割，mermaid 预览恢复全屏 */
+  .mermaid-preview-overlay,
+  .mermaid-preview-content {
+    right: 24px;
   }
 
   .chat-collapsed-button {
