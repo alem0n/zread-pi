@@ -67,11 +67,9 @@ jobs:
             (cd "packages/$pkg" && bun run build)
           done
 
-      # browse 前端静态资源（独立安装，见 AGENTS.md §6.3）
+      # browse 前端静态资源（依赖随根 bun install 安装）
       - name: Build browse frontend
-        run: |
-          bun run browse:install
-          bun run browse:build
+        run: bun run browse:build
 
       # CLI tsup 产物：dist/index.js + tree-sitter.wasm + mappings.wasm + dist/browse
       - name: Build CLI bundle

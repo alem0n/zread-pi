@@ -18,7 +18,7 @@
 
 ```
 apps/cli            pi-tui 全屏 TUI（不再依赖 Ink/React；布局与快捷键与迁移前一致）
-apps/browse         React 19 + Vite 预览站（保留；独立安装，见 §6.3）
+apps/browse         React 19 + Vite 预览站（保留；依赖随根 bun install，见 §6.3）
 packages/
   agent-runtime     ★ 适配层：createAgent / createProvider / 5 个文件工具 / SDKMessage 等类型
                     + pi/provider-catalog（pi-ai 内置 Provider 目录 / 登录 / 自定义模型）
@@ -54,7 +54,7 @@ tools/                 vendor 模式切换脚本、mock LLM 全链路脚本
 | 凭据不进 `config.yaml` | 用户配置（provider/model/base_url/自定义模型）在 `config.yaml`， 秘密（API Key / OAuth token）在 `auth.json`；旧扁平字段首次切换时自动迁移后清空 |
 | pi 以 vendor 源码 + dist 产物方式消费 | 可锁定版本、可局部调试，同时类型检查走 `.d.ts` 保持快 |
 | 浏览文档：服务端返回的 URL 必须真实可访问 | 有构建产物（打包 `dist/browse` / 源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码运行且未构建时进程内启动 Vite dev server（`/api` 代理到 API 端口）。不再依赖用户另起 `browse:dev`，也不再返回没人监听的 5173；启动失败在 TUI 显示原因（`ZREAD_PI_BROWSE_DIST` / `ZREAD_PI_BROWSE_NO_OPEN` 供自定义与测试） |
-| `apps/browse` 不进根 workspaces | React 19（browse）与 React 18（ink）混装会让 CLI 启动即崩，见 §6.3 |
+| `apps/browse` 并入根 workspaces | 历史隔离原因（React 18/19 混装）随 CLI 换成 pi-tui 消失；并入后根 `bun install` 即装齐 Vite/React，源码运行「浏览文档」直接走进程内 Vite 兜底，不再依赖手动 `browse:install`（漏跑会以「未找到前端资源」启动失败，见 §6.3） |
 
 ### 1.2 契约冻结点（破坏即需同步改业务层）
 
@@ -131,8 +131,7 @@ bun run typecheck          # tsc --noEmit（apps/cli/src + apps/cli/test + packa
 bun run test               # typecheck + 11 个测试套件（离线，无需 API Key）
 bun run test:tui           # CLI(pi-tui) 专项：布局/快捷键 + 真实终端启动 + 目标目录参数 + mock LLM 生成/同步
 bun run mock:wiki          # 用 mock LLM 对 fixtures/hello-python 跑全链路
-bun run browse:install     # 预览站依赖（apps/browse 独立安装）
-bun run browse:build       # 预览站静态产物（打包 CLI / 免 Vite 预览）
+bun run browse:build       # 预览站静态产物（打包 CLI / 免 Vite 预览；依赖随根 bun install）
 bun run cli                # 真机 CLI（需 ~/.zread-pi/config.yaml）
 bun run cli --dir <repo>   # 真机 CLI，-d/--dir 指定目标目录（缺省=当前目录）
 ```
@@ -307,14 +306,15 @@ Refs: MIGRATION.md §4
 ### 6.2 业务工具的 schema 是"JSON Schema 直接当 TypeBox 用"
 `ToolDefinition.inputSchema` 原样传给 pi 的 `AgentTool.parameters`，pi 用 TypeBox 的编译/校验器处理这类纯 JSON Schema 是可行的（已验证）。新增工具时按旧风格写 `inputSchema` 即可，不要引入 TypeBox DSL。
 
-### 6.3 React 18 / 19 不能混装（历史约束，现已缓解）
+### 6.3 React 18 / 19 混合安装（历史约束，已解除）
 `apps/cli` 在迁移到 pi-tui 之前使用 Ink 4 + React 18，与 `apps/browse`（React 19）在同一次 install 中解析时，
 `ink` 的 `react-reconciler` 会拿到 React 19 变体，CLI 启动即崩：
 `TypeError: undefined is not an object (evaluating 'ReactSharedInternals.ReactCurrentOwner')`。
-因此 `apps/browse` **不在根 workspaces 内**，用 `bun run browse:install` / `bun run browse:dev` 独立处理。
+CLI 换成 pi-tui（零 React 依赖）后该冲突不存在，因此 **`apps/browse` 已重新列入根 workspaces**：
+根 `bun install` 即装齐浏览站依赖，源码运行「浏览文档」不需要再单独 `browse:install`
+（历史上漏跑该步会以「未找到前端资源，也无法启动 Vite（apps/browse 依赖缺失）」失败）。
 
-> CLI 已换成 pi-tui（零 React 依赖），该冲突不再存在；但保持现状不动（本次迁移不碰 browse）。
-> 若日后要合并：把 browse 加回 workspaces 后重跑 `bun run test:tui`（含真实 ProcessTerminal 启动检查）验证。
+> 并入时已重跑 `bun run test:tui`（含真实 ProcessTerminal 启动检查与进程内 Vite 兜底断言）验证。
 
 ### 6.4 RepoAnalyzer 依赖 cwd
 `parseFiles()` 以 `process.cwd()` 为根解析相对路径，`scanFiles()` 返回相对路径。

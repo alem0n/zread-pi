@@ -272,7 +272,7 @@ app.exit();
 
 // ---------------------------------------------------------------------------
 // 3) 兜底路径：源码运行且没有构建产物时，进程内启动 Vite dev server
-//    依赖 apps/browse/node_modules（bun run browse:install）；缺失/已有 dist 时跳过
+//    依赖 apps/browse/node_modules（随根 bun install 安装）；缺失/已有 dist 时跳过
 // ---------------------------------------------------------------------------
 
 console.log("▶ 兜底路径（in-process Vite dev server）");
@@ -287,7 +287,7 @@ const sourceDistExists = existsSync(join(browseRoot, "dist", "index.html"));
 if (sourceDistExists) {
   console.log("  - 跳过：apps/browse/dist 已存在，静态模式优先");
 } else if (!viteAvailable) {
-  console.log("  - 跳过：未安装 apps/browse 依赖（bun run browse:install）");
+  console.log("  - 跳过：未安装 apps/browse 依赖（在仓库根运行 bun install）");
 } else {
   const viteInfo = await startWikiBrowseServer(repo, { openBrowser: false });
   check("兜底 URL 为 Vite 实际监听地址", /^http:\/\/localhost:\d+$/.test(viteInfo.url), viteInfo.url);
