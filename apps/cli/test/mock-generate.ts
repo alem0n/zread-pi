@@ -8,7 +8,7 @@
  * 运行：bun run test:tui（或单独 bun run apps/cli/test/mock-generate.ts）
  */
 
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
@@ -311,6 +311,23 @@ if (wikiJsonExists) {
 }
 
 check("发生了真实的 mock LLM 请求", requestCount >= 4, `requests=${requestCount}`);
+
+// 全局记忆：开始生成文档时把项目路径写入 <项目家目录>/history（重复生成去重）
+{
+  const { readHistory } = await import("@zread-pi/utils");
+  const history = await readHistory();
+  const canonical = async (path: string): Promise<string> =>
+    realpath(path)
+      .then((resolved) => (process.platform === "win32" ? resolved.toLowerCase() : resolved))
+      .catch(() => (process.platform === "win32" ? path.toLowerCase() : path));
+  const repoReal = await canonical(repo);
+  const matches: string[] = [];
+  for (const record of history) {
+    if ((await canonical(record.path)) === repoReal) matches.push(record.path);
+  }
+  check("开始生成文档时写入全局记忆", matches.length === 1, JSON.stringify(history));
+  check("重复生成（蓝图 + 页面）只保留一条记忆", history.length === 1, JSON.stringify(history));
+}
 
 // 返回 wiki 首页：应识别出已生成完成（进度检查 + 选项重建）
 terminal.send("\x1b");
