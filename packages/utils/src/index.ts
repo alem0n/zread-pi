@@ -18,6 +18,24 @@ export {
 // Logger
 export { logger, getLogFile } from './logger.js';
 
+// 项目家目录（~/.zread-pi）的唯一定义点
+// 配置 / 凭据 / 日志 / 解析器缓存 / 托管二进制 / 全局记忆 history 全部经由这里取路径
+export { ZREAD_PI_DIR_NAME, ZREAD_PI_HOME_ENV, getProjectHome, projectHomePath } from './project-home.js';
+
+// 全局记忆（开始生成文档时写入；`zread-pi history` 清理并展示）
+export {
+  HISTORY_FILE_NAME,
+  DEFAULT_PRUNE_CONCURRENCY,
+  getHistoryPath,
+  rememberProject,
+  readHistory,
+  forgetProject,
+  clearHistory,
+  pruneHistory,
+} from './history/index.js';
+export type { ProjectRecord, HistoryPruneOptions, HistoryPruneResult } from './history/index.js';
+export { mapWithConcurrency } from './history/concurrency.js';
+
 // Config
 export {
   loadConfig,

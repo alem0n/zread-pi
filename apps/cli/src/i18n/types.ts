@@ -15,6 +15,14 @@ export interface TranslationKeys {
     wikiDesc: string;
     configDesc: string;
     browseDesc: string;
+    historyDesc: string;
+    historyConcurrencyDesc: string;
+  };
+  history: {
+    pruned: string;
+    remaining: string;
+    empty: string;
+    failed: string;
   };
   layout: {
     provider: string;

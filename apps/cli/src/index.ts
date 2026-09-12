@@ -5,6 +5,7 @@ import { enterTargetDir } from "./utils/target-dir";
 import { runConfig } from "./commands/config";
 import { runWiki } from "./commands/wiki";
 import { runBrowse } from "./commands/browse";
+import { runHistory } from "./commands/history";
 import { zhCN } from "./i18n/translations/zh-CN";
 import { enUS } from "./i18n/translations/en-US";
 
@@ -61,6 +62,22 @@ program
   .action(async () => {
     if (!applyTargetDir()) return;
     await runBrowse();
+  });
+
+/** 解析 history 的并发参数；非法/缺省交给 pruneHistory 用默认值 8 */
+function parseHistoryConcurrency(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+// history 命令：查看/清理全局记忆（不依赖目标目录，-d 参数对它无效）
+program
+  .command("history")
+  .description(t.cli.historyDesc)
+  .option("-c, --concurrency <n>", t.cli.historyConcurrencyDesc)
+  .action(async (options: { concurrency?: string }) => {
+    await runHistory({ concurrency: parseHistoryConcurrency(options.concurrency) });
   });
 
 program.parse();

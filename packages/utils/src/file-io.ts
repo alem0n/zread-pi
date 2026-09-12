@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, rm, stat } from 'fs/promises';
 import { dirname, join } from 'path';
+import { ZREAD_PI_DIR_NAME } from './project-home.js';
 
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
@@ -49,7 +50,7 @@ export function getProjectRoot(): string {
 }
 
 export function getOutputDir(): string {
-  return join(getProjectRoot(), '.zread-pi');
+  return join(getProjectRoot(), ZREAD_PI_DIR_NAME);
 }
 
 export function getCacheDir(): string {

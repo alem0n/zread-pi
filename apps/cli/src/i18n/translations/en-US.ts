@@ -13,6 +13,14 @@ export const enUS: TranslationKeys = {
     wikiDesc: 'Generate Wiki documentation',
     configDesc: 'Interactive configuration editor',
     browseDesc: 'Start Wiki preview server',
+    historyDesc: 'Show global memory (prune stale projects, list recently generated ones)',
+    historyConcurrencyDesc: 'Concurrent checks (default: 8)',
+  },
+  history: {
+    pruned: 'Removed {count} stale record(s)',
+    remaining: '{count} record(s) remaining:',
+    empty: 'No history yet',
+    failed: 'Failed to read history: {error}',
   },
   layout: {
     provider: 'Provider',

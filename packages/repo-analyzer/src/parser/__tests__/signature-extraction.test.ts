@@ -3,7 +3,7 @@ import Parser from 'web-tree-sitter';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
+import { projectHomePath } from '@zread-pi/utils';
 
 let tsxParser: Parser;
 let tsParser: Parser;
@@ -28,7 +28,7 @@ async function initParsers(): Promise<void> {
     locateFile: (fileName: string) => join(treeSitterDir, fileName)
   });
 
-  const wasmDir = join(homedir(), '.zread-pi', 'parsers');
+  const wasmDir = projectHomePath('parsers');
 
   const tsxWasm = readFileSync(join(wasmDir, 'tree-sitter-tsx.wasm'));
   const tsWasm = readFileSync(join(wasmDir, 'tree-sitter-typescript.wasm'));

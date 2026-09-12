@@ -13,6 +13,14 @@ export const zhCN: TranslationKeys = {
     wikiDesc: 'Wiki 文档生成',
     configDesc: '交互式配置编辑器',
     browseDesc: '启动 Wiki 预览服务器',
+    historyDesc: '查看全局记忆（清理失效项目并列出最近生成过文档的项目）',
+    historyConcurrencyDesc: '检查记录存在的并发数（默认 8）',
+  },
+  history: {
+    pruned: '已清理 {count} 条失效记录',
+    remaining: '剩余 {count} 条记录：',
+    empty: '暂无历史记录',
+    failed: '历史记录读取失败: {error}',
   },
   layout: {
     provider: '提供商',

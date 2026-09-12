@@ -25,6 +25,7 @@ import {
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { WritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
+import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import type { WikiPage } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
@@ -251,6 +252,9 @@ export async function rescuePageFile(
  */
 export async function generateWikiContent(options?: GenerateWikiOptions): Promise<WikiResult> {
   const startTime = performance.now();
+
+  // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
+  await rememberCurrentProject();
 
   // 并发数由调用方传递（默认 1）
   const maxConcurrent = options?.maxConcurrent ?? 1;

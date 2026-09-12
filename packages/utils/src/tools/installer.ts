@@ -21,13 +21,14 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { archiveKindOf, getToolSpec, listTools, type ToolId, type ToolSpec } from './registry.js'
 import { extractArchive } from './archive.js'
 import { loadConfigSync } from '../config/index.js'
+import { projectHomePath } from '../project-home.js'
 
 export const DEFAULT_NETWORK_TIMEOUT_MS = 15_000
 export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 180_000
@@ -36,7 +37,7 @@ export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 180_000
 export function getManagedBinDir(): string {
   const override = process.env.ZREAD_PI_TOOLS_DIR
   if (override && override.trim().length > 0) return resolve(override.trim())
-  return join(homedir(), '.zread-pi', 'bin')
+  return projectHomePath('bin')
 }
 
 /** 托管二进制路径（Windows 带 .exe 后缀） */

@@ -24,7 +24,7 @@ zread-pi/
 │  │  └─ test/                    冒烟测试（离线 faux + 本地 mock HTTP + provider + catalog）
 │  ├─ orchestrator/      ← 保留：编排层（工具/提示词/并发/同步，仅把 import 指向 agent-runtime）
 │  ├─ repo-analyzer/     ← 保留：Tree-sitter 分析（未改）
-│  ├─ utils/             ← 保留：配置 / cache / wiki 落盘 / 版本快照 / 外部工具注册表与安装器
+│  ├─ utils/             ← 保留：配置 / cache / wiki 落盘 / 版本快照 / 外部工具注册表与安装器 / 项目家目录与全局记忆 history
 │  └─ types/             ← 保留：共享类型（provider/model 配置结构有新增字段）
 ├─ apps/
 │  ├─ cli/               ← 保留：TUI（**pi-tui 实现**，不再依赖 Ink/React；仅 browse-chat 的 provider 改为 pi 实现）
@@ -71,6 +71,10 @@ bun run cli browse --dir /path/to/repo           # 预览站也看该目录的�
 #   有构建产物（apps/browse/dist 或打包后的 dist/browse）→ API + 静态资源同端口；
 #   源码运行且未构建 → 进程内自动启动 Vite dev server（依赖随根 `bun install` 安装；/api 代理到 API 端口）。
 #   启动失败（端口占用/资源缺失）时页面直接显示原因，不再静默显示一个打不开的地址。
+
+# history：查看全局记忆 —— 开始生成文档时自动记录项目路径，这里清理已失效项目并列出剩余
+bun run cli history           # 目录不存在或 <项目>/.zread-pi 已不存在 → 删除记录
+bun run cli history -c 16     # 检查目录存在性的并发数（默认 8）
 
 # 5) 预览站（React 19 + Vite，依赖随根 bun install 安装，见「工程细节 1」）
 bun run browse:build        # 可选：构建静态产物（打包 CLI / 免 Vite 预览）
@@ -131,6 +135,24 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 > 真机验证（手动执行）：对真实 GitHub Releases 安装成功并可直接运行——`ripgrep 15.2.0 (rev e89fff89ac)`、`fd 10.5.0`。
 > 离线回归：`bun run test:installer`（70/70，本地 mock Releases + 注入探测）。
 
+### 全局记忆（`history`）
+
+每次**开始生成文档**（蓝图 / 页面两个入口）都会把当前项目路径写入 `<项目家目录>/history`
+（默认 `~/.zread-pi/history`），同一项目重复生成只保留最近一条（去重并移到末尾）。
+`zread-pi history` 并发检查每条记录对应项目下的 `.zread-pi` 是否还存在（不存在 = 项目已删除 / 产物已清理），
+删除失效记录后按最近使用顺序展示剩余项；`-c/--concurrency` 可调整检查并发数（默认 8）。
+
+- **二进制结构（ZRH1 v1）**：16 字节头部 + 连续记录（`tag(1) | length(4) | UTF-8 路径`）。
+  追加写在文件末尾 O(1)；随机删除只把记录首字节写成墓碑 O(1)；顺序遍历 O(n)；
+  墓碑达到阈值（≥16 且不少于存活字节）时自动 compact（写临时文件 + 原子 rename）；
+  记录数上限 1000（超出淘汰最旧），因此文件体积有界。
+- **健壮性**：打开时截断修复「写了一半的最后一条记录」（进程被杀 / 掉电）；
+  magic / version 不合法时备份为 `history.corrupt-<时间戳>` 后重建，生成与查看历史都不会被坏文件阻塞。
+- **路径唯一定义点**：项目家目录只在 `packages/utils/src/project-home.ts` 定义一次，
+  配置 / 凭据 / 模型缓存 / 日志 / 解析器缓存 / 托管二进制 / 全局记忆全部从这里取路径；
+  `ZREAD_PI_HOME` 可覆盖家目录（测试隔离 / 同机多套配置）。
+- 回归：`bun run test:history`（二进制结构与清理逻辑 55 项 + CLI 命令 24 项）。
+
 ---
 
 ## 验证结果（`bun run test`）
@@ -141,6 +163,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `test:agent` | pi Agent 循环、工具执行、钩子、流式事件、**429 重试**、usage 映射、thinkingLevel → reasoning 透传、maxTurns | 11/11 |
 | `test:tools` | **工具层专项**：截断设施、glob 语义、`Ls`/`Glob`/`Grep`/`Read`/`Write`/`Edit` 行为与错误文案、**rg/fd 与纯 JS 兜底两条路径结果一致**（含 .gitignore 行为）、同文件 16 路并发编辑不丢更新、`details` 与图片内容块穿过桥接层进入模型上下文、外部工具启用开关 → 二进制解析联动 | 95/95 |
 | `test:installer` | **外部工具安装**：注册表与资产名（对过真实 release 列表）、归档解包（tar.gz/zip、stored+deflate、GNU LongName、zip-slip 防护）、配置归一化（旧配置零迁移）、安装全流程（本地 mock Releases + 注入探测：进度阶段 / 百分比单调 / 指纹不匹配拒绝解包 / 校验失败清理）、卸载与启用开关、**版本探测与可用性解耦**（多组参数回退 / 识别不出版本仍可用 / 安装台账与不一致提示） | 70/70 |
+| `test:history` | **全局记忆**：ZRH1 二进制结构（头部 / 追加 / 顺序遍历 / 偏移稳定 / 墓碑随机删除 / 去重移到末尾 / 压缩 / maxRecords 淘汰 / 半截尾部修复 / 损坏自愈 / UTF-8 与超长路径）、`ZREAD_PI_HOME` 唯一定义点、`pruneHistory` 并发检查 `.zread-pi` 并删除失效记录、`mapWithConcurrency` 保序；**`zread-pi history` 命令**（空记忆 / 清理 / 幂等 / `-c` / 损坏文件 / 帮助信息） | 55 + 24 |
 | `test:context` | **上下文压缩 + 优雅停止**：`transformContext` 调用 pi `prepareCompaction`/`compact`、`system/compact_boundary`、压缩后继续成功；单个巨大 turn（压缩无法腾出空间）与 `compaction.enabled=false` 时产出 `error_context_full`；`maxTurns` 收尾提示 + 宽限轮：模型最后一轮/宽限轮输出 → success，仍不收敛 → `error_max_turns`，`graceTurns=0` 回到旧行为，**`maxTurns=0` = 不限制轮次**（不发收尾提示、不因轮次停止） | 39/39 |
 | `test:agent:http` | 真实 HTTP/SSE 路径：baseURL + apiKey 注入、增量 tool_call 参数解析、第二轮请求 | 7/7 |
 | `test:provider` | `createProvider().createMessage()`（browse-chat 路径）、system 透传、usage | 5/5 |
@@ -148,7 +171,7 @@ bun run browse:dev          # 可选：单独开发前端 UI（Vite HMR）
 | `test:bluprint` | **Orchestrator 端到端**：`generateWikiCatalog()` → 工具落盘 `wiki.json` → CatalogEvent 进度事件；模型不产出蓝图时报错 | 7/7 |
 | `test:pages` | **并行页面生成**：`generateWikiContent({maxConcurrent:3})` → `write_page` 落盘、frontmatter、Mermaid 校验拦截；页面未落盘时必须记失败并发出 `page_error`（不再误报完成）；**`write_page` 写错路径时落盘兜底移回 wiki.json 约定位置**（报告路径 / 参数复算 / 目录扫描三层，跳过 `archived/` 历史快照） | 18/18（e2e 11 + 兜底 7） |
 | `test:browse` | **「浏览文档」服务器 + pi-tui 浏览页**：静态资源与 API 同端口、SPA fallback、未知 API 404、`close()` 后端口不可连；页面显示「服务器已启动」+ 真实访问地址、ESC 停止；源码无产物时进程内 Vite 兜底（`/api` 代理）；无效 `ZREAD_PI_BROWSE_DIST` 直接报错 | 28/28（apps/browse 有 dist 时兜底 4 项自动跳过） |
-| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页（含 `0` = 不限制写回与落盘）+ 外部工具页（安装/卸载/启停 + 进度条）+ 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路 + 「浏览文档」服务与页面（`test:browse`） | 187 + 19 + 9 + 25 + 19 + 24 |
+| `test:tui` | **CLI (pi-tui)**：布局/快捷键/输入框/分页 + 版本号与项目版本同步 + Provider 详情页（API Key + 模型）冒烟 + 多 Provider/自定义模型 + 思考深度页 + 最大轮次页（含 `0` = 不限制写回与落盘）+ 外部工具页（安装/卸载/启停 + 进度条）+ 全部路由渲染 + 真实 ProcessTerminal 启动与退出 + **`-d/--dir` 目标目录（相对/绝对路径、产物落盘、无效目录报错）** + mock LLM 的生成/同步全链路（含全局记忆写入断言） + 「浏览文档」服务与页面（`test:browse`） | 187 + 21 + 9 + 25 + 19 + 24 |
 
 另有诊断脚本 `packages/agent-runtime/test/debug-events.ts`（打印 pi 原始事件）。
 
