@@ -28,6 +28,7 @@ export {
   DEFAULT_PRUNE_CONCURRENCY,
   getHistoryPath,
   rememberProject,
+  ensureProjectRecorded,
   readHistory,
   forgetProject,
   clearHistory,

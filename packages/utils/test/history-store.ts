@@ -29,6 +29,7 @@ import {
 } from '../src/history/binary-log.js';
 import {
   clearHistory,
+  ensureProjectRecorded,
   forgetProject,
   getHistoryPath,
   getProjectHome,
@@ -341,6 +342,34 @@ process.env.ZREAD_PI_HOME = home;
 
   await clearHistory();
   check('clearHistory 清空记忆', (await readHistory()).length === 0);
+}
+
+// ---------------------------------------------------------------------------
+// 5b) ensureProjectRecorded：老旧项目自动登记（仅缺录，不改顺序）
+// ---------------------------------------------------------------------------
+
+{
+  const oldFirst = join(home, 'projects', 'old-first');
+  const oldSecond = join(home, 'projects', 'old-second');
+
+  check('ensureProjectRecorded：不存在时新增', await ensureProjectRecorded(oldFirst));
+  check(
+    'ensureProjectRecorded：新增后可读到',
+    (await readHistory()).some((item) => item.path === resolve(oldFirst)),
+  );
+  check('ensureProjectRecorded：已存在时返回 false', !(await ensureProjectRecorded(oldFirst)));
+  check('ensureProjectRecorded：已存在时数量不变', (await readHistory()).length === 1);
+
+  await rememberProject(oldSecond);
+  await rememberProject(oldFirst); // rememberProject 会把它移到末尾 → [oldSecond, oldFirst]
+  check('ensureProjectRecorded：已存在时不刷新位置', !(await ensureProjectRecorded(oldFirst)));
+  check(
+    'ensureProjectRecorded：已存在时顺序保持不变',
+    JSON.stringify((await readHistory()).map((item) => item.path)) ===
+      JSON.stringify([resolve(oldSecond), resolve(oldFirst)]),
+  );
+
+  await clearHistory();
 }
 
 // ---------------------------------------------------------------------------

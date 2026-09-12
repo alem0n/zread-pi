@@ -102,6 +102,23 @@ export async function readHistory(): Promise<ProjectRecord[]> {
   return log.entries().map(toRecord);
 }
 
+/**
+ * 确保某个「已经生成过文档」的老旧项目在记忆中：仅当名单里没有该路径时追加。
+ *
+ * 与 `rememberProject()` 的区别：已存在时**不做任何写入**（不刷位置、不重复），
+ * 用于打开旧项目时的自动登记；`rememberProject()` 用于开始生成时的「移到最近」。
+ *
+ * @param projectPath 项目目录，缺省为当前工作目录
+ * @returns 是否新增（false = 已在名单中，未改动）
+ */
+export async function ensureProjectRecorded(projectPath: string = process.cwd()): Promise<boolean> {
+  const log = await openHistory();
+  const normalized = normalizeProjectPath(projectPath);
+  if (log.entries().some((entry) => entry.path === normalized)) return false;
+  await log.append(normalized);
+  return true;
+}
+
 /** 删除某个项目的记录；返回是否删掉了 */
 export async function forgetProject(projectPath: string): Promise<boolean> {
   const log = await openHistory();

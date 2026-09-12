@@ -1,6 +1,6 @@
 {
   "name": "zread-pi",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
@@ -18,7 +18,7 @@
     "test:agent": "bun run packages/agent-runtime/test/smoke-agent.ts",
     "test:tools": "bun run packages/agent-runtime/test/tools-smoke.ts",
     "test:installer": "bun run packages/utils/test/tool-installer.ts",
-    "test:history": "bun run packages/utils/test/history-store.ts && bun run apps/cli/test/history-command.ts",
+    "test:history": "bun run packages/utils/test/history-store.ts && bun run apps/cli/test/history-command.ts && bun run apps/cli/test/history-adopt.ts",
     "test:context": "bun run packages/agent-runtime/test/context-compaction.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
     "test:provider": "bun run packages/agent-runtime/test/provider-http-smoke.ts",
