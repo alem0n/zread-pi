@@ -7,6 +7,7 @@
 import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, LsTool } from '@zread-pi/agent-runtime';
 import { loadWikiBlueprint } from '@zread-pi/utils';
 import { createAgent } from './agents/create-agent';
+import { rememberCurrentProject } from './wiki/memory.js';
 import GenerateCatalog from './prompts/generate-catalog';
 import { GenerateBlueprintTool, ValidateBlueprintTool } from './tools/output-tools.js';
 import { GetCoreSignaturesTool, GetDirectoryTreeTool, GetModuleDetailsTool } from './tools/repo-map-tools.js';
@@ -42,6 +43,9 @@ const BLUEPRINT_TOOLS = [
 export async function generateWikiCatalog(
   onEvent?: (event: CatalogEvent) => void
 ): Promise<BlueprintResult> {
+  // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
+  await rememberCurrentProject();
+
   const result = await createAgent({
     tools: BLUEPRINT_TOOLS,
     prompts: GenerateCatalog as string,
