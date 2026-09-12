@@ -65,7 +65,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 1. **MCP 缺失**：pi 文档无 MCP 能力。当前 wiki 链路不需要；若 `cli`/browse-chat 需要用户配置的 MCP 工具，应把 `agent-sdk/src/mcp/client.ts` + `tool-helper.ts` 作为独立小包保留并适配成 pi 工具（pi 支持运行时 `registerTool`）。
 2. **会话能力缺口**：tag/rename/list/fork 在 pi 文档中无直接对应，需用值存储/自定义条目实现或放弃。
-3. **React 18/19 混装（已解除）**：原因为 Ink（React 18）与 browse（React 19）冲突，见 README §工程细节 1。
+3. **React 18/19 混装（已解除）**：原因为 Ink（React 18）与 browse（React 19）冲突。
    CLI 换成 pi-tui 后已不再依赖 React，`apps/browse` 已重新列入根 workspaces（依赖随根 `bun install`）；
    修复了源码运行「浏览文档」因漏跑 `bun run browse:install` 而报「未找到前端资源，也无法启动 Vite」的问题。
 4. **pi 内核版本**：vendor 快照为 0.85.1（与 npm 发布版同版本号）。升级 pi 时需重跑 `bun run vendor:build` 与 `bun run test`。
@@ -140,7 +140,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 2. **页内其他内容不滚动**：分页只作用于列表；若页面非列表部分（如自定义 Provider 的多个步骤）本身就超过终端高度，仍会被裁剪（与迁移前一致）。
 3. **`parseFiles` 期间的卡顿**：Tree-sitter 首次解析会同步下载/初始化 WASM，主线程被占用时加载动画无法刷新（迁移前同样存在）；本次未改 repo-analyzer。
 4. **pi-tui 与上游同版本（0.85.1）**：后续升级需重跑 `bun run vendor:build && bun run test:tui`。
-5. **`tui` 包的构建差异**：上游用 `tsgo`，本仓库用 `tsc` 并把 target/lib 提到 ES2024（原因见 README §工程细节 2）。
+5. **`tui` 包的构建差异**：上游用 `tsgo`，本仓库用 `tsc` 并把 target/lib 提到 ES2024（`utils.ts` 里用了 `v` 正则标志，ES2022 下 TS 报 TS1501）。
 6. **`apps/browse` 已并入根 workspaces**：CLI 无 React 依赖后合并没有冲突；根 `bun install` 即装齐浏览站依赖，
    源码运行「浏览文档」直接走进程内 Vite 兜底（此前为独立安装，漏跑 `browse:install` 会导致启动失败）。
 
