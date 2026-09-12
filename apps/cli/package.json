@@ -25,7 +25,7 @@
     "url": "https://github.com/alem0n/zread-pi/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.19.0"
   },
   "publishConfig": {
     "access": "public"
@@ -57,7 +57,7 @@
     "@zread-pi/repo-analyzer": "workspace:*",
     "@zread-pi/types": "workspace:*",
     "@zread-pi/utils": "workspace:*",
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
     "@types/express": "^5.0.6"
   }
