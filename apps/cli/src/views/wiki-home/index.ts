@@ -9,28 +9,12 @@ import { Divider } from "../../tui/components/divider";
 import { barIndicator, Select } from "../../tui/components/select";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
-import { fileExists, getWikiDir, joinPath } from "@zread-pi/utils";
-import type { WikiOutput, WikiPage } from "@zread-pi/types";
+import { countGeneratedPages } from "../../utils/generated-docs";
+import type { WikiOutput } from "@zread-pi/types";
 
 type SelectItem = { value: string; label: string };
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
-
-// 进度检查函数
-async function checkProgress(pages: WikiPage[]): Promise<{ total: number; generated: number }> {
-  const wikiDir = getWikiDir();
-
-  const checks = pages.map(async (page) => {
-    // wiki 目录按 section 分组，文件路径：wikiDir/section/file.md
-    const filePath = joinPath(wikiDir, page.section, page.file);
-    return await fileExists(filePath);
-  });
-
-  const results = await Promise.all(checks);
-  const generated = results.filter(Boolean).length;
-
-  return { total: pages.length, generated };
-}
 
 // 构建首次配置选项列表
 function buildFirstTimeSelectItems(t: Translate): SelectItem[] {
@@ -160,11 +144,7 @@ export default class WikiHomePage extends Screen {
   private async loadCatalog(): Promise<void> {
     await this.app.wiki.load();
     const pages = this.app.wiki.catalog?.pages;
-    if (pages) {
-      this.progress = await checkProgress(pages);
-    } else {
-      this.progress = null;
-    }
+    this.progress = pages ? await countGeneratedPages(pages) : null;
     this.syncItems();
     this.refresh();
   }

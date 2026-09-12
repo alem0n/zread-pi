@@ -5,5 +5,5 @@
 import { runApp } from "../app";
 
 export async function runWiki(): Promise<void> {
-  runApp({ initialEntries: ["/wiki"] });
+  await runApp({ initialEntries: ["/wiki"] });
 }

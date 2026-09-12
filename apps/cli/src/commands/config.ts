@@ -5,5 +5,5 @@
 import { runApp } from "../app";
 
 export async function runConfig(): Promise<void> {
-  runApp({ initialEntries: ["/config"] });
+  await runApp({ initialEntries: ["/config"] });
 }

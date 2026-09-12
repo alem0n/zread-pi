@@ -5,5 +5,5 @@
 import { runApp } from "../app";
 
 export async function runBrowse(): Promise<void> {
-  runApp({ initialEntries: ["/browse"] });
+  await runApp({ initialEntries: ["/browse"] });
 }
