@@ -24,7 +24,8 @@
 | 未改动 | `orchestrator` 的 prompts / 三层 Repo Map 工具 / 并发与错误隔离 / wiki 契约；`repo-analyzer`；`utils`；`types`；`browse` 全部前端代码（`cli` 的 TUI 在第二步换成 pi-tui，见 §7） |
 | 依赖修正 | `apps/cli` 补 `@types/express`；`vendor/pi/packages/ai` 补 `@smithy/types` |
 | 配置界面（第三步） | `apps/cli` 的 Provider/模型页面改为 pi-ai 目录 + `Models.login`；Provider 详情页为「API Key 配置 + 模型选择」并列布局（只提供 API Key）；`agent-runtime` 新增 `src/pi/{provider-catalog,auth-store,models-store}.ts`；配置结构新增 `llm.providers`，凭据落 `~/.zread-pi/auth.json`（详见 §8） |
-| 上下文与轮次（第五步） | `agent-runtime` 接入 pi compaction（`transformContext` + `prepareCompaction`/`compact`）与 `shouldStopAfterTurn` 优雅停止；配置结构新增 `agent.max_turns`，CLI 新增 `/config/max-turns`，Orchestrator 不再硬编码 30（详见 §8.6） |
+| 上下文与轮次（第五步） | `agent-runtime` 接入 pi compaction（`transformContext` + `prepareCompaction`/`compact`）与 `shouldStopAfterTurn` 优雅停止；配置结构新增 `agent.max_turns`，CLI 新增 `/config/max-turns`，Orchestrator 不再硬编码 30（详见 §8.6）。**第十步已被 harness 版本取代，见 §12** |
+| 首尾机制 harness 化（第十步） | `agent-runtime` 内部由裸 agent loop 换成 pi 的 `AgentHarness`：会话/泳道/操作状态机/压缩/重试/事件全部交给 harness；轮数硬顶→token 预算、一次性提示→两段式提示（`before_run` 注入）、`shouldStopAfterTurn`→`before_run_end` 终止、`error_max_turns`→`error_budget_exhausted` + 编排层判页失败；新增 `agent.token_budget`（详见 §12） |
 
 工具与类型的**原样复制**（非重写）：
 `packages/agent-runtime/src/types.ts`、`src/tools/{types,read,write,edit,glob,grep}.ts`、`src/providers/types.ts`
@@ -43,20 +44,22 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 `SDKMessage` 联合类型、`CatalogEvent` 触发时序（requesting → responding → tool_start → tool_result → complete）、
 `TokenUsage` 字段名、`BlueprintResult.durationMs/tokenUsage` 全部保持；
-`result.subtype` 新增 `error_context_full`（上下文将满优雅停止，见 §8.6），与 `error_max_turns` 同为「非成功但非异常」的停止原因。
+`result.subtype` 新增 `error_context_full`（上下文将满优雅停止，见 §8.6/§12）与 `error_budget_exhausted`
+（token 预算耗尽且强制交卷后仍无目标产物，见 §12）；
+`result.usage` 在第十步起为 **harness usage ledger 的累计值**（单次响应用量仍在 `assistant` 事件上，见 §12.5）。
 
 ## 4. 与旧实现的行为差异（有意为之，均已验证）
 
 | 差异 | 说明 |
 |---|---|
-| 重试位置 | pi 的 Agent 循环**不内置**重试（避免污染会话）；本适配层在 `streamFn` 层实现"未产出内容即可重试"，并额外提供可选 `retryScope: "stream+run"`（整轮重跑，默认关闭）。旧实现是 API 级重试，语义等价且更干净。 |
-| 重试判定 | 复用 pi-ai 的错误分类器，同时保留旧 `retryableStatusCodes` 白名单（错误文本包含状态码即视为可重试）。 |
+| 重试位置 | 第十步起重试直接交给 harness 的 retry policy（失败尝试在 settlement 前不落库，语义与旧 `"stream"` 等价）；旧适配层自研的 `streamFn` 包装与 `retryScope: "stream+run"` 已移除（见 §12.5）。 |
+| 重试判定 | 复用 pi-ai 的错误分类器；旧配置里的 `retryableStatusCodes` 白名单不再参与判定，`maxDelayMs` 映射为 `maxAgentDelayMs`。 |
 | 未登记 providerId | 旧实现抛 `Unsupported provider`；新实现回退 OpenAI 兼容协议（健壮性增强）。 |
 | 思考深度 | 新增 `thinkingLevel` 选项（`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，缺省 `off` = 旧行为）与 `config.llm.thinking_level`：pi 以 `options.reasoning` 下发，模型不支持时 pi-ai 在请求时自动 clamp。 |
 | 会话 | 旧实现的 `saveSession/loadSession/tag/rename/fork` 未迁移；wiki 生成是一次性 agent，不需要。若 CLI 后续要做"会话聊天"，需接 pi 的 JSONL 会话树。 |
 | 上下文窗口/定价 | 旧 `MODEL_PRICING` 表未迁移，`Model` 用保守默认（200k 窗口 / 8k 输出、cost=0）。pi 的 usage 记账照常工作，只是成本字段为 0。 |
-| 最大轮次 | 旧实现在 Orchestrator 硬编码 30；现由 `config.agent.max_turns`（默认 30，`0` = 不限制轮次）提供，`createAgent({ maxTurns })` 仍可显式覆盖。到达上限前会向模型注入收尾提示（steering user 消息），超限后默认允许 1 轮宽限（`finalization.graceTurns`，0 = 旧行为）；`maxTurns = 0` 时不发提示、不因轮次停止（仍受上下文/取消约束）；模型在最后一轮给出最终答复（无工具调用）时按 success 处理，不再误报 `error_max_turns`。 |
-| 上下文压缩 | 旧引擎的「自动压缩」语义由 pi 的 `transformContext` + `compaction` 对等实现：超阈值时摘要历史（发出 `system/compact_boundary`），摘要请求会额外消耗一次模型调用；压缩无法再腾出空间时在本轮边界优雅停止（`error_context_full`）。 |
+| 最大轮次 | 第十步起内核**不再数轮次**：`config.agent.max_turns`（缺省 30，`0` = 不限制）折算成 token 预算（`max_turns * 25000`），软提示（70% 预算）+ 硬提示（预算将尽）经 harness 的 `before_run` 注入，`before_run_end` 决定终止或强制交卷（详见 §12.4）。新增 `agent.token_budget` 可直接配置 token 预算。 |
+| 上下文压缩 | 第十步起用 harness 内建压缩（run 边界按 `model.contextWindow - reserveTokens` 触发；`system/compact_boundary` 事件不变，摘要请求额外消耗一次模型调用）；泄漏到 provider 的上下文溢出按 pi-ai 的 `isContextOverflow` 归类并映射回 `error_context_full` 与既有「Context window nearly full」文案；`compaction.enabled=false` 用 `before_compaction` decline 保证一个摘要请求都不发（详见 §12.4）。 |
 | 事件粒度 | `assistant` 事件在 `message_end` 产出（完整内容 + usage）；流式增量以 `partial_message` 产出（旧引擎同形）。 |
 | 成功判定以落盘为准 | `generateWikiCatalog()` 在 Agent 正常结束后校验 `wiki.json` 可加载；`generateWikiContent()` 校验 `.zread-pi/wiki/<section>/<file>` 真实存在，否则记为失败（抛错/`page_error`）。旧实现把「Agent 循环正常结束」当作完成，模型只输出文字、写到错误路径或被 Mermaid 校验拦截时会显示完成，但首页按文件检查仍显示未完成；现以磁盘产物为唯一判定依据。**落盘兜底**：`write_page` 已成功但文件不在约定路径时（典型：漏传 `section` 落到 wiki 根、只传 `slug` 写成 `<slug>.md`），按「write_page 报告的真实路径 → 模型传入参数复算 → wiki 目录按文件名扫描（跳过 `archived/` 快照）」三层候选找到文件并移动回约定位置，移动成功仍计为完成，不再误报「写入路径与 wiki.json 不一致」。 |
 | 浏览文档服务器 | 旧实现源码运行（非打包）时固定返回 `http://localhost:5173`（外部 Vite dev server 的地址），未另起 Vite 时浏览器 ERR_CONNECTION_REFUSED。现返回的一定是真实监听地址：有构建产物（打包 `dist/browse` 或源码 `apps/browse/dist`）时 API + 静态资源同端口（SPA fallback）；源码且未构建时进程内启动 Vite dev server，并把 `/api` 代理到 API 端口；启动失败（端口占用/资源缺失）在 TUI 直接显示原因。 |
@@ -70,11 +73,11 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
    修复了源码运行「浏览文档」因漏跑 `bun run browse:install` 而报「未找到前端资源，也无法启动 Vite」的问题。
 4. **pi 内核版本**：vendor 快照为 0.85.1（与 npm 发布版同版本号）。升级 pi 时需重跑 `bun run vendor:build` 与 `bun run test`。
    `ai` 包现在编译到 `providers/all.ts` + `auth/oauth/*` + `providers/data/*.json`（为了配置界面的 Provider 目录与 pi-ai 登录能力，见 §8）；升级后需同步更新 data JSON。
-5. **真机联调**：全部测试使用离线 faux / 本地 mock HTTP；**尚未用真实 API Key 跑过完整 wiki 生成**。建议首次验证：`bun run cli config` 配好 key → 在目标仓库执行 `bun run cli`，重点观察 retry 事件与长上下文（大仓库）下的 usage/压缩表现（压缩触发时会收到 `system/compact_boundary`）。
+5. **真机联调**：全部测试使用离线 faux / 本地 mock HTTP；**尚未用真实 API Key 跑过完整 wiki 生成**。建议首次验证：`bun run cli config` 配好 key → 在目标仓库执行 `bun run cli`，重点观察 retry 事件、压缩触发（`system/compact_boundary`）与**真实 usage**（据此调整 `agent.token_budget`，见 §12.8）。
 
 ## 6. 后续可选路径
 
-1. **pi 的压缩能力已接入**（`transformContext` + `prepareCompaction`/`compact` + `shouldStopAfterTurn` 优雅停止，见 §8.6）；后续可把 `compaction.reserveTokens` / `keepRecentTokens` 也暴露到配置界面。
+1. **pi 的压缩能力已接入**（第十步起为 harness 内建压缩：threshold + overflow 恢复，见 §12）；后续可把 `compaction.reserveTokens` / `keepRecentTokens` 与 `agent.token_budget` 一起暴露到配置界面。
 2. **接入 pi 的用量与成本**：`Model.cost` 填真实定价后，`usage.cost` 可直接回传 UI（旧 `estimateCost` 的替代）。
 3. **会话化**：把 `cli` 的聊天类命令接到 pi 的 `JsonlStorage` 会话树，得到分支/压缩/恢复能力。
 4. **扩展点**：需要子代理/权限弹窗/计划模式时，优先用 pi 的扩展 API（`registerTool` / `tool_call` 事件 / `beforeToolCall` 阻断），而不是回填旧工具。
@@ -204,6 +207,10 @@ bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路�
 - 项目信息框新增「思考深度」一行，直接展示当前生效档位。
 
 ### 8.6 最大轮次配置 + pi 上下文压缩（第五步）
+
+> **已被 §12（第十步）取代**：裸 agent loop 换成 `AgentHarness` 后，轮次不再参与判定（`max_turns` 只作为
+> token 预算的折算依据）、收尾提示改由 `before_run` 注入、压缩由 harness 内建承担。
+> 本节保留当年的实现记录与决策理由，**当前实现以 §12 为准**。
 
 两个相关的运行时能力一起落地：
 
@@ -479,3 +486,140 @@ SDKToolResultMessage.result.details?: ... // 同上，透传到 SDK 事件，供
 2. **格式只有 v1**：读取遇到未知 version 会走「备份 + 重建」；将来扩展布局时需保留旧版本读取或显式迁移。
 3. **`.zread-pi` 存在性作为失效判据**：项目还在但用户手动删了产物目录时记录会被清掉 —— 这符合
    「memory 只记生成过的项目」的语义；若将来想按项目目录本身判活，需改 `hasLocalOutput`。
+---
+
+## 12. agent loop → AgentHarness（第十步：harness 化重写首尾机制）
+
+### 12.1 目标与判定
+
+**目标**：把 `packages/agent-runtime` 内部的「裸 agent loop」（`pi-agent-core` 的 `Agent` +
+`shouldStopAfterTurn` / 手写 `transformContext` 压缩 / `agent.steer()` 插话）替换为 pi 的
+**AgentHarness**（`vendor/pi/packages/agent/src/harness`），并借这次替换把首尾机制升级为
+harness 形态，而不是原样搬运。
+
+**判定**：harness 化 = 「换内核 + 升级首尾机制」；业务层（orchestrator / CLI / browse / 工具层 / wiki 契约）零改动。
+
+- 会话/泳道/操作状态机/恢复/压缩/重试/事件/钩子全部交给 `AgentHarness`；
+- 轮数硬顶升级为 **token 预算**（usage 事件/ledger 为权威来源）；
+- 一次性收尾提示升级为 **两段式提示**（软 70% + 硬将尽），在 `before_run` 注入；
+- `shouldStopAfterTurn` 停止升级为 **`before_run_end` 不返回 followUp 即终止**；
+- `error_max_turns` 升级为 **预算耗尽 → before_run_end 强制交卷 → 编排层照旧判页失败**。
+
+### 12.2 架构（模块划分与职责边界）
+
+模块落在 `packages/agent-runtime/src/harness/`，依赖方向单向向下（每个关注点一个模块，
+driver 只做装配与驱动，不承载业务语义）：
+
+```text
+apps/cli ──► orchestrator ──► agent-runtime ──► vendor/pi（AgentHarness）
+                                  │
+      ┌───────────────────────────┴────────────────────────────┐
+      │ agent.ts        装配层：选项归一化 / 运行时模型 / 契约出口     │
+      │ harness/driver.ts   驱动层：会话装配 + 钩子/事件注册 + 分段驱动  │
+      │ harness/budget.ts   首尾机制：token 预算 + 两段式提示 + 终止   │
+      │ harness/tools.ts    工具桥：ToolDefinition → AgentHarnessTool│
+      │ harness/events.ts   事件桥：HarnessEvent → SDKMessage        │
+      │ harness/models.ts   Models 桥：模型解析覆盖 + streamFn 注入    │
+      │ harness/queue.ts    订阅事件 → AsyncGenerator 的队列         │
+      └─────────────────────────────────────────────────────────┘
+```
+
+| 模块 | 职责 | 明确不做 |
+|---|---|---|
+| `agent.ts` | 对外契约（`createAgent/query/close`）；解析 provider/凭据/模型；把旧选项（`maxTurns` / `finalization` / `retryConfig`）归一化成 harness 选项；构造 `BudgetController` | 不碰 loop、不碰钩子时序 |
+| `harness/driver.ts` | 建会话（`MemorySessionRepo` → `Session` → `AgentHarness` → `AgentLane`）；注册钩子与事件订阅；按预算分段驱动 run；把 `OperationResultRecord` 归类成 `result.subtype`；关闭资源 | 不做预算判定（交给 budget）、不做消息映射（交给 events） |
+| `harness/budget.ts` | token 预算的唯一判据与状态机；`before_run` / `before_run_end` / `before_tool` 三处钩子实现；`pendingNotice()` 供 driver 决定是否分段 | 不直接调用 lane / 不发事件 / 不读会话存储 |
+| `harness/tools.ts` | 工具契约桥接（错误语义、内容块、details、执行模式） | 不执行策略（权限/预算由钩子承担） |
+| `harness/events.ts` | 纯映射函数（usage / 内容块 / 流式增量 / tool_result） | 不做状态累积 |
+| `harness/models.ts` | 让 harness 按 `{provider, modelId}` 解析到**本次解析出的模型对象**（保住 baseURL / contextWindow / maxTokens 覆盖），并支持测试注入 streamFn | 不改写凭据解析 |
+
+会话生命周期：每 `query()` 一个内存会话（与迁移前「每次运行新建 Agent」语义一致），
+`harness.close()` + `session.close()` + `repo.close()` 在生成器 finally 里收尾；
+`abort()` 走 harness 的 **durable 取消**（`lane.abort()`），不靠打断本地观察。
+
+### 12.3 钩子接入点
+
+| 钩子 | 本层用途 | durability |
+|---|---|---|
+| `before_run` | **两段式提示的唯一注入点**：按累计 tokens 判断软/硬提示，返回 `{ messages }`，与 run 的 checkpoint 同事务落库 | transition-consumed |
+| `before_run_end` | **正常收尾边界的决策点**：目标产物已产出 → 不返回 followUp（终止）；预算耗尽且强制交卷轮未用完 → 返回硬提示 followUp（强制交卷）；其余 → 不返回 followUp（终止） | transition-consumed |
+| `before_tool` | 旧 `PreToolUse` + `canUseTool` + **预算熔断**（耗尽后拦截探索类工具，目标输出工具例外） | transition-consumed |
+| `after_tool` | 旧 `PostToolUse`（UI 进度；不改结果） | transition-consumed |
+| `before_compaction` | 承载 `compaction.enabled=false`（decline，含 overflow 恢复压缩） | transition-consumed |
+| 事件 `usage` | 预算的**权威用量**（committed ledger 的累计 totals） | 只读 |
+| 事件 `turn_end` / `tool_end` | 轮次统计 / 目标产物判定（成功的 `write_page` / `generate_blueprint` 调用） | 只读 |
+| 事件 `message_update` / `message_end` / `tool_end` / `compaction_end` / `retry_scheduled` / `handler_error` | 映射为既有 `SDKMessage` 与业务 `retry` 回调 | 只读 |
+
+### 12.4 首尾机制差异映射（逐项落点）
+
+| 现有机制 | harness 下的升级形态 | 落点 | 理由 |
+|---|---|---|---|
+| 轮数预算（30 轮硬顶） | **token 预算**：`before_run` / `before_run_end` / `before_tool` 里按 `usage` 事件的累计 tokens 判定（口径 = input + output + cacheWrite + cacheRead） | `harness/budget.ts` + driver 的 `usage` 订阅 | 轮数≠成本：一条 100k 上下文的轮次与一条 1k 的轮次代价差两个数量级；usage ledger 是 harness 已经落库的权威成本事实，不需要另造计数器 |
+| 倒数第 1 轮一次性硬提示 | **两段式提示**：软提示（默认 70% 预算）+ 硬提示（预算将尽），都由 `before_run` 注入 `messages` | `budget.beforeRun()` | 早提示让模型有机会收敛（而不是到最后一轮才救火）；`before_run` 的注入是 transition-consumed 的 durable 消息，随 checkpoint 提交，崩溃重放安全 |
+| `shouldStopAfterTurn` 返回 true 停止 | `before_run_end` **不返回 followUp 即终止**（正常收尾边界）；预算耗尽时返回 followUp = 强制交卷 | `budget.beforeRunEnd()` | `before_run_end` 是 harness 明确规定的「无排队输入时的收尾决策点」；返回值本身既是「继续」也是「终止」信号，不需要再维护 turn 计数器或额外内核字段 |
+| 收尾失败 → `error_max_turns` | 预算耗尽 → `before_run_end` 强制交卷；仍无 `write_page` → 编排层照旧判页失败（产物存在性判定，不依赖内核） | `budget` + `driver.buildResultMessage()` + `orchestrator/wiki/generate-wiki.ts` | 内核只负责「预算与强制交卷」；「页面成不成」是业务语义，编排层已按 `.zread-pi/wiki/<section>/<file>` 是否存在判定，两层解耦 |
+
+补充说明（首尾机制的完整行为）：
+
+1. **软提示的落地时机**：软阈值可能在 run 中途越过，而 `before_run` 只在 run 起点触发。
+   driver 因此在 run 正常结束时检查 `pendingNotice()`：若提示已到期且目标产物未产出，
+   就再起一个 run（同一 lane、同一 transcript），由 `before_run` 把提示写进上下文。
+   这样「提示只经 `before_run` 注入」与「提示一定能送到模型」同时成立。
+2. **硬提示与强制交卷**：预算耗尽时 `before_run_end` 直接返回硬提示 followUp（同一 hook 的
+   继续语义），`forcedTurns`（缺省 1，0 = 立即终止）控制允许几次强制交卷。
+3. **熔断（backstop）**：模型可能一直调用工具、永不回到 `before_run_end`。预算耗尽后
+   `before_tool` 拦截探索类工具（返回 `{ block: { reason: 硬提示 } }`），把它推到收尾边界；
+   **目标输出工具例外**，否则强制交卷会被自己的熔断打掉。
+4. **`compaction.enabled=false`**：harness 的 overflow 恢复压缩不走 `shouldCompact`，
+   因此额外用 `before_compaction` decline 保证「关闭压缩 = 一次摘要请求都不发」。
+
+### 12.5 契约与行为差异（有意为之）
+
+| 差异 | 说明 |
+|---|---|
+| `result.subtype` 新增 `error_budget_exhausted` | `error_max_turns` 由「预算耗尽且强制交卷后仍无目标产物」取代；旧 subtype 保留在类型联合里（向后兼容），内核不再产出。 |
+| `result.usage` 语义 | 迁移前是「最后一次响应的 usage」（覆盖式赋值，接口在最后一条消息上）；现在是 **harness usage ledger 的累计值**（本次生成的全部 tokens）。`assistant` 事件仍是单次响应的 usage，UI 的实时增量不变。 |
+| 预算耗尽判定 | 迁移前的 `error_max_turns` 只是「到达轮数上限」；现在必须同时满足「预算耗尽」+「目标工具未成功调用」，交卷成功则算 success（场景验证见 §12.7 场景 7）。 |
+| `maxTurns` | 不再是轮数硬顶：`resolveBudgetOptions()` 折算成 `maxTurns * TOKENS_PER_TURN`（25k/轮，缺省 30 → 750k tokens），`0` = 不限制预算。配置界面 `/config/max-turns` 与 `config.agent.max_turns` 保持可用；新增 `agent.token_budget` 可直接配置 token 预算（0 = 按 max_turns 折算）。 |
+| `finalization` | 保留为兼容选项：`finalization.notice` → 硬提示文案，`graceTurns` → `forcedTurns`；新代码请用 `budget.notices` / `budget.forcedTurns`。 |
+| 重试 | 迁移前是适配层自研的 `streamFn` 包装（`createRetryingStreamFn` + `retryableStatusCodes` 白名单 + `retryScope: "stream+run"` 整轮重跑）；现在直接用 harness 的 retry policy（pi-ai 的分类器 + 退避上限，`maxDelayMs` → `maxAgentDelayMs`）。**失败尝试不落库**的语义不变（响应只有在 settlement 时才写会话）。`retryScope` 保留字段但已无用（harness 无「整轮重跑」概念）。 |
+| 上下文溢出 | 迁移前靠 `estimateContextTokens` 提前预判并优雅停止（faux provider 也会停）；现在靠 harness 的 threshold 压缩 + overflow 恢复压缩，泄漏到 provider 的溢出按 pi-ai 的 `isContextOverflow` 归类，适配层映射回 `error_context_full` 与既有「Context window nearly full」文案。 |
+| 折叠提示的 k 数 | 迁移前硬编码 30 轮；现在缺省折算 750k tokens（等价口径见上）。真机首次运行建议观察 usage 后调整 `agent.token_budget`。 |
+
+### 12.6 改动清单
+
+| 动作 | 对象 |
+|---|---|
+| 新增 | `packages/agent-runtime/src/harness/{driver,budget,tools,events,models,queue}.ts` |
+| 重写 | `packages/agent-runtime/src/agent.ts`（裸 loop → 装配层）、`src/hooks.ts`（钩子配置与执行，原为兼容垫片） |
+| 修改 | `packages/agent-runtime/src/index.ts`（导出预算能力）、`packages/orchestrator/src/agents/create-agent.ts`（构造 `budget`，两段式提示按文档语言本地化）、`packages/types/src/config.ts` + `packages/utils/src/config/index.ts`（新增 `agent.token_budget`） |
+| 未改动 | 工具层（5 个文件工具 + `Ls`）、orchestrator 的 prompts / wiki 契约 / 并发与错误隔离、CLI TUI、browse、repo-analyzer |
+
+### 12.7 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:context` | **45/45**（harness 内建压缩 + 溢出归类 + token 预算 + 两段式提示 + `before_run_end` 终止 + 强制交卷 + 权威 usage 口径 + `maxTurns` 折算） |
+| `bun run test:agent` | 11/11（含钩子映射、429 流级重试、thinkingLevel、工具落盘） |
+| `bun run test:agent:http` | 8/8（真实 HTTP/SSE：单次 usage 与累计 usage 分别断言） |
+| `bun run test:pages` | 11/11 + 7/7（含新增预算页：预算耗尽 → 强制交卷后仍无 write_page → `page_error`，页面未落盘） |
+| `bun run test:blueprint` / `test:tools` / `test:catalog` / `test:installer` / `test:history` / `test:provider` / `test:analyzer` | 7/7 · 95/95 · 34/34 · 70/70 · 61+24+10 · 5/5 · 5/5 |
+| `bun run test:tui` | 187 + 9 + 25 + 21 + 28 全绿（含真实终端启动与 mock LLM 全链路） |
+| `bun run mock:wiki` | `completed=4 failed=0` |
+
+### 12.8 风险与未决
+
+1. **软提示的时机**：软提示最早也要等到「模型停止但未交卷」的边界（或下一次 run 起点）才注入，
+   而不是像旧的 `agent.steer()` 那样精确插在第 N 轮之后。这是 harness 的注入语义所决定的
+   （`before_run` = run 起点；run 中途的 durable 通道是 steer 队列）。若将来需要更早介入，
+   可在 `usage` 事件里用 `lane.steer()` 补一条（当前未启用，避免多一条提示来源）。
+2. **预算口径**：累计 tokens 把 cacheRead 也算进去（长对话下占比很高）。若希望「只算真金白银」，
+   可把 `usageTokens()` 改成只累加 input + output。
+3. **`maxTurns` 折算系数**（25k/轮）是经验值，不是从旧行为反推的精确等价；真机首次运行后按
+   usage 调整 `agent.token_budget` 更靠谱。
+4. **会话仍是内存态**：harness 的 durable 能力（JSONL/SQLite 后端、恢复、fork）尚未启用；
+   wiki 生成是一次性任务，暂不需要。将来要做「中断续跑」时，把 `MemorySessionRepo` 换成
+   `JsonlSessionRepo` 即可，driver 的分段驱动天然兼容（`create` 会返回 open operations）。
+5. **`watchSession` 未用**：harness 的 `watchSession` 在 vendor 版本里仍是 `SliceNotImplemented`
+   桩，本层只用 `watch` 之外的显式事件订阅。
