@@ -9,11 +9,15 @@
  *
  * `-c/--concurrency` 可调整检查并发数（默认 8）：探测是 I/O 等待型任务，
  * 并发只影响速度，不影响结果顺序。
+ *
+ * stdout 保护：本命令的输出是「可被脚本消费」的（项目路径清单），启动时接管 stdout，
+ * 杂散写入（第三方库直写）转去 stderr，清单本身走 `writeRawStdout`，保证输出不被污染。
  */
 
 import { loadConfigSync, pruneHistory } from '@zread-pi/utils';
 import { enUS } from '../i18n/translations/en-US';
 import { zhCN } from '../i18n/translations/zh-CN';
+import { flushRawStdout, restoreStdout, takeOverStdout, writeRawStdout } from '../tui/output-guard';
 
 export interface RunHistoryOptions {
   /** 并发检查数（缺省 8） */
@@ -24,27 +28,30 @@ export async function runHistory(options: RunHistoryOptions = {}): Promise<void>
   const config = loadConfigSync();
   const t = config?.language === 'en' ? enUS : zhCN;
 
+  takeOverStdout();
   try {
     const { removed, remaining } = await pruneHistory({ concurrency: options.concurrency });
 
     if (removed.length > 0) {
-      process.stdout.write(`${t.history.pruned.replace('{count}', String(removed.length))}\n`);
+      writeRawStdout(`${t.history.pruned.replace('{count}', String(removed.length))}\n`);
     }
 
     if (remaining.length === 0) {
-      process.stdout.write(`${t.history.empty}\n`);
+      writeRawStdout(`${t.history.empty}\n`);
       return;
     }
 
-    process.stdout.write(
-      `${t.history.remaining.replace('{count}', String(remaining.length))}\n`,
-    );
+    writeRawStdout(`${t.history.remaining.replace('{count}', String(remaining.length))}\n`);
     for (const [index, record] of remaining.entries()) {
-      process.stdout.write(`  ${index + 1}. ${record.path}\n`);
+      writeRawStdout(`  ${index + 1}. ${record.path}\n`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${t.history.failed.replace('{error}', message)}\n`);
     process.exitCode = 1;
+  } finally {
+    // 排队中的清单输出先落盘再还原 stdout，避免被 process.exit 截断
+    await flushRawStdout();
+    restoreStdout();
   }
 }
