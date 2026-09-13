@@ -1,19 +1,36 @@
 /**
- * 重试策略：保留旧 agent-sdk 的 RetryConfig 契约（业务层事件依赖它），
- * 判定与退避实现复用 pi-ai 的 isRetryableAssistantError / retryDelayMs。
+ * 重试：**判定与退避全部用 pi 的实现**，这里只保留业务侧的配置形状与桥接。
+ *
+ * 历史（已删除）：本文件曾自维护 `isRetryableMessage`（pi 分类器 + 旧 `retryableStatusCodes` 白名单）
+ * 与 `computeBackoff`（自算指数退避）；现在两者都直接转出 pi-ai：
+ *   · 可重试判定 → `isRetryableAssistantError`（`pi-ai/utils/retry.ts` 的权威分类器）
+ *   · 退避计算   → `retryDelayMs`（`baseDelayMs * 2^(attempt-1)`，受 `maxAgentDelayMs` 封顶）
+ *   · 单次调用重试循环 → `retryAssistantCall`（本仓库目前由 harness 的 retry policy 承担，
+ *     不再自己写循环；导出以便业务侧需要时直接用 pi 的）
+ *
+ * `RetryConfig` 仍是**业务可见契约**（`~/.zread-pi/config.yaml` 的 `concurrency.max_retries`
+ * 经 Orchestrator 下发），`toRetryPolicy()` 负责把它翻译成 pi 的 `RetryPolicy`。
  */
 
-import {
+import { DEFAULT_MAX_AGENT_RETRY_DELAY_MS, type RetryPolicy } from "@earendil-works/pi-ai";
+
+export {
+	DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
 	isRetryableAssistantError,
+	retryAssistantCall,
 	retryDelayMs,
-	type AssistantMessage,
 } from "@earendil-works/pi-ai";
 
-/** 重试配置（与旧 @zread-pi/agent-runtime 完全一致） */
+/** 重试配置（与旧 @zread-pi/agent-runtime 完全一致，业务层事件依赖它） */
 export interface RetryConfig {
 	maxRetries: number;
 	baseDelayMs: number;
+	/** 单次退避上限；等于 `baseDelayMs` 时退化为固定延迟 */
 	maxDelayMs: number;
+	/**
+	 * @deprecated 已不参与判定：可重试性由 pi-ai 的 `isRetryableAssistantError` 按错误文本/状态判定。
+	 * 字段保留只为兼容旧配置形状（`config.concurrency` 只暴露次数，不暴露状态码白名单）。
+	 */
 	retryableStatusCodes: number[];
 	/** 重试前回调（用于通知 UI） */
 	onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; error: string }) => void;
@@ -27,42 +44,18 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
 };
 
 /**
- * 旧配置里 retryableStatusCodes 是 HTTP 状态码白名单；pi 的错误分类器基于错误文本。
- * 这里做一次桥接：文本命中 pi 的分类器、或文本中出现配置中的状态码，都算可重试。
+ * 业务 `RetryConfig` → harness 的 `RetryPolicy`（pi-ai）。
+ *
+ * `maxRetries <= 0` 表示不重试，返回 `undefined`（harness 用默认策略；调用方不启用时
+ * 适配层不再下发 retry，等价于一次尝试）。
  */
-export function isRetryableMessage(message: AssistantMessage, policy: RetryConfig | undefined): boolean {
-	if (message.stopReason !== "error") return false;
-	if (!policy) return false;
-	if (isRetryableAssistantError(message)) return true;
-
-	const text = message.errorMessage ?? "";
-	if (!text) return false;
-	return policy.retryableStatusCodes.some((code) => text.includes(String(code)));
-}
-
-/** 按旧配置计算退避（baseDelayMs 固定或指数，取决于 maxDelayMs） */
-export function computeBackoff(policy: RetryConfig, attempt: number): number {
-	if (policy.maxDelayMs === policy.baseDelayMs) return policy.baseDelayMs;
-	return retryDelayMs(
-		{ baseDelayMs: policy.baseDelayMs, maxAgentDelayMs: policy.maxDelayMs },
-		attempt,
-	);
-}
-
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (signal?.aborted) {
-			reject(new Error("Aborted"));
-			return;
-		}
-		const timer = setTimeout(resolve, ms);
-		signal?.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				reject(new Error("Aborted"));
-			},
-			{ once: true },
-		);
-	});
+export function toRetryPolicy(retryConfig: RetryConfig | undefined): RetryPolicy | undefined {
+	if (!retryConfig || retryConfig.maxRetries <= 0) return undefined;
+	return {
+		enabled: true,
+		maxRetries: retryConfig.maxRetries,
+		baseDelayMs: retryConfig.baseDelayMs,
+		// 旧配置里 maxDelayMs 就是硬上限（create-agent 传 10000 = 固定延迟）
+		maxAgentDelayMs: retryConfig.maxDelayMs ?? DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
+	};
 }

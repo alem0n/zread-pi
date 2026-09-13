@@ -1,73 +1,40 @@
 /**
- * 同文件写操作串行化
+ * 同文件写操作串行化（**不再自维护实现**）。
  *
- * 从上游移植：`pi/packages/agent/src/harness/tools/file-mutation-queue.ts`
- * （与 `coding-agent/src/core/tools/file-mutation-queue.ts` 同源）。
+ * 排队逻辑全部由 pi 内核承担：`harness/tools/file-mutation-queue.ts`
+ * （vendor/pi/packages/agent/src/harness/tools/file-mutation-queue.ts）。
+ * 本文件只做两件事，都是「接线」而不是实现：
+ *  1. 给 pi 的 `withFileMutationQueue(env, path, fn, context)` 提供宿主能力：
+ *     · `ExecutionEnv`：pi 的 `NodeExecutionEnv`（`harness/env/nodejs`），
+ *       用它的 `absolutePath` / `canonicalPath` 得到排队键（canonical path = realpath，
+ *       软链接指向同一文件时也能串行）；
+ *     · `Context`：把工具拿到的 `abortSignal` 包进 `BACKGROUND_CONTEXT`。
+ *  2. 保持本仓库调用点的两参数签名 `(filePath, fn, signal?)` 不变。
  *
- * 为什么必须移植：本仓库的 Wiki 页面是**并行生成**的（p-limit 并发），
- * 多个子 Agent 会对同一批文件发 Read/Write/Edit。同一文件的写-写竞争会导致
- * 「读-改-写」丢更新（Edit 尤其明显：读到 v1、另一个写者写 v2、再把 v1 的修改写回 → v2 丢失）。
- * 这里按「真实路径（realpath 解析软链接）」排队，不同文件仍然并行。
+ * 为什么 env 必须是**进程级单例**：pi 把队列状态存在 `WeakMap<ExecutionEnv, ...>` 里，
+ * 每个 env 实例一套队列；只有共享同一个 env，不同子 Agent 对同一文件的写才会进同一条队列
+ * （Wiki 页面是 p-limit 并行生成的，Edit 的「读-改-写」尤其怕丢更新）。
+ *
+ * 调用方传入的路径一律是**绝对路径**（Write/Edit 先 `resolveToCwd`），
+ * 因此 env 的 `cwd` 只作为相对路径的兜底基准。
  */
 
-import { realpath } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { BACKGROUND_CONTEXT, withAbortSignal, type Context } from '@earendil-works/pi-agent-core'
+import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/harness/env/nodejs'
+import { withFileMutationQueue as withPiFileMutationQueue } from '@earendil-works/pi-agent-core/harness/tools/file-mutation-queue'
 
-const fileMutationQueues = new Map<string, Promise<void>>()
-let registrationQueue = Promise.resolve()
+let sharedEnv: NodeExecutionEnv | undefined
 
-function isMissingPathError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'code' in error &&
-		(error.code === 'ENOENT' || error.code === 'ENOTDIR')
-	)
-}
-
-async function getMutationQueueKey(filePath: string): Promise<string> {
-	const resolvedPath = resolve(filePath)
-	try {
-		return await realpath(resolvedPath)
-	} catch (error) {
-		if (isMissingPathError(error)) {
-			return resolvedPath
-		}
-		throw error
-	}
+function executionEnv(): NodeExecutionEnv {
+  sharedEnv ??= new NodeExecutionEnv({ cwd: process.cwd() })
+  return sharedEnv
 }
 
 /**
  * Serialize file mutation operations targeting the same file.
  * Operations for different files still run in parallel.
  */
-export async function withFileMutationQueue<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-	const registration = registrationQueue.then(async () => {
-		const key = await getMutationQueueKey(filePath)
-		const currentQueue = fileMutationQueues.get(key) ?? Promise.resolve()
-
-		let releaseNext!: () => void
-		const nextQueue = new Promise<void>((resolveQueue) => {
-			releaseNext = resolveQueue
-		})
-		const chainedQueue = currentQueue.then(() => nextQueue)
-		fileMutationQueues.set(key, chainedQueue)
-
-		return { key, currentQueue, chainedQueue, releaseNext }
-	})
-	registrationQueue = registration.then(
-		() => undefined,
-		() => undefined,
-	)
-
-	const { key, currentQueue, chainedQueue, releaseNext } = await registration
-	await currentQueue
-	try {
-		return await fn()
-	} finally {
-		releaseNext()
-		if (fileMutationQueues.get(key) === chainedQueue) {
-			fileMutationQueues.delete(key)
-		}
-	}
+export function withFileMutationQueue<T>(filePath: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  const context: Context = signal ? withAbortSignal(signal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT
+  return withPiFileMutationQueue(executionEnv(), filePath, fn, context)
 }

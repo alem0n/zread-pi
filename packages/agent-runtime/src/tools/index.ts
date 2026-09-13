@@ -38,7 +38,7 @@ export type { WalkEntry, WalkOptions } from "./file-walk.js";
 export { findSearchBinary, resetSearchBinaryCache } from "./search-binaries.js";
 export { normalizeEditInput } from "./edit.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
-export { detectSupportedImageMimeType, encodeBase64 } from "./image.js";
+export { detectSupportedImageMimeType, encodeBase64 } from "@earendil-works/pi-agent-core/harness/tools/image";
 export { resolveReadPathAsync, resolveToCwd } from "./path-utils.js";
 
 export {

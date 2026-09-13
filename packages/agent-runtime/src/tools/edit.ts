@@ -24,6 +24,7 @@ import { defineTool, getBoolean, getString } from './types.js'
 import type { ToolCallReturn } from './types.js'
 import { withFileMutationQueue } from './file-mutation-queue.js'
 import { resolveToCwd } from './path-utils.js'
+// 精确替换与 diff 计算直接用 pi 内核实现（不再本地维护副本，见 MIGRATION.md §13）
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
@@ -33,7 +34,7 @@ import {
   normalizeToLF,
   restoreLineEndings,
   stripBom,
-} from './edit-diff.js'
+} from '@earendil-works/pi-agent-core/harness/tools/edit-diff'
 
 interface NormalizedEditInput {
   requestedPath: string
@@ -167,8 +168,7 @@ export const FileEditTool = defineTool({
 
       try {
         await access(absolutePath, constants.R_OK | constants.W_OK)
-      } catch (error: unknown) {
-        throwIfAborted()
+      } catch (error: unknown) {        throwIfAborted()
         const message = error instanceof Error && 'code' in error ? `Error code: ${error.code}` : String(error)
         throw new Error(`Could not edit file: ${requestedPath}. ${message}.`)
       }
@@ -225,6 +225,6 @@ export const FileEditTool = defineTool({
           patch,
         },
       }
-    })
+    }, context.abortSignal)
   },
 })

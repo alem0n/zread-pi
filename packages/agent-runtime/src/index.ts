@@ -124,10 +124,17 @@ export {
 export type { TruncationResult, TruncationOptions, WalkEntry, WalkOptions } from "./tools/index.js";
 
 // ---------------------------------------------------------------------------
-// 重试
+// 重试（判定/退避/重试循环均为 pi 的实现，见 MIGRATION.md §13）
 // ---------------------------------------------------------------------------
 
-export { DEFAULT_RETRY_CONFIG, isRetryableMessage, computeBackoff } from "./retry.js";
+export {
+	DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
+	DEFAULT_RETRY_CONFIG,
+	isRetryableAssistantError,
+	retryAssistantCall,
+	retryDelayMs,
+	toRetryPolicy,
+} from "./retry.js";
 export type { RetryConfig } from "./retry.js";
 
 // ---------------------------------------------------------------------------
