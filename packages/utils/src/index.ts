@@ -57,6 +57,8 @@ export {
   isThinkingLevel,
   normalizeThinkingLevel,
   DEFAULT_MAX_TURNS,
+  DEFAULT_TOKEN_BUDGET,
+  normalizeTokenBudget,
   MIN_MAX_TURNS,
   MAX_MAX_TURNS,
   normalizeMaxTurns,

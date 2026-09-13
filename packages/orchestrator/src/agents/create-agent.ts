@@ -3,10 +3,10 @@
  *
  * 封装逻辑：
  * - 加载 config 配置（model, apiKey, baseURL, apiType）
- * - 创建 Agent 并执行提示词
+ * - 创建 Agent（pi AgentHarness）并执行提示词
  * - 处理执行过程中的日志和结果解析
  * - 支持进度回调（通过钩子机制）
- * - LLM API 重试由 agent-sdk 的 retryConfig 处理
+ * - LLM 重试与 token 预算由适配层（harness）处理
  */
 
 import { createAgent as CreateAgentSdk, hasZreadProvider, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
@@ -22,8 +22,13 @@ export interface CreateBlueprintAgentOptions {
   tools: ToolDefinition[];
   /** 执行提示词 */
   prompts: string;
-  /** 最大轮次 */
+  /**
+   * 兼容字段：折算成 token 预算（见 `TOKENS_PER_TURN`），调用方一般不再传。
+   * `0` = 不限制预算。
+   */
   maxTurns?: number;
+  /** 显式 token 预算（覆盖 config 与 maxTurns 折算）；0 / 缺省 = 用 config */
+  tokenBudget?: number;
   /** 进度回调（可选） */
   onEvent?: (event: CatalogEvent) => void;
 }
@@ -34,23 +39,44 @@ export interface CreateBlueprintAgentOptions {
 export interface AgentResult {
   /** 执行耗时（毫秒） */
   durationMs: number;
-  /** Token 使用统计 */
+  /** Token 使用统计（harness usage ledger 的累计值） */
   tokenUsage?: TokenUsage;
 }
 
-/** 轮次收尾提示文案（按文档语言本地化，并点名最终的输出工具） */
-const FINALIZATION_NOTICES: Record<'zh' | 'en', (tool: string) => string> = {
-  zh: (tool) => `【系统提示】轮次即将用尽：请立即停止探索，直接调用 ${tool} 输出完整最终结果（不要只做文字总结），否则本次生成将以失败结束。`,
-  en: (tool) => `[System notice] Turn budget nearly exhausted: stop exploring and call ${tool} now to write the complete final result (do not merely summarize in text), otherwise this run will fail.`,
+/** 每「轮」折算的 token 预算（与适配层 `TOKENS_PER_TURN` 保持一致） */
+const TOKENS_PER_TURN = 25_000;
+
+/** 两段式预算提示文案（按文档语言本地化，并点名最终的输出工具） */
+const BUDGET_NOTICES: Record<'zh' | 'en', { soft: (tool: string) => string; hard: (tool: string) => string }> = {
+  zh: {
+    soft: (tool) => `【系统提示】token 预算已用掉约 70%：请尽快收敛探索，优先把已获得的信息整理成完整结果并调用 ${tool} 输出。`,
+    hard: (tool) => `【系统提示】token 预算即将耗尽：立即停止探索，直接调用 ${tool} 输出完整最终结果（不要只做文字总结），否则本次生成将以失败结束。`,
+  },
+  en: {
+    soft: (tool) => `[System notice] About 70% of the token budget is used: start converging now and prepare to call ${tool} with the complete result.`,
+    hard: (tool) => `[System notice] Token budget nearly exhausted: stop exploring and call ${tool} now to write the complete final result (do not merely summarize in text), otherwise this run will fail.`,
+  },
 };
 
 /** 输出工具名（蓝图/页面 Agent 的最终产物） */
 const OUTPUT_TOOL_NAMES = new Set(['generate_blueprint', 'write_page']);
 
-/** 根据工具集与文档语言构造收尾提示；没有输出工具时返回 undefined（关闭） */
-function buildFinalizationNotice(tools: ToolDefinition[], docLanguage: 'zh' | 'en'): string | undefined {
+/** 根据工具集与文档语言构造两段式提示；没有输出工具时返回 undefined（关闭提示） */
+function buildBudgetNotices(
+  tools: ToolDefinition[],
+  docLanguage: 'zh' | 'en',
+): { soft: string; hard: string } | undefined {
   const outputTool = tools.find((tool) => OUTPUT_TOOL_NAMES.has(tool.name));
-  return outputTool ? FINALIZATION_NOTICES[docLanguage](outputTool.name) : undefined;
+  if (!outputTool) return undefined;
+  return {
+    soft: BUDGET_NOTICES[docLanguage].soft(outputTool.name),
+    hard: BUDGET_NOTICES[docLanguage].hard(outputTool.name),
+  };
+}
+
+/** 目标输出工具名（交卷判定的锚点） */
+function outputToolNames(tools: ToolDefinition[]): string[] {
+  return tools.filter((tool) => OUTPUT_TOOL_NAMES.has(tool.name)).map((tool) => tool.name);
 }
 
 /**
@@ -69,11 +95,15 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   const config = await loadConfig();
   const docLanguage = config.doc_language as 'zh' | 'en';
   const maxRetries = config.concurrency.max_retries;
-  // 最大轮次：调用方显式传入 > config.agent.max_turns > 适配层兜底 30；0 = 不限制轮次
+  // token 预算：显式传参 > config.agent.token_budget > max_turns 折算（见适配层 resolveBudgetOptions）
+  // `0` = 不限制预算；内核不再数轮次，`maxTurns` 仅作为折算依据。
   const maxTurns = options.maxTurns ?? config.agent.max_turns ?? 30;
-  // 轮次收尾提示：只在有轮次预算时启用（maxTurns <= 0 = 不限制，无收尾一说）
-  const finalizationNotice =
-    maxTurns > 0 ? buildFinalizationNotice(options.tools, docLanguage) : undefined;
+  const configuredTokenBudget = config.agent.token_budget ?? 0;
+  const tokenBudget = options.tokenBudget ?? (configuredTokenBudget > 0 ? configuredTokenBudget : undefined);
+  const effectiveTokenBudget = tokenBudget ?? (maxTurns > 0 ? maxTurns * TOKENS_PER_TURN : 0);
+  // 两段式预算提示：有输出工具时启用（无输出工具则无从交卷，也没有收尾一说）
+  const notices = buildBudgetNotices(options.tools, docLanguage);
+  const outputTools = outputToolNames(options.tools);
 
   // 提取 LLM 配置（null → undefined，SDK 不接受 null）
   const model = config.llm.model ?? undefined;
@@ -92,7 +122,10 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     throw new Error('LLM configuration incomplete. Please run `zread-pi config` to configure.');
   }
 
-  logger.info(`模型: ${model}, 思考深度: ${thinkingLevel}, 最大轮次: ${maxTurns > 0 ? maxTurns : '不限制'}, baseURL: ${baseURL}`);
+  logger.info(
+    `模型: ${model}, 思考深度: ${thinkingLevel}, token 预算: ${effectiveTokenBudget > 0 ? effectiveTokenBudget : '不限制'}` +
+      `${tokenBudget === undefined && maxTurns > 0 ? ` (由 max_turns=${maxTurns} 折算)` : ''}, baseURL: ${baseURL}`,
+  );
 
   // Token 累积统计
   let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
@@ -159,7 +192,13 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     tools: options.tools,
     systemPrompt: SYSTEM_PROMPTS[docLanguage],
     maxTurns,
-    finalization: finalizationNotice ? { notice: finalizationNotice } : undefined,
+    budget: {
+      // 显式 token 预算（不传则由 maxTurns 折算，见 resolveBudgetOptions）
+      ...(tokenBudget === undefined ? {} : { maxTokens: tokenBudget }),
+      forcedTurns: 1,
+      outputTools,
+      ...(notices ? { notices } : {}),
+    },
     thinkingLevel,
     permissionMode: 'bypassPermissions',
     hooks,
