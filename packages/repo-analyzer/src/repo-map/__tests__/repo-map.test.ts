@@ -66,7 +66,7 @@ describe('Repo Map Builder', () => {
   });
 
   describe('token-counter', () => {
-    test('estimateTokens should calculate tokens correctly', () => {
+    test('estimateTokens 用 pi 的 chars/4 估算器（不再是「行数 × 10」）', () => {
       const symbol: SymbolInfo = {
         file: 'src/test.ts',
         exports: ['export function a()', 'export function b()'],
@@ -75,10 +75,22 @@ describe('Repo Map Builder', () => {
         docstrings: ['/** test */'],
       };
 
+      // 该文件在 Repo Map 里的渲染文本（深度 1）：4 空格缩进 + 文件行，子行为 8 空格缩进
+      const rendered = [
+        '    ├── test.ts',
+        '        /** /** test */ */',
+        '        [Export] export function a()',
+        '        [Export] export function b()',
+        '        function a()',
+      ].join('\n');
+
       const tokens = estimateTokens(symbol);
       expect(tokens).toBeGreaterThan(0);
-      // Expected: 1 (path) + 1 (doc) + 2 (exports) + 1 (fn) + 1 (depth) = 6 lines * 10 = 60
-      expect(tokens).toBe(60);
+      // pi 的启发式：chars / 4（与 harness 判定上下文压力同一套算法）
+      expect(tokens).toBe(Math.ceil(rendered.length / 4));
+
+      // Ref 标签也计入估算（引用数越高、行越长，占用越真实）
+      expect(estimateTokens(symbol, 3)).toBeGreaterThan(tokens);
     });
 
     test('getDepth should return correct depth', () => {

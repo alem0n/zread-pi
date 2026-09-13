@@ -22,6 +22,7 @@ import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-agent-core";
 import { createRuntimeModel, inferProviderId, type RuntimeModel } from "./pi/runtime-model.js";
 import { hasZreadProvider } from "./pi/provider-catalog.js";
 import type { RetryConfig } from "./retry.js";
+import { toRetryPolicy } from "./retry.js";
 import type { ThinkingLevel } from "@zread-pi/types";
 import type { SDKMessage, PermissionMode, ToolDefinition } from "./types.js";
 import type { ApiType } from "./providers/types.js";
@@ -264,18 +265,6 @@ function resolveRuntime(options: AgentOptions, modelId: string | undefined): Res
 		models: bridgeModels(runtime.models, { resolved: runtime.model }),
 		apiType: runtime.apiType,
 		providerId: runtime.providerId,
-	};
-}
-
-/** 旧扁平 RetryConfig → harness 的 RetryPolicy（pi-ai） */
-function toRetryPolicy(retryConfig: RetryConfig | undefined) {
-	if (!retryConfig || retryConfig.maxRetries <= 0) return undefined;
-	return {
-		enabled: true,
-		maxRetries: retryConfig.maxRetries,
-		baseDelayMs: retryConfig.baseDelayMs,
-		// 旧配置里 maxDelayMs 就是硬上限（create-agent 传 10000 = 固定延迟）
-		...(retryConfig.maxDelayMs !== undefined ? { maxAgentDelayMs: retryConfig.maxDelayMs } : {}),
 	};
 }
 

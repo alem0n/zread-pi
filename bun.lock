@@ -108,6 +108,7 @@
       "name": "@zread-pi/repo-analyzer",
       "version": "0.1.0",
       "dependencies": {
+        "@earendil-works/pi-agent-core": "0.85.1",
         "@zread-pi/types": "workspace:*",
         "@zread-pi/utils": "workspace:*",
         "crypto-hash": "^1.3.0",

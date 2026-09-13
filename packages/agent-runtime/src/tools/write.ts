@@ -76,6 +76,6 @@ export const FileWriteTool = defineTool({
           created: !existed,
         },
       }
-    })
+    }, context.abortSignal)
   },
 })

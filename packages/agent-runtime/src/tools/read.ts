@@ -21,7 +21,8 @@ import { readFile, stat } from 'node:fs/promises'
 import { defineTool, getNumber, getRequiredString, getString } from './types.js'
 import type { ToolCallReturn } from './types.js'
 import type { ToolInputParams } from '../types.js'
-import { detectSupportedImageMimeType, encodeBase64 } from './image.js'
+// 图片判型 / base64 直接用 pi 内核实现（不再本地维护副本，见 MIGRATION.md §13）
+import { detectSupportedImageMimeType, encodeBase64 } from '@earendil-works/pi-agent-core/harness/tools/image'
 import { resolveReadPathAsync } from './path-utils.js'
 import { toTruncationDetails, truncateHead, formatSize, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from './truncate.js'
 

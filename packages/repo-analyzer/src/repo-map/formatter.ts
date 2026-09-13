@@ -4,6 +4,40 @@
 
 import type { SymbolInfo, DirectoryTreeNode, RepoMapOutput } from '@zread-pi/types';
 import { REPO_MAP_CONFIG } from './constants.js';
+import { estimateTextTokens } from './token-counter.js';
+
+/** 取路径的文件名部分（两种分隔符都支持） */
+export function fileNameOf(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const index = normalized.lastIndexOf('/');
+  return index === -1 ? normalized : normalized.slice(index + 1);
+}
+
+/**
+ * 一个文件在 Repo Map 中会输出的符号内容行（不含树前缀 / Ref 标签）
+ *
+ * formatter 渲染与 token-counter 估算共用这一份构造：估算值与真实输出不会漂移。
+ */
+export function formatSymbolContentLines(symbol: SymbolInfo): string[] {
+  const lines: string[] = [fileNameOf(symbol.file)];
+
+  // Docstring (first one)
+  if (symbol.docstrings.length > 0) {
+    lines.push(`/** ${symbol.docstrings[0].trim()} */`);
+  }
+
+  // Exports (with signature truncation)
+  for (const exp of symbol.exports) {
+    lines.push(`[Export] ${trimSignature(exp, REPO_MAP_CONFIG.max_signature_length)}`);
+  }
+
+  // Functions
+  for (const fn of symbol.functions) {
+    lines.push(trimSignature(fn.signature, REPO_MAP_CONFIG.max_signature_length));
+  }
+
+  return lines;
+}
 
 /**
  * Build directory tree from selected files
@@ -20,7 +54,6 @@ export function buildDirectoryTree(files: SymbolInfo[]): DirectoryTreeNode {
     const normalizedPath = symbol.file.replace(/\\/g, '/');
     const parts = normalizedPath.split('/');
     const fileName = parts.pop() || '';
-
     // Navigate/create directory structure
     let current = root;
     for (const dirName of parts) {
@@ -110,25 +143,10 @@ function formatTreeNode(
 
       lines.push(`${prefix}${nodePrefix}${node.name}${refLabel}`);
 
-      // Add symbol details
+      // Add symbol details（与 token 估算共用同一份内容行构造）
       const symbolPrefix = prefix + childPrefix;
-
-      // Docstring (first one)
-      if (symbol.docstrings.length > 0) {
-        const doc = symbol.docstrings[0].trim();
-        lines.push(`${symbolPrefix}/** ${doc} */`);
-      }
-
-      // Exports (with signature truncation)
-      for (const exp of symbol.exports) {
-        const trimmed = trimSignature(exp, REPO_MAP_CONFIG.max_signature_length);
-        lines.push(`${symbolPrefix}[Export] ${trimmed}`);
-      }
-
-      // Functions
-      for (const fn of symbol.functions) {
-        const trimmed = trimSignature(fn.signature, REPO_MAP_CONFIG.max_signature_length);
-        lines.push(`${symbolPrefix}${trimmed}`);
+      for (const contentLine of formatSymbolContentLines(symbol)) {
+        lines.push(`${symbolPrefix}${contentLine}`);
       }
 
       // Empty line after file (for readability)
@@ -158,10 +176,8 @@ export function buildRepoMapOutput(
   selectedSymbols: SymbolInfo[],
   priorities: { file: string; referenceCount: number }[]
 ): RepoMapOutput {
-  // Estimate token count (rough: 1 char ≈ 0.5 token for Chinese, 0.25 for English)
-  // Use conservative estimate: 1 line ≈ 10 tokens
-  const lines = content.split('\n').length;
-  const tokenCount = lines * 10;
+  // Estimate token count with pi's context estimator (same algorithm the harness uses)
+  const tokenCount = estimateTextTokens(content);
 
   // Get top files
   const topFiles = priorities
