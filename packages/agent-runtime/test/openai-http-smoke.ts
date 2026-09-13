@@ -7,6 +7,8 @@
  *   - baseURL 注入（打到本地 mock 服务）
  *   - apiKey 注入（Authorization: Bearer）
  *   - 流式 tool_call 解析 → 工具执行 → 第二轮请求 → 最终文本
+ *   - **Provider 层重试：429 + Retry-After 被尊重**（而不是退化到 agent 层退避）
+ *   - Retry-After 超过 maxRetryDelayMs 时立即失败，错误文本可识别
  *
  * 运行：bun run packages/agent-runtime/test/openai-http-smoke.ts
  */
@@ -26,6 +28,9 @@ const workdir = await mkdtemp(join(tmpdir(), "zread-pi-http-smoke-"));
 const targetFile = join(workdir, "http-out.md").replace(/\\/g, "/");
 const seenAuth: string[] = [];
 const seenBodies: Array<Record<string, unknown>> = [];
+/** 下一次请求是否回 429（用于 Retry-After 断言） */
+let rateLimitPending: string | undefined;
+const requestStartTimes: number[] = [];
 
 function chunk(payload: Record<string, unknown>): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -49,6 +54,16 @@ const server = Bun.serve({
 			return new Response("not found", { status: 404 });
 		}
 		seenAuth.push(request.headers.get("authorization") ?? "");
+		requestStartTimes.push(Date.now());
+		// Retry-After 断言：开关打开时先回一次 429（带服务端要求的等待秒数）
+		if (rateLimitPending !== undefined) {
+			const retryAfter = rateLimitPending;
+			rateLimitPending = undefined;
+			return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+				status: 429,
+				headers: { "content-type": "application/json", "retry-after": retryAfter },
+			});
+		}
 		const body = (await request.json()) as Record<string, unknown>;
 		seenBodies.push(body);
 
@@ -175,10 +190,96 @@ for await (const event of agent.query("写文件")) {
 	}
 }
 await agent.close();
+
+// 阶段 1 快照：后续 Retry-After 用例会往同一个 mock 服务发更多请求
+const phase1BodyCount = seenBodies.length;
+
+// ---------------------------------------------------------------------------
+// 第二阶段：Provider 层重试（429 + Retry-After）
+// ---------------------------------------------------------------------------
+console.log("\n▶ Provider 层重试：服务端 Retry-After 被尊重（不发 agent 层退避）");
+
+rateLimitPending = "0.05"; // 50ms，远小于 agent 层 baseDelayMs 的 5s
+requestStartTimes.length = 0;
+const retryAgent = createAgent({
+	providerId: "openai-compatible",
+	model: "mock-model",
+	apiKey: "sk-mock-key",
+	baseURL,
+	cwd: workdir,
+	systemPrompt: "测试",
+	tools: [FileWriteTool],
+	retryConfig: {
+		maxRetries: 1,
+		baseDelayMs: 5000, // 若不走 Provider 层，agent 层会等 5 秒（断言可区分）
+		maxDelayMs: 5000,
+		retryableStatusCodes: [429],
+		provider: { maxRetries: 1, maxRetryDelayMs: 60_000 },
+	},
+});
+const retryStartedAt = Date.now();
+let retrySubtype: string | undefined;
+for await (const event of retryAgent.query("写文件")) {
+	if (event.type === "result") retrySubtype = (event as { subtype?: string }).subtype;
+}
+const retryElapsedMs = Date.now() - retryStartedAt;
+await retryAgent.close();
+
+check(
+	"429 触发 Provider 层重试（多了一次请求）",
+	requestStartTimes.length === 3,
+	`requests=${requestStartTimes.length}`,
+);
+check(
+	"重试等待按 Retry-After（~50ms），而不是 agent 层 5s 退避",
+	requestStartTimes.length === 3 && requestStartTimes[1]! - requestStartTimes[0]! < 1000,
+	`gap=${requestStartTimes.length === 3 ? requestStartTimes[1]! - requestStartTimes[0]! : -1}ms elapsed=${retryElapsedMs}ms`,
+);
+check("Retry-After 重试后任务成功", retrySubtype === "success", String(retrySubtype));
+
+// ---------------------------------------------------------------------------
+// 第三阶段：Retry-After 超过 maxRetryDelayMs → 立即失败（错误可直接识别）
+// ---------------------------------------------------------------------------
+console.log("\n▶ Retry-After 超过上限：立即失败且错误可识别");
+
+rateLimitPending = "120"; // 120s，超过 maxRetryDelayMs=1s
+const cappedAgent = createAgent({
+	providerId: "openai-compatible",
+	model: "mock-model",
+	apiKey: "sk-mock-key",
+	baseURL,
+	cwd: workdir,
+	systemPrompt: "测试",
+	tools: [FileWriteTool],
+	retryConfig: {
+		maxRetries: 0, // 关掉 agent 层重试，只看 Provider 层行为
+		baseDelayMs: 1,
+		maxDelayMs: 1,
+		retryableStatusCodes: [429],
+		provider: { maxRetries: 3, maxRetryDelayMs: 1000 },
+	},
+});
+let cappedSubtype: string | undefined;
+let cappedErrors: string[] | undefined;
+for await (const event of cappedAgent.query("写文件")) {
+	if (event.type === "result") {
+		cappedSubtype = (event as { subtype?: string }).subtype;
+		cappedErrors = (event as { errors?: string[] }).errors;
+	}
+}
+await cappedAgent.close();
+
+check(
+	"超上限的 Retry-After 不被重试，失败文本含 retry delay",
+	cappedSubtype === "error_during_execution" &&
+		(cappedErrors ?? []).some((message) => /retry delay/i.test(message)),
+	`${String(cappedSubtype)} · ${(cappedErrors ?? []).join(" | ")}`,
+);
+
 server.stop(true);
 
 console.log("\n▶ 断言");
-check("命中本地 mock 服务两次（工具调用 + 后续答复）", seenBodies.length === 2, `requests=${seenBodies.length}`);
+check("命中本地 mock 服务两次（工具调用 + 后续答复）", phase1BodyCount === 2, `requests=${phase1BodyCount}`);
 check("apiKey 以 Authorization: Bearer 注入", seenAuth.every((value) => value === "Bearer sk-mock-key"), seenAuth.join("|"));
 check("请求体带 model 与 stream:true", seenBodies[0]?.model === "mock-model" && seenBodies[0]?.stream === true);
 check("工具被真实执行并写入文件", (await readFile(targetFile, "utf-8").catch(() => "")) === "# via http\n");

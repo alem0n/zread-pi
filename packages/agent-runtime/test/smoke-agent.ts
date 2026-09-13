@@ -7,6 +7,8 @@
  *  3. PreToolUse / PostToolUse 钩子被触发（Orchestrator 的 UI 进度就依赖它们）；
  *  4. 用量（usage）从 pi 映射回 TokenUsage；
  *  5. 流级重试：首次 429 错误 -> onRetry 回调 -> 第二次成功；
+ *  5b. Provider 层重试配置透传（streamOptions.maxRetries / maxRetryDelayMs）
+ *      与 toRetryPolicy / toStreamOptions 的纯函数映射；
  *  6. 最终 SDKResultMessage.subtype === 'success'。
  *
  * 运行：bun run tools/smoke-agent.ts
@@ -18,7 +20,7 @@ import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai";
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createAgent, FileReadTool, FileWriteTool, type SDKMessage } from "../src/index.js";
+import { createAgent, FileReadTool, FileWriteTool, toRetryPolicy, toStreamOptions, type SDKMessage } from "../src/index.js";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -50,6 +52,8 @@ let assistantTexts: string[] = [];
 let finalUsage: { input_tokens: number; output_tokens: number } | undefined;
 let resultSubtype: string | undefined;
 let capturedReasoning: SimpleStreamOptions["reasoning"];
+let capturedMaxRetries: number | undefined;
+let capturedMaxRetryDelayMs: number | undefined;
 
 const agent = createAgent({
 	model: String(model.id),
@@ -64,6 +68,8 @@ const agent = createAgent({
 		model,
 		streamFn: (m, c, o) => {
 			capturedReasoning = o?.reasoning;
+			capturedMaxRetries = o?.maxRetries;
+			capturedMaxRetryDelayMs = o?.maxRetryDelayMs;
 			return models.streamSimple(m, c, o);
 		},
 	},
@@ -92,6 +98,8 @@ const agent = createAgent({
 		baseDelayMs: 5,
 		maxDelayMs: 5,
 		retryableStatusCodes: [429, 500, 503],
+		// Provider 层重试：应透传为 harness streamOptions（pi-ai 读 Retry-After 的开关）
+		provider: { maxRetries: 2, maxRetryDelayMs: 60_000 },
 		onRetry: (info) => retryLog.push(`retry#${info.attempt}:${info.error.slice(0, 24)}`),
 	},
 });
@@ -128,7 +136,44 @@ check("流级重试被触发（429）", retryLog.length === 1, retryLog.join(","
 check("最终结果为 success", resultSubtype === "success", String(resultSubtype));
 check("usage 已从 pi 映射回 TokenUsage", finalUsage !== undefined, JSON.stringify(finalUsage));
 check("thinkingLevel 作为 reasoning 传入 streamFn", capturedReasoning === "high", String(capturedReasoning));
+check(
+	"provider 层重试配置透传为 streamOptions.maxRetries",
+	capturedMaxRetries === 2,
+	String(capturedMaxRetries),
+);
+check(
+	"provider 层重试上限透传为 streamOptions.maxRetryDelayMs",
+	capturedMaxRetryDelayMs === 60_000,
+	String(capturedMaxRetryDelayMs),
+);
 check("模型答复文本可见", assistantTexts.some((text) => text.includes("已写入")), assistantTexts.join("|"));
+
+// 纯函数：RetryConfig → pi 的 RetryPolicy / streamOptions（不依赖运行）
+const noRetry = { maxRetries: 0, baseDelayMs: 1, maxDelayMs: 1, retryableStatusCodes: [] };
+check(
+	"toRetryPolicy：maxRetries=0 显式禁用（不回退 harness 默认 3 次）",
+	JSON.stringify(toRetryPolicy(noRetry)) === JSON.stringify({ enabled: false, maxRetries: 0, baseDelayMs: 0 }),
+	JSON.stringify(toRetryPolicy(noRetry)),
+);
+check(
+	"toRetryPolicy：指数退避参数按 pi 口径映射（maxAgentDelayMs）",
+	JSON.stringify(toRetryPolicy({ maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 60_000, retryableStatusCodes: [] })) ===
+		JSON.stringify({ enabled: true, maxRetries: 3, baseDelayMs: 2000, maxAgentDelayMs: 60_000 }),
+);
+check(
+	"toStreamOptions：未配置 provider 重试时返回 undefined",
+	toStreamOptions({ maxRetries: 3, baseDelayMs: 1, maxDelayMs: 1, retryableStatusCodes: [] }) === undefined,
+);
+check(
+	"toStreamOptions：缺省补 60s 的服务端等待上限",
+	JSON.stringify(toStreamOptions({
+		maxRetries: 3,
+		baseDelayMs: 1,
+		maxDelayMs: 1,
+		retryableStatusCodes: [],
+		provider: { maxRetries: 2 },
+	})) === JSON.stringify({ maxRetries: 2, maxRetryDelayMs: 60_000 }),
+);
 
 let fileContent = "";
 try {

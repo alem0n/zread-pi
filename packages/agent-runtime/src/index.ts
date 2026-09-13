@@ -129,13 +129,15 @@ export type { TruncationResult, TruncationOptions, WalkEntry, WalkOptions } from
 
 export {
 	DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
+	DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS,
 	DEFAULT_RETRY_CONFIG,
 	isRetryableAssistantError,
 	retryAssistantCall,
 	retryDelayMs,
 	toRetryPolicy,
+	toStreamOptions,
 } from "./retry.js";
-export type { RetryConfig } from "./retry.js";
+export type { HarnessStreamRetryOptions, ProviderRetryConfig, RetryConfig } from "./retry.js";
 
 // ---------------------------------------------------------------------------
 // 类型
