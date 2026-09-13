@@ -72,6 +72,11 @@ export {
   POLISH_MODES,
   isPolishMode,
   normalizePolishConfig,
+  BLUEPRINT_DETAIL_LEVELS,
+  DEFAULT_BLUEPRINT_DETAIL,
+  isBlueprintDetailLevel,
+  normalizeBlueprintDetail,
+  normalizeBlueprintConfig,
 } from './config/index.js';
 
 // 外部工具（注册表 / 安装器 / 归档解包），配置界面 /config/tools 与 agent-runtime 共用
@@ -162,6 +167,8 @@ export type {
   MergeTopicsResult,
   MergeTopicsOptions,
   ApplyTitlesResult,
+  BlueprintSectionOptions,
+  BlueprintSkeletonOptions,
 } from './output/wiki-content.js';
 
 // Provider Registry

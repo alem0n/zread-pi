@@ -35,14 +35,14 @@ const slugify = (value: string): string =>
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-|-$/g, "") || "page";
 
-/** 分类阶段交给 mock LLM 的分类清单（概览/快速开始/核心架构是强制基础分类） */
+/** 分类阶段交给 mock LLM 的分类清单（概览/快速开始/核心架构是强制基础分类；low 档位 3~5 个） */
 const SECTIONS = [
 	{ title: "概览", description: "项目定位与整体速览" },
 	{ title: "快速开始", description: "安装、运行与最小示例" },
 	{ title: "核心架构", description: "核心模块与实现细节" },
 ];
 
-/** 分主题阶段：每个分类的文章主题（核心架构覆盖扫描到的源文件） */
+/** 分主题阶段：每个分类的文章主题（low 档位每分类 1~3 篇；核心架构覆盖扫描到的源文件） */
 const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
 	概览: [
 		{
@@ -60,7 +60,7 @@ const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
 			associatedFiles: entries.slice(0, 1),
 		},
 	],
-	核心架构: entries.slice(0, 5).map((relative) => ({
+	核心架构: entries.slice(0, 3).map((relative) => ({
 		title: basename(relative, extname(relative)),
 		slug: slugify(basename(relative, extname(relative))),
 		level: "Intermediate",
@@ -227,6 +227,9 @@ await writeFile(
 		"  model: mock-model",
 		"  api_key: sk-mock",
 		`  base_url: http://127.0.0.1:${server.port}/v1`,
+		// 离线试跑用 low 档位：3~5 个分类 · 每分类 1~3 篇，跳过标题精修（请求更少、产物更小）
+		"blueprint:",
+		"  detail: low",
 		"concurrency:",
 		"  max_concurrent: 3",
 		"  max_retries: 1",

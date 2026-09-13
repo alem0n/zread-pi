@@ -231,7 +231,8 @@ process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.chdir(repo);
 
-const { generateWikiContent } = await import("../src/wiki/generate-wiki.js");
+const { generateWikiContent, buildPagePrompt } = await import("../src/wiki/generate-wiki.js");
+const { getDetailSpec } = await import("../src/agents/blueprint-detail.js");
 
 const progress: string[] = [];
 const events: string[] = [];
@@ -346,6 +347,25 @@ check(
 	(eventUsages.get(`page_error:${budgetPage.slug}`)?.input_tokens ?? 0) >= 120,
 	JSON.stringify(eventUsages.get(`page_error:${budgetPage.slug}`) ?? null),
 );
+
+// ---- blueprint.detail = minimal：页面提示词附加「全景导览」段（传递断言）----
+{
+	const minimalPrompt = buildPagePrompt(pages[0], getDetailSpec("minimal"));
+	const highPrompt = buildPagePrompt(pages[0], getDetailSpec("high"));
+	check(
+		"minimal 档位：页面提示词附加「全景导览」段（Mermaid 架构图 + 数据流）",
+		minimalPrompt.includes("全景导览附加要求") &&
+			minimalPrompt.includes("Mermaid 架构图") &&
+			minimalPrompt.includes("数据流"),
+	);
+	check("high 档位：页面提示词不附加全景导览段", !highPrompt.includes("全景导览附加要求"));
+	check(
+		"附加段不破坏既有段落（任务元数据 / 输出路径规范仍在）",
+		minimalPrompt.includes("**Slug**: 1-overview") &&
+			minimalPrompt.includes("输出路径规范") &&
+			minimalPrompt.includes("write_page"),
+	);
+}
 
 process.chdir(join(repo, ".."));
 await rm(repo, { recursive: true, force: true });

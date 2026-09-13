@@ -9,7 +9,7 @@
  * 新增：per-provider 配置与自定义模型（同时配置多个 Provider）。
  */
 
-import type { AppConfig, CustomModelConfig, LlmProviderConfig, PolishMode } from "@zread-pi/types";
+import type { AppConfig, BlueprintDetailLevel, CustomModelConfig, LlmProviderConfig, PolishMode } from "@zread-pi/types";
 import { DEFAULT_CONFIG, isFirstTimeConfig, loadConfig, saveConfig } from "@zread-pi/utils";
 
 export class ConfigStore {
@@ -118,6 +118,18 @@ export class ConfigStore {
   /** 由 /config/polish 维护：开关与模式整体写回 */
   setPolish(enabled: boolean, mode: PolishMode): void {
     this.config.polish = { enabled, mode };
+  }
+
+  // ==================== 蓝图细节档位（/config/detail） ====================
+
+  /** 当前蓝图细节档位（旧配置缺省 high，与 validateConfig 一致） */
+  getBlueprintDetail(): BlueprintDetailLevel {
+    return this.config.blueprint?.detail ?? "high";
+  }
+
+  /** 由 /config/detail 维护：档位整体写回 */
+  setBlueprintDetail(level: BlueprintDetailLevel): void {
+    this.config.blueprint = { detail: level };
   }
 
   // ==================== 外部工具（rg / fd …） ====================

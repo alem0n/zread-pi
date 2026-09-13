@@ -13,8 +13,9 @@
 import pLimit from 'p-limit';
 import { copyFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { ensureDir, fileExists, getWikiDir, joinPath, loadWikiBlueprint, logger } from '@zread-pi/utils';
+import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, logger } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
+import { getDetailSpec, MINIMAL_PANORAMA_REQUIREMENT, type BlueprintDetailSpec } from '../agents/blueprint-detail.js';
 import {
   FileEditTool,
   FileReadTool,
@@ -34,9 +35,12 @@ import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, Articl
 
 /**
  * Build page-specific prompt
+ *
+ * minimal 档位会附加「全景导览」要求（唯一一篇必须用 Mermaid 架构图梳理模块关系与数据流）。
  */
-function buildPagePrompt(page: WikiPage): string {
+export function buildPagePrompt(page: WikiPage, spec: BlueprintDetailSpec): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
+  const panorama = spec.panorama ? `\n\n---\n\n${MINIMAL_PANORAMA_REQUIREMENT}` : '';
 
   return `${PageAgentPrompt}
 
@@ -65,7 +69,7 @@ ${associatedFilesList}
 
 输出文件将写入: \`.zread-pi/wiki/${page.section}/${page.file}\`
 
-请按照三步工作流执行，最后使用 write_page 输出文档（务必传入完整的 file 和 section 参数）。`;
+请按照三步工作流执行，最后使用 write_page 输出文档（务必传入完整的 file 和 section 参数）。${panorama}`;
 }
 
 /**
@@ -258,6 +262,10 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
   await rememberCurrentProject();
 
+  // 蓝图细节档位：minimal 会在页面提示词里附加「全景导览」要求
+  const config = await loadConfig();
+  const spec = getDetailSpec(config.blueprint.detail);
+
   // 并发数由调用方传递（默认 1）
   const maxConcurrent = options?.maxConcurrent ?? 1;
 
@@ -341,7 +349,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             LsTool,
             writePageTool
           ],
-          prompts: buildPagePrompt(page),
+          prompts: buildPagePrompt(page, spec),
           // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
           maxTurns: options?.maxTurns,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload

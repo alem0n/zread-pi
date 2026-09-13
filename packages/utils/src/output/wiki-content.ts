@@ -102,14 +102,35 @@ export function normalizeSectionList(input: unknown): WikiSection[] {
 }
 
 /**
+ * normalizeBlueprintSections 的选项
+ */
+export interface BlueprintSectionOptions {
+  /**
+   * minimal 档位：只保留「概览」一个分类（跳过「快速开始 / 核心架构」强补逻辑）。
+   * minimal 的分类数固定为 1，没有归并空间，因此由代码直接收尾。
+   */
+  minimal?: boolean;
+}
+
+/**
  * 归一化分类清单：去重 + 强制基础分类（概览/快速开始/核心架构）+ 数量上限。
  * 基础分类排在最前，因此截断不会丢基础分类。
+ *
+ * `options.minimal = true` 时只保留「概览」一个分类（文档语言对应的第一个基础分类），
+ * 传入的其余分类一律忽略（minimal 档位的确定性收尾；见 blueprint-detail）。
  */
 export function normalizeBlueprintSections(
   input: unknown,
   language: string,
   limit: number = MAX_BLUEPRINT_SECTIONS,
+  options: BlueprintSectionOptions = {},
 ): WikiSection[] {
+  if (options.minimal) {
+    const overview = baseSectionsFor(language)[0];
+    const provided = normalizeSectionList(input).find((section) => sameTitle(section.title, overview.title));
+    return [provided?.description ? { ...overview, description: provided.description } : { ...overview }];
+  }
+
   const result: WikiSection[] = [];
   const seen = new Set<string>();
 
@@ -126,11 +147,15 @@ export function normalizeBlueprintSections(
 /**
  * 合并分类清单（sync 分类阶段用）：
  * 既有分类原样保留（可能承载着已生成的页面），模型新增的分类追加在末尾。
+ *
+ * `limit` 为合并后的分类数上限（由蓝图细节档位决定，缺省沿用历史常量）。
+ * 既有分类必留：即使既有分类已达上限，也不会被截断（只拒绝继续追加新增分类）。
  */
 export function mergeBlueprintSections(
   existing: unknown,
   incoming: unknown,
   language: string,
+  limit: number = MAX_BLUEPRINT_SECTIONS,
 ): WikiSection[] {
   const result = normalizeBlueprintSections(existing, language, Number.MAX_SAFE_INTEGER);
   const seen = new Set(result.map((section) => sectionKey(section.title)));
@@ -144,7 +169,7 @@ export function mergeBlueprintSections(
       }
       continue;
     }
-    if (result.length >= MAX_BLUEPRINT_SECTIONS) break;
+    if (result.length >= limit) break;
     seen.add(key);
     result.push(section);
   }
@@ -283,17 +308,30 @@ async function withWikiOutput<T>(fn: (output: WikiOutput) => T | Promise<T>): Pr
  * 写入 sections（强制包含基础分类）+ 空 pages，覆盖旧骨架。
  *
  * 之后的每个阶段都只做增量归并，因此任何时刻 wiki.json 都是可加载的。
+ *
+ * `options.minimal` / `options.limit` 由蓝图细节档位决定（minimal：只保留概览）。
  */
+export interface BlueprintSkeletonOptions extends BlueprintSectionOptions {
+  /** 分类数量上限（档位决定；缺省 MAX_BLUEPRINT_SECTIONS） */
+  limit?: number;
+}
+
 export async function initWikiSkeleton(
   sections: WikiSection[],
   config: AppConfig,
   techStackSummary?: TechStackSummary,
+  options: BlueprintSkeletonOptions = {},
 ): Promise<string> {
   const output: WikiOutput = {
     id: generateWikiId(),
     generated_at: new Date().toISOString(),
     language: config.doc_language,
-    sections: normalizeBlueprintSections(sections, config.doc_language),
+    sections: normalizeBlueprintSections(
+      sections,
+      config.doc_language,
+      options.limit ?? MAX_BLUEPRINT_SECTIONS,
+      { minimal: options.minimal },
+    ),
     pages: [],
     ...(techStackSummary ? { techStackSummary } : {}),
   };
@@ -308,13 +346,24 @@ export async function initWikiSkeleton(
 /**
  * 合并分类清单（sync 的分类阶段）：
  * 保持既有分类与页面不动，只把模型新增的分类补进 sections。
+ *
+ * `options.limit` 为合并后的分类数上限（由蓝图细节档位决定）；
+ * `options.minimal` = minimal 档位：既有分类替换为唯一的「概览」（页面不动）。
  */
 export async function mergeWikiSections(
   incoming: WikiSection[],
   config: AppConfig,
+  options: BlueprintSkeletonOptions = {},
 ): Promise<WikiSection[]> {
   return withWikiOutput((output) => {
-    output.sections = mergeBlueprintSections(output.sections, incoming, config.doc_language);
+    output.sections = options.minimal
+      ? normalizeBlueprintSections(incoming, config.doc_language, 1, { minimal: true })
+      : mergeBlueprintSections(
+          output.sections,
+          incoming,
+          config.doc_language,
+          options.limit ?? MAX_BLUEPRINT_SECTIONS,
+        );
     return output.sections;
   });
 }

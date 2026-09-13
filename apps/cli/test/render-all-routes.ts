@@ -66,6 +66,7 @@ const paths = [
   "/config/thinking",
   "/config/max-turns",
   "/config/polish",
+  "/config/detail",
   "/config/tools",
   "/config/tools/rg",
   "/config/tools/fd",

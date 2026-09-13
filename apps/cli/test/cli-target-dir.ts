@@ -70,26 +70,30 @@ const SECTIONS = [
   { title: "概览", description: "项目定位与整体速览" },
   { title: "快速开始", description: "安装与运行示例" },
   { title: "核心架构", description: "核心模块与实现细节" },
+  { title: "模块", description: "工具模块与实现细节" },
 ];
 
-/** 主题阶段：每个分类下的页面草稿（slug 由代码分配到最终 wiki.json） */
+/** 主题阶段：每个分类下的页面草稿（high 档位要求每分类 3~10 篇） */
 const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
   概览: [
-    {
-      title: "入口",
-      slug: "main",
-      level: "Beginner",
-      associatedFiles: ["main.ts"],
-    },
+    { title: "入口", slug: "main", level: "Beginner", associatedFiles: ["main.ts"] },
+    { title: "核心特性", slug: "features", level: "Beginner", associatedFiles: ["main.ts"] },
+    { title: "设计目标", slug: "design-goals", level: "Intermediate", associatedFiles: ["main.ts"] },
   ],
-  快速开始: [],
+  快速开始: [
+    { title: "安装与运行", slug: "install", level: "Beginner", associatedFiles: ["main.ts"] },
+    { title: "最小示例", slug: "minimal-example", level: "Beginner", associatedFiles: ["main.ts"] },
+    { title: "常见问题", slug: "faq", level: "Beginner", associatedFiles: ["main.ts"] },
+  ],
   核心架构: [
-    {
-      title: "工具函数",
-      slug: "utils",
-      level: "Intermediate",
-      associatedFiles: ["src/utils.ts"],
-    },
+    { title: "整体架构", slug: "architecture", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
+    { title: "数据流", slug: "data-flow", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
+    { title: "扩展点", slug: "extensions", level: "Advanced", associatedFiles: ["src/utils.ts"] },
+  ],
+  模块: [
+    { title: "工具函数", slug: "utils", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
+    { title: "工具函数 API", slug: "utils-api", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
+    { title: "工具函数测试", slug: "utils-tests", level: "Beginner", associatedFiles: ["src/utils.ts"] },
   ],
 };
 
@@ -387,16 +391,16 @@ const canonicalTarget = await canonical(targetRepo);
     }
   };
   const generated = await waitFor(
-    async () => ((await readWiki())?.pages.length ?? 0) === 2,
-    40000,
-    "目标目录生成 wiki.json（2 个页面归并完成）",
+    async () => ((await readWiki())?.pages.length ?? 0) === 12,
+    60000,
+    "目标目录生成 wiki.json（12 个页面归并完成）",
   );
   check("wiki.json 落盘到目标目录", generated, wikiJsonPath);
 
   let generatedPages: Array<{ file: string; section: string }> = [];
   if (generated) {
     const catalog = (await readWiki())!;
-    check("wiki.json 含 2 个页面", catalog.pages.length === 2, `实际 ${catalog.pages.length}`);
+    check("wiki.json 含 12 个页面", catalog.pages.length === 12, `实际 ${catalog.pages.length}`);
     check(
       "wiki.json 含三阶段分类骨架",
       (catalog.sections?.length ?? 0) >= 3,
@@ -405,8 +409,8 @@ const canonicalTarget = await canonical(targetRepo);
     generatedPages = catalog.pages;
   }
 
-  const allDone = await waitFor(() => run.text().includes("文章 2/2"), 40000, "页面生成完成");
-  check("生成完成后界面显示「文章 2/2」", allDone);
+  const allDone = await waitFor(() => run.text().includes("文章 12/12"), 60000, "页面生成完成");
+  check("生成完成后界面显示「文章 12/12」", allDone);
 
   // 页面文件由并行 Agent 逐个 write_page 落盘，必须在「文章 2/2」之后再判定
   const pageFiles = generatedPages.map((page) =>
@@ -414,7 +418,7 @@ const canonicalTarget = await canonical(targetRepo);
   );
   const pagesWritten = await waitFor(
     async () => (await Promise.all(pageFiles.map((file) => exists(file)))).every(Boolean),
-    40000,
+    60000,
     "页面文件全部落盘",
   );
   for (const page of generatedPages) {
@@ -433,7 +437,7 @@ const canonicalTarget = await canonical(targetRepo);
 {
   const run = spawnCli(["-d", "target-repo"], workspace);
   const recognized = await waitFor(
-    () => run.text().includes("文档已生成 (2 篇)"),
+    () => run.text().includes("文档已生成 (12 篇)"),
     20000,
     "相对路径解析到目标目录",
   );
@@ -447,7 +451,7 @@ const canonicalTarget = await canonical(targetRepo);
 {
   const run = spawnCli(["wiki", "--dir", targetRepo], workspace);
   const recognized = await waitFor(
-    () => run.text().includes("文档已生成 (2 篇)"),
+    () => run.text().includes("文档已生成 (12 篇)"),
     20000,
     "`wiki --dir` 生效",
   );
@@ -461,7 +465,7 @@ const canonicalTarget = await canonical(targetRepo);
 {
   const run = spawnCli([], targetRepo);
   const rendered = await waitFor(
-    () => run.text().includes("文档已生成 (2 篇)"),
+    () => run.text().includes("文档已生成 (12 篇)"),
     20000,
     "缺省 -d 时使用当前目录",
   );

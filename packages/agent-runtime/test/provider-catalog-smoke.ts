@@ -112,6 +112,31 @@ try {
 		JSON.stringify(negativeTurnsConfig.agent),
 	);
 
+	// blueprint.detail 归一化：旧配置缺省 high（老用户零变化）；非法值回退 high；合法值保留
+	await writeHomeConfig([]);
+	const defaultDetailConfig = await loadConfig();
+	check(
+		"旧 config.yaml（缺 blueprint 段）补默认 blueprint.detail=high",
+		defaultDetailConfig.blueprint.detail === "high",
+		JSON.stringify(defaultDetailConfig.blueprint),
+	);
+
+	await writeHomeConfig(["blueprint:", "  detail: minimal"]);
+	const minimalDetailConfig = await loadConfig();
+	check(
+		"blueprint.detail: minimal 保留（五档之一）",
+		minimalDetailConfig.blueprint.detail === "minimal",
+		JSON.stringify(minimalDetailConfig.blueprint),
+	);
+
+	await writeHomeConfig(["blueprint:", "  detail: bogus"]);
+	const bogusDetailConfig = await loadConfig();
+	check(
+		"blueprint.detail 非法值回退 high",
+		bogusDetailConfig.blueprint.detail === "high",
+		JSON.stringify(bogusDetailConfig.blueprint),
+	);
+
 	const providers = await listZreadProviders();
 	const anthropic = providers.find((provider) => provider.id === "anthropic");
 	check("内置 Provider 数量 >= 30", providers.length >= 30, `count=${providers.length}`);

@@ -67,11 +67,35 @@ const TOPICS: Record<string, Array<Record<string, unknown>>> = {
 			level: "Beginner",
 			associatedFiles: ["README.md"],
 		},
+		{
+			title: "核心特性速览",
+			slug: "feature-tour",
+			level: "Beginner",
+			associatedFiles: ["src/"],
+		},
+		{
+			title: "设计目标与边界",
+			slug: "design-goals",
+			level: "Intermediate",
+			associatedFiles: ["README.md"],
+		},
 	],
 	"Quick Start": [
 		{
 			title: "快速开始指南",
 			slug: "quick-start",
+			level: "Beginner",
+			associatedFiles: ["src/greet.ts"],
+		},
+		{
+			title: "环境与安装",
+			slug: "environment-setup",
+			level: "Beginner",
+			associatedFiles: ["src/greet.ts"],
+		},
+		{
+			title: "最小可运行示例",
+			slug: "minimal-example",
 			level: "Beginner",
 			associatedFiles: ["src/greet.ts"],
 		},
@@ -83,12 +107,36 @@ const TOPICS: Record<string, Array<Record<string, unknown>>> = {
 			level: "Intermediate",
 			associatedFiles: ["src/"],
 		},
+		{
+			title: "模块职责划分",
+			slug: "module-responsibilities",
+			level: "Intermediate",
+			associatedFiles: ["src/"],
+		},
+		{
+			title: "数据流与调用链",
+			slug: "data-flow",
+			level: "Advanced",
+			associatedFiles: ["src/"],
+		},
 	],
 	核心模块: [
 		{
 			title: "问候模块实现",
 			slug: "greet-module",
 			level: "Intermediate",
+			associatedFiles: ["src/greet.ts"],
+		},
+		{
+			title: "问候模块 API",
+			slug: "greet-api",
+			level: "Intermediate",
+			associatedFiles: ["src/greet.ts"],
+		},
+		{
+			title: "问候模块扩展点",
+			slug: "greet-extension",
+			level: "Advanced",
 			associatedFiles: ["src/greet.ts"],
 		},
 	],
@@ -149,6 +197,8 @@ let mode: "ok" | "no-sections" | "section-skip" = "ok";
 /** 记录每次请求的 system 消息（验证上下文文件注入） */
 const seenSystemPrompts: string[] = [];
 const seenSections: string[] = [];
+/** 记录工具结果内容（验证常驻数量反馈） */
+const seenToolResults: string[] = [];
 let requestCount = 0;
 /** 单次请求的 mock 用量（断言「跨 Agent 聚合」时按请求数换算） */
 let totalInputTokens = 0;
@@ -177,6 +227,9 @@ const server = Bun.serve({
 				.filter((name): name is string => typeof name === "string"),
 		);
 		const hasToolResult = messages.some((message) => message.role === "tool");
+		for (const message of messages) {
+			if (message.role === "tool") seenToolResults.push(contentToText(message.content));
+		}
 		const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
 		if (section) seenSections.push(section);
 
@@ -313,9 +366,9 @@ const sections = ((blueprint?.sections as Array<{ title: string }> | undefined) 
 
 console.log("\n▶ 断言（三阶段正向）");
 check("wiki.json 已写出", blueprint !== undefined, wikiJsonPath);
-check("页面数与主题阶段一致", pages.length === 4, `实际 ${pages.length}`);
+check("页面数与主题阶段一致", pages.length === 12, `实际 ${pages.length}`);
 check("sectionsCount 已回传", result.sectionsCount === 4, String(result.sectionsCount));
-check("pagesCount 已回传", result.pagesCount === 4, String(result.pagesCount));
+check("pagesCount 已回传", result.pagesCount === 12, String(result.pagesCount));
 check("failedSections 为空", result.failedSections === undefined, JSON.stringify(result.failedSections));
 
 check(
@@ -390,6 +443,21 @@ check(
 check("durationMs 已回传", typeof result.durationMs === "number" && result.durationMs >= 0, String(result.durationMs));
 
 check(
+	"submit_sections 成功结果带常驻数量反馈（区间内也发）",
+	seenToolResults.some((content) =>
+		content.includes("分类数量反馈：当前 4 / 要求 4~8（当前档位：high）"),
+	),
+	seenToolResults.filter((content) => content.includes("数量反馈")).slice(0, 2).join(" || "),
+);
+check(
+	"submit_section_topics 成功结果带常驻数量反馈（区间内也发）",
+	seenToolResults.some((content) =>
+		content.includes("文章数量反馈：当前 3 / 要求 3~10（当前档位：high）"),
+	),
+	seenToolResults.filter((content) => content.includes("数量反馈")).slice(0, 2).join(" || "),
+);
+
+check(
 	"目标仓库 AGENTS.md 被注入系统提示（<project_context> 块）",
 	seenSystemPrompts.some(
 		(prompt) =>
@@ -439,9 +507,9 @@ check(
 	partial.failedSections?.some((entry) => entry.section === "核心模块" && entry.stage === "topics") === true,
 	JSON.stringify(partial.failedSections),
 );
-check("失败分类不阻断其余分类", partialPages.length === 3, `实际 ${partialPages.length}`);
+check("失败分类不阻断其余分类", partialPages.length === 9, `实际 ${partialPages.length}`);
 check("失败后 wiki.json 仍可加载", partialBlueprint !== undefined);
-check("失败后 pagesCount 反映实际页面数", partial.pagesCount === 3, String(partial.pagesCount));
+check("失败后 pagesCount 反映实际页面数", partial.pagesCount === 9, String(partial.pagesCount));
 
 // ---------------------------------------------------------------------------
 // 6) 失败语义 2：分类阶段不产出 sections —— 必须报错

@@ -1,4 +1,45 @@
-export default `你是一位顶级的软件架构师。这是【蓝图三阶段】的第二步：为**当前这一个分类**规划文章主题（topic）草稿。
+/**
+ * 主题阶段提示词（蓝图三阶段第二步）
+ *
+ * 数量目标由 `blueprint.detail` 档位参数化（见 agents/blueprint-detail.ts）：
+ * - minimal：固定 1 篇（全景导览）；
+ * - low：1~3 篇；medium：3~5 篇；high：3~10 篇；max：5~12 篇并鼓励深挖关联文件。
+ */
+
+import type { BlueprintDetailSpec } from '../agents/blueprint-detail.js';
+
+export interface TopicsPromptOptions {
+  spec: BlueprintDetailSpec;
+}
+
+/** 数量要求段落（按档位生成） */
+function quantitySection(spec: BlueprintDetailSpec): string {
+  if (spec.level === 'minimal') {
+    return (
+      '**数量**：固定 **1 篇**——minimal 档位只写一篇全景导览，把该分类的全部内容收敛到这一篇里（不要新增第二篇）。\n' +
+      '**关联路径**：这一篇的 `associatedFiles` 要覆盖该分类最核心的入口与模块目录（1~6 个路径）。'
+    );
+  }
+  if (spec.level === 'low') {
+    return (
+      '**数量**：当前分类建议规划 **1~3 篇**文章，不要把整个分类压缩成一篇，也不要为了凑数把同一主题硬拆成多篇。\n' +
+      '**关联路径**：每篇文章的 `associatedFiles` 建议 1~4 个目录或核心文件；若功能高度浓缩在具体文件，必须精确到文件（如 `packages/core/src/scheduler.ts`），禁止粗暴地把父目录整体打包混入。'
+    );
+  }
+  const deepDive = spec.exhaustive
+    ? '\n**深挖关联路径（max 档位）**：鼓励探索更深层的关联文件——不只看入口文件，还要覆盖实现文件、类型定义与关键测试，为每篇文章建立完整的源码证据链；'
+    : '';
+  return (
+    `**数量**：当前分类建议规划 **${spec.topics.min}~${spec.topics.max} 篇**文章——这是文章数是否充足的关键，不要把整个分类压缩成一两篇。\n` +
+    '**关联路径**：每篇文章的 `associatedFiles` 建议 1~4 个目录或核心文件；若功能高度浓缩在具体文件，必须精确到文件（如 `packages/core/src/scheduler.ts`），禁止粗暴地把父目录整体打包混入。' +
+    deepDive
+  );
+}
+
+export function renderTopicsPrompt(options: TopicsPromptOptions): string {
+  const { spec } = options;
+
+  return `你是一位顶级的软件架构师。这是【蓝图三阶段】的第二步：为**当前这一个分类**规划文章主题（topic）草稿。
 
 当前分类与它的说明会写在下方「当前分类」一节，请只围绕该分类规划，不要越界到其它分类。
 
@@ -14,8 +55,7 @@ export default `你是一位顶级的软件架构师。这是【蓝图三阶段�
 | **细碎的 Utils / 常量** | ✅ 允许聚合，打包进"共享基础设施"类文章 |
 | **高密度的核心机制 / 关键算法** | ✅ 即使只有 1~2 个文件，也必须独立成篇（如调度器、状态机、协议解析引擎） |
 
-**数量**：当前分类建议规划 **3~10 篇**文章——这是文章数是否充足的关键，不要把整个分类压缩成一两篇。
-**关联路径**：每篇文章的 \`associatedFiles\` 建议 1~4 个目录或核心文件；若功能高度浓缩在具体文件，必须精确到文件（如 \`packages/core/src/scheduler.ts\`），禁止粗暴地把父目录整体打包混入。
+${quantitySection(spec)}
 
 ## 可用工具（三层 Repo Map）
 - \`get_directory_tree\`：全局目录拓扑；
@@ -64,6 +104,7 @@ export default `你是一位顶级的软件架构师。这是【蓝图三阶段�
 
 **最终警告**：\`section\` 字段必须与下方「当前分类」的标题完全一致；没有找到合理关联文件的主题宁可不写，也不要编造路径。
 `;
+}
 
 /**
  * sync 主题阶段的追加规则（由 sync-wiki 拼在主题提示词之后）。
