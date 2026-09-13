@@ -14,7 +14,8 @@
  * - 每个页面的用量由该页自己的事件写进自己的 state 槽位，互不干扰；
  * - 中间事件会反复携带同一份快照（requesting / responding / tool_*），
  *   reduce 重复计算同一份快照结果不变（增量累加会重复计数）；
- * - 与事件到达顺序无关；页面重新生成时该槽位被重置，旧用量自然不再计入。
+ * - 与事件到达顺序无关；重试 / 重新生成时该槽位把上一轮结转进 `carryUsage`，
+ *   而不是清零（展示口径 `collectUsageTotals` = 结转 + 本轮快照）。
  */
 
 import { sumTokenUsage } from '@zread-pi/agent-runtime';
@@ -48,15 +49,25 @@ export function toUsageTotals(usage: TokenUsage): UsageTotals {
 }
 
 /**
- * 目录 + 全部页面（含失败页的最后一次快照）的合计。
+ * 单个槽位（目录 / 某个页面）的展示用量 = 历史轮次结转 + 本轮快照。
+ *
+ * 重试 / 重新生成只重置「本轮快照」：上一轮的消耗在槽位里结转（`carryUsage`），
+ * 因此行内数字与合计都是「成功 + 失败 + 重试」的总量，不会因重试而回退。
+ */
+export function slotUsageTotal(slot: { usage?: TokenUsage; carryUsage?: TokenUsage }): TokenUsage {
+  return sumTokenUsage([slot.carryUsage, slot.usage]);
+}
+
+/**
+ * 目录 + 全部页面（含失败页与历史重试轮次）的合计。
  *
  * 直接遍历 `articles.pages`（而不是 wikiPages）：即使某页在列表重建前已经产生过
  * 用量，只要它的状态槽位还在就会被计入。
  */
 export function collectUsageTotals(catalog: CatalogState, articles: ArticlesState): UsageTotals {
-  const usages: Array<TokenUsage | undefined> = [catalog.usage];
+  const usages: TokenUsage[] = [slotUsageTotal(catalog)];
   for (const page of Object.values(articles.pages)) {
-    usages.push(page.usage);
+    usages.push(slotUsageTotal(page));
   }
   return toUsageTotals(sumTokenUsage(usages));
 }

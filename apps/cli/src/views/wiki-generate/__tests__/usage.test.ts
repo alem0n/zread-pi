@@ -1,14 +1,15 @@
 /**
  * usage.test.ts —— 生成页用量合计（纯函数）
  *
- * 覆盖：输入侧口径（含缓存读写）、跨页面归并、失败页快照、页重置、
+ * 覆盖：输入侧口径（含缓存读写）、跨页面归并、失败页快照、
+ * 重试/重新生成的 carryUsage 结转（成功 + 失败 + 重试不清零）、
  * 缓存占比边界（0 输入 / 全命中）与文案格式。
  *
  * 运行：bun test apps/cli/src/views/wiki-generate/__tests__（已并入 bun run test:tui）
  */
 
 import { describe, expect, test } from 'bun:test';
-import { cacheHitRatio, collectUsageTotals, formatPercent, toUsageTotals } from '../usage';
+import { cacheHitRatio, collectUsageTotals, formatPercent, slotUsageTotal, toUsageTotals } from '../usage';
 import type { ArticlesState, CatalogState, PageStatus, TokenUsage } from '../types';
 
 const catalogState = (usage?: TokenUsage): CatalogState => ({ status: 'completed', usage });
@@ -77,17 +78,50 @@ describe('collectUsageTotals', () => {
     expect(totals.totalInput).toBe(0);
   });
 
-  test('页面重新生成后旧用量不再计入（槽位被重置）', () => {
+  test('页面重新生成：上一轮结转到 carryUsage，合计不回退（成功 + 失败 + 重试）', () => {
+    // 重试前的槽位：本轮快照 usage
     const before = collectUsageTotals(
       catalogState(),
       articlesState({
         a: { status: 'completed', usage: { input_tokens: 500, output_tokens: 100 } },
       }),
     );
-    const after = collectUsageTotals(catalogState(), articlesState({ a: { status: 'waiting' } }));
+    // 重试中：上一轮结转到 carryUsage，本轮快照在累积
+    const during = collectUsageTotals(
+      catalogState(),
+      articlesState({
+        a: {
+          status: 'loading',
+          carryUsage: { input_tokens: 500, output_tokens: 100 },
+          usage: { input_tokens: 80, output_tokens: 20 },
+        },
+      }),
+    );
+    // 重试完成：合计 = 上一轮 + 本轮
+    const after = collectUsageTotals(
+      catalogState(),
+      articlesState({
+        a: {
+          status: 'completed',
+          carryUsage: { input_tokens: 500, output_tokens: 100 },
+          usage: { input_tokens: 600, output_tokens: 120 },
+        },
+      }),
+    );
 
     expect(before.total).toBe(600);
-    expect(after.total).toBe(0);
+    expect(during.total).toBe(700); // 不会因重试回退到 0/80
+    expect(after.total).toBe(1320); // (500+600) + (100+120)
+  });
+
+  test('目录重试：carryUsage 与本轮 usage 一起计入', () => {
+    const totals = collectUsageTotals(
+      { status: 'loading', carryUsage: { input_tokens: 150, output_tokens: 30 } },
+      articlesState({}),
+    );
+
+    expect(totals.input).toBe(150);
+    expect(totals.output).toBe(30);
   });
 
   test('幂等：同一份快照反复归并结果不变（并发中间事件重复上报）', () => {
@@ -99,6 +133,40 @@ describe('collectUsageTotals', () => {
 
     expect(collectUsageTotals(catalog, articles)).toEqual(collectUsageTotals(catalog, articles));
     expect(collectUsageTotals(catalog, articles).total).toBe(66);
+  });
+});
+
+describe('slotUsageTotal', () => {
+  test('等于历史结转 + 本轮快照', () => {
+    expect(
+      slotUsageTotal({
+        carryUsage: { input_tokens: 50, output_tokens: 5 },
+        usage: { input_tokens: 20, output_tokens: 3, cache_read_input_tokens: 7 },
+      }),
+    ).toEqual({
+      input_tokens: 70,
+      output_tokens: 8,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 7,
+    });
+  });
+
+  test('只有结转时返回结转值（重试刚开始、本轮尚无快照）', () => {
+    expect(slotUsageTotal({ carryUsage: { input_tokens: 50, output_tokens: 5 } })).toEqual({
+      input_tokens: 50,
+      output_tokens: 5,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    });
+  });
+
+  test('两者都缺失时全为 0（行内不渲染用量）', () => {
+    expect(slotUsageTotal({})).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    });
   });
 });
 

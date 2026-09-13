@@ -105,7 +105,13 @@ export class WikiGenerateController {
 
   /** 目录失败时重试（r 键） */
   retryCatalog(): void {
-    this.state.catalog = { ...initialCatalogState };
+    // 保留上一轮已消耗的用量（不做清空）：真正「开启新一轮」时由
+    // mapper 的 scanning 事件把 usage 结转到 carryUsage（合计 = carry + 本轮）
+    this.state.catalog = {
+      status: "waiting",
+      usage: this.state.catalog.usage,
+      carryUsage: this.state.catalog.carryUsage,
+    };
     this.flowState = "idle";
     this.maybeStartCatalog();
     this.reconcile();
@@ -117,10 +123,23 @@ export class WikiGenerateController {
     const page = this.pages.find((p) => p.slug === slug);
     if (!page) return;
 
-    // 先将状态改为 waiting，并同步计数
+    // 同一页正在生成时忽略重复触发：两次运行同时写同一槽位会让合计失真
+    // （快照是同轮累计值，交错覆盖无法再还原）
+    if (this.state.articles.pages[slug]?.status === "loading") return;
+
+    // 先将状态改为 waiting，并同步计数；用量原样保留等待 page_start 结转，
+    // 重试不清空槽位（展示口径 = carryUsage + 本轮快照）
     const previous = { ...this.state.articles };
-    const prevStatus = previous.pages[slug]?.status;
-    const pages = { ...previous.pages, [slug]: { status: "waiting" } as const };
+    const prevPage = previous.pages[slug];
+    const prevStatus = prevPage?.status;
+    const pages = {
+      ...previous.pages,
+      [slug]: {
+        status: "waiting",
+        usage: prevPage?.usage,
+        carryUsage: prevPage?.carryUsage,
+      } as const,
+    };
     let { completedCount, failedCount, pendingCount } = previous;
     if (prevStatus === "completed") {
       completedCount--;
@@ -182,8 +201,8 @@ export class WikiGenerateController {
       }
     }
 
-    // 扫描阶段
-    this.state.catalog = catalogEventToState(initialCatalogState, { type: "scanning" });
+    // 扫描阶段（以当前状态为基准：mapper 会把上一轮 usage 结转到 carryUsage）
+    this.state.catalog = catalogEventToState(this.state.catalog, { type: "scanning" });
     this.flowState = "catalog-generating";
     this.options.onChange();
 
@@ -191,7 +210,11 @@ export class WikiGenerateController {
       // Phase 1-2: 扫描 + 解析
       const manifest = await scanFiles();
       if (manifest.files.length === 0) {
-        this.state.catalog = { status: "failed", error: "No files found" };
+        this.state.catalog = {
+          ...this.state.catalog,
+          status: "failed",
+          error: "No files found",
+        };
         this.options.onChange();
         return;
       }
@@ -205,7 +228,9 @@ export class WikiGenerateController {
       // Phase 3: 调用 Agent
       await generateWikiCatalog((event) => this.handleCatalogEvent(event));
     } catch (err) {
+      // 保留已消耗的用量与结转（失败也要计入合计，重试不清空）
       this.state.catalog = {
+        ...this.state.catalog,
         status: "failed",
         error: err instanceof Error ? err.message : String(err),
       };

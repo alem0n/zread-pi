@@ -9,6 +9,7 @@
  */
 
 import type { ArticleEventPayload, TokenUsage } from '@zread-pi/orchestrator';
+import { sumTokenUsage } from '@zread-pi/agent-runtime';
 import type {
   CatalogState,
   ArticlesState,
@@ -16,6 +17,20 @@ import type {
   CatalogEventPayload,
 } from './types';
 import { initialPageStatus } from './state';
+
+/**
+ * 一轮运行开始时把上一轮的累计快照结转到 `carryUsage`（展示口径 = carryUsage + usage）。
+ *
+ * 幂等：调用两次时第二次的 `usage` 已为 undefined，结转结果不变。
+ * 这样重试/重新生成只会重置「本轮快照」，不会丢掉已消耗的历史用量。
+ */
+function carryForward<T extends { usage?: TokenUsage; carryUsage?: TokenUsage }>(state: T): T {
+  return {
+    ...state,
+    carryUsage: sumTokenUsage([state.carryUsage, state.usage]),
+    usage: undefined,
+  };
+}
 
 function tokenUsageEquals(a?: TokenUsage, b?: TokenUsage): boolean {
   if (a === b) return true;
@@ -35,6 +50,7 @@ function catalogStateEquals(a: CatalogState, b: CatalogState): boolean {
     a.phase === b.phase &&
     a.currentTool === b.currentTool &&
     tokenUsageEquals(a.usage, b.usage) &&
+    tokenUsageEquals(a.carryUsage, b.carryUsage) &&
     a.durationMs === b.durationMs &&
     a.error === b.error &&
     a.retryCount === b.retryCount &&
@@ -56,6 +72,7 @@ function pageStatusEquals(a: PageStatus, b: PageStatus): boolean {
     a.phase === b.phase &&
     a.currentTool === b.currentTool &&
     tokenUsageEquals(a.usage, b.usage) &&
+    tokenUsageEquals(a.carryUsage, b.carryUsage) &&
     a.durationMs === b.durationMs &&
     a.error === b.error &&
     a.outputPath === b.outputPath &&
@@ -84,19 +101,14 @@ export function catalogEventToState(
 
   switch (event.type) {
     case 'scanning':
-      nextState = {
-        ...state,
-        status: 'loading',
-        phase: 'scanning',
-      };
-      break;
-
     case 'parsing':
-      nextState = {
+      // 每轮目录生成的起点：把上一轮的累计快照结转到 carryUsage（重试不清零）
+      nextState = carryForward({
         ...state,
         status: 'loading',
         phase: 'scanning',
-      };
+        error: undefined,
+      });
       break;
 
     case 'requesting':
@@ -140,6 +152,7 @@ export function catalogEventToState(
       nextState = {
         status: 'completed',
         usage: event.usage,
+        carryUsage: state.carryUsage,
         durationMs: event.durationMs ?? 0,
       };
       break;
@@ -150,6 +163,7 @@ export function catalogEventToState(
         // 失败事件可能不带用量（例如扫描/解析阶段抛错）：保留最后一次已知快照，
         // 否则目录已消耗的 token 会被合计清零。
         usage: event.usage ?? state.usage,
+        carryUsage: state.carryUsage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
       };
@@ -164,7 +178,8 @@ export function catalogEventToState(
         maxRetries: event.maxRetries,
         delayMs: event.delayMs,
         error: event.error,
-        usage: event.usage,
+        // 重试事件同样可能不带用量：保留本轮快照（carryUsage 本来就在 state 里）
+        usage: event.usage ?? state.usage,
       };
       break;
 
@@ -198,11 +213,14 @@ export function articleEventToState(
 
   switch (event.type) {
     case 'page_start':
-      newPageStatus = {
+      // 每轮页面生成的起点：把上一轮（成功/失败/重试）的累计快照结转到 carryUsage
+      newPageStatus = carryForward({
         ...initialPageStatus,
         status: 'loading',
         phase: 'requesting',
-      };
+        carryUsage: currentStatus.carryUsage,
+        usage: currentStatus.usage,
+      });
       break;
 
     case 'requesting':
@@ -251,7 +269,7 @@ export function articleEventToState(
         maxRetries: event.maxRetries,
         delayMs: event.delayMs,
         error: event.error,
-        usage: event.usage,
+        usage: event.usage ?? currentStatus.usage,
       };
       break;
 
@@ -259,6 +277,7 @@ export function articleEventToState(
       newPageStatus = {
         status: 'completed',
         usage: event.usage, // 直接使用，不累加
+        carryUsage: currentStatus.carryUsage,
         durationMs: event.durationMs ?? 0,
         outputPath: event.outputPath,
       };
@@ -269,6 +288,7 @@ export function articleEventToState(
         status: 'failed',
         // 同目录错误：失败事件不带用量时沿用该页最后一次快照（失败页也要计入合计）
         usage: event.usage ?? currentStatus.usage,
+        carryUsage: currentStatus.carryUsage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
       };

@@ -310,6 +310,21 @@ check(
   totalsText.trimEnd().split("\n").at(-1) ?? "(空)",
 );
 
+// 重新生成一页（r）：合计必须继续累加（成功 + 失败 + 重试），
+// 不能把该页已消耗的 240 清零（底部合计 720 -> 960，输出 180 -> 240）
+terminal.send("\x1b[B"); // 先移动选中项（onHighlight 才会记录 slug）
+await sleep(20);
+terminal.send("r");
+const regenerated = await waitFor(
+  () => screenText().includes("合计 输入 960"),
+  30000,
+  "重新生成后合计继续累加",
+);
+check("重新生成一页后合计继续累加（720 + 240 = 960）", regenerated);
+const retryText = screenText();
+checkContains("重新生成后输出 token 累加", retryText, "输出 240");
+checkContains("重新生成后缓存占比保持", retryText, "缓存占比 50.0%");
+
 const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
 const wikiJsonExists = await stat(wikiJsonPath).then(
   () => true,

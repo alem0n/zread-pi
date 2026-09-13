@@ -18,7 +18,7 @@ import { Screen } from "../../tui/screen";
 import { theme } from "../../theme";
 import { formatBytes, formatDuration } from "../../utils/display";
 import { WikiGenerateController } from "./controller";
-import { cacheHitRatio, collectUsageTotals, formatPercent } from "./usage";
+import { cacheHitRatio, collectUsageTotals, formatPercent, slotUsageTotal } from "./usage";
 import type { WikiPage } from "./types";
 
 type ArticleItem = { value: string; page: WikiPage };
@@ -141,8 +141,9 @@ export default class WikiGeneratePage extends Screen {
 
   private renderCatalogSection(width: number): string[] {
     const state = this.controller.state.catalog;
-    const { status, phase, currentTool, usage, durationMs, error, retryCount, maxRetries, delayMs } =
-      state;
+    const { status, phase, currentTool, durationMs, error, retryCount, maxRetries, delayMs } = state;
+    // 展示口径 = 历史结转 + 本轮快照（重试不清零）
+    const usage = slotUsageTotal(state);
 
     // 构建状态文字
     let statusText: string;
@@ -244,6 +245,8 @@ export default class WikiGeneratePage extends Screen {
     const status = pageState?.status || "waiting";
     const phase = pageState?.phase;
     const currentTool = pageState?.currentTool;
+    // 展示口径 = 历史结转 + 本轮快照：重新生成时已消耗的 token 留在槽位里（不清零）
+    const usage = pageState ? slotUsageTotal(pageState) : undefined;
 
     // 重试状态：实时倒计时
     const isRetrying = status === "loading" && phase === "retry";
@@ -295,22 +298,22 @@ export default class WikiGeneratePage extends Screen {
         max: maxRetries,
         seconds,
       })}]`;
-      if (pageState?.usage) {
-        if (pageState.usage.input_tokens > 0)
-          countdownText += ` ↑${formatBytes(pageState.usage.input_tokens)}`;
-        if (pageState.usage.output_tokens > 0)
-          countdownText += ` ↓${formatBytes(pageState.usage.output_tokens)}`;
+      if (usage) {
+        if (usage.input_tokens > 0)
+          countdownText += ` ↑${formatBytes(usage.input_tokens)}`;
+        if (usage.output_tokens > 0)
+          countdownText += ` ↓${formatBytes(usage.output_tokens)}`;
       }
       return statusRow(width, left, style(countdownText, { color: rightColor }));
     }
 
     // 普通状态
     let rightText = `[${statusText}]`;
-    if (status === "loading" && pageState?.usage) {
-      if (pageState.usage.input_tokens > 0)
-        rightText += ` ↑${formatBytes(pageState.usage.input_tokens)}`;
-      if (pageState.usage.output_tokens > 0)
-        rightText += ` ↓${formatBytes(pageState.usage.output_tokens)}`;
+    if (status === "loading" && usage) {
+      if (usage.input_tokens > 0)
+        rightText += ` ↑${formatBytes(usage.input_tokens)}`;
+      if (usage.output_tokens > 0)
+        rightText += ` ↓${formatBytes(usage.output_tokens)}`;
     }
 
     return statusRow(width, left, style(rightText, { color: rightColor }));
