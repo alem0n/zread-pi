@@ -38,6 +38,7 @@
 
 - **三层 Repo Map** —— 目录拓扑 → 高频签名 → 按需深挖。超大规模仓库也不会撑爆上下文预算。
 - **仓库自述注入** —— 目标仓库若有 `AGENTS.md` / `CLAUDE.md`（含大小写变体与全局 `~/.zread-pi`），会把里面的架构说明与约定注入页面 Agent 的系统提示，让生成的 Wiki 与仓库自述保持一致。
+- **文风纪律（humanizer）** —— 按文档语言注入两套精炼的「反 AI 腔」写作纪律（基于 Wikipedia "Signs of AI Writing"）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，代码块 / `Sources:` 溯源行 / Mermaid 引号标签 / frontmatter 全程受保护，润色失败不会让页面失败。
 - **符号级增量缓存** —— 基于 AST hash；未变更的符号跨运行直接跳过，Wiki 同步只重新生成源码确实变过的页面。
 - **并行页面 Agent** —— `p-limit` 调度扇出，并发可配置；每个 Agent 只拥有一个 Wiki 页面，只读它需要的真实代码。
 - **图片读取管线** —— `Read` 读图片时自动缩放到 2000×2000 / 4.5MB 以内（省 token、避免被 provider 拒收），BMP 等非内联格式自动转 PNG，并给出坐标换算提示。
@@ -93,7 +94,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | ------------------------ | -------------------------------------------------------------------------- |
 | `zread-pi`               | 默认命令 —— 打开 Wiki TUI；检测已有文档时提供 生成 / 同步 / 浏览 选项      |
 | `zread-pi wiki`          | 显式 Wiki 生成入口（与默认命令同一 TUI）                                   |
-| `zread-pi config`        | 交互式配置编辑器 —— Provider、API Key、模型、思考深度、最大轮次（折算 token 预算）、外部工具  |
+| `zread-pi config`        | 交互式配置编辑器 —— Provider、API Key、模型、思考深度、最大轮次（折算 token 预算）、文风润色、外部工具  |
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）                    |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
@@ -217,7 +218,8 @@ zread-pi 不会把代码一股脑塞给 LLM，而是模仿资深架构师读代�
 
 - `~/.zread-pi/config.yaml` —— 非敏感配置：UI / 文档语言、`llm.provider/model`、每个 Provider 的
   `base_url` 与自定义模型、思考深度（`llm.thinking_level`）、token 预算（`agent.token_budget`，0 = 按
-  `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、外部工具开关（`tools.<id>.enabled`）。
+  `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、文风润色（`polish.enabled`，
+  `polish.mode = prompt-only | full`）、外部工具开关（`tools.<id>.enabled`）。
   重试次数（`concurrency.max_retries`，0–5，0 = 不重试，配置界面 `/config/retry`）同时下发到 Agent 层与
   Provider 层：前者指数退避（2s 起、60s 封顶），后者在单次请求内读取服务端 `Retry-After`。
 - `~/.zread-pi/auth.json` —— pi-ai 格式凭据（API Key），可同时保存多个 Provider；**秘密不进 config.yaml**。
