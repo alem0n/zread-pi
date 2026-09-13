@@ -22,7 +22,7 @@
     "test:context": "bun run packages/agent-runtime/test/context-compaction.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
     "test:provider": "bun run packages/agent-runtime/test/provider-http-smoke.ts",
-    "test:analyzer": "bun run packages/repo-analyzer/test/smoke-analyzer.ts",
+    "test:analyzer": "bun run packages/repo-analyzer/test/smoke-analyzer.ts && bun test packages/repo-analyzer/src/repo-map",
     "test:pages": "bun run packages/orchestrator/test/e2e-page-generation.ts && bun run packages/orchestrator/test/page-output-fallback.ts",
     "cli": "bun run apps/cli/src/index.ts",
     "vendor:src": "bun run tools/patch-vendor.ts",

@@ -11,6 +11,7 @@ import { countReferences } from './reference-counter.js';
 import { REPO_MAP_CONFIG } from './constants.js';
 import { calculateAllPriorities, selectByTokenBudget } from './prioritizer.js';
 import { buildDirectoryTree, formatRepoMap, buildRepoMapOutput, trimSignature } from './formatter.js';
+import { estimateTextTokens } from './token-counter.js';
 
 /**
  * Build Repo Map from SymbolManifest
@@ -243,9 +244,8 @@ export function buildModuleDetails(
   // Format with full details
   const content = formatRepoMap(tree, moduleSymbols, refMap);
 
-  // Estimate tokens
-  const lines = content.split('\n').length;
-  const tokenCount = lines * 10;
+  // Estimate tokens（统一用 pi 的上下文估算器，见 MIGRATION.md §13）
+  const tokenCount = estimateTextTokens(content);
 
   return {
     content,

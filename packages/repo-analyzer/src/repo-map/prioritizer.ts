@@ -73,7 +73,7 @@ export function selectByTokenBudget(
     const symbol = symbols.find(s => s.file === p.file);
     if (!symbol) continue;
 
-    const tokens = estimateTokens(symbol);
+    const tokens = estimateTokens(symbol, p.referenceCount);
     if (usedTokens + tokens <= contentBudget) {
       selected.push(symbol);
       usedTokens += tokens;
@@ -85,7 +85,7 @@ export function selectByTokenBudget(
     const symbol = symbols.find(s => s.file === p.file);
     if (!symbol) continue;
 
-    const tokens = estimateTokens(symbol);
+    const tokens = estimateTokens(symbol, p.referenceCount);
     if (usedTokens + tokens <= contentBudget) {
       selected.push(symbol);
       usedTokens += tokens;

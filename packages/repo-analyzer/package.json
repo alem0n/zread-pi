@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
     "@zread-pi/types": "workspace:*",
     "@zread-pi/utils": "workspace:*",
     "ignore": "^7.0.8",
