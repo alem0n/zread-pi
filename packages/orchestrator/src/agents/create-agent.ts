@@ -10,9 +10,10 @@
  */
 
 import { createAgent as CreateAgentSdk, hasZreadProvider, DEFAULT_MAX_AGENT_RETRY_DELAY_MS, DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
-import { loadConfig, logger } from '@zread-pi/utils';
+import { getProjectHome, loadConfig, logger } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
+import { loadProjectContextFiles, withProjectContext } from './context-files.js';
 
 /**
  * 创建 Blueprint Agent 的选项
@@ -191,6 +192,12 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
 
   // 创建 Agent
   logger.info(`System prompt doc_language: ${docLanguage} => "${SYSTEM_PROMPTS[docLanguage]}"`);
+  // 目标仓库自述（AGENTS.md / CLAUDE.md …）注入系统提示：仓库若有架构说明/约定术语，
+  // 让生成的 wiki 与仓库自述一致，减少纯靠读代码的猜测（见 context-files.ts）。
+  const contextFiles = loadProjectContextFiles({ cwd: process.cwd(), agentDir: getProjectHome() });
+  if (contextFiles.length > 0) {
+    logger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
+  }
   const agent = CreateAgentSdk({
     model,
     apiKey,
@@ -198,7 +205,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     providerId,
     cwd: process.cwd(),
     tools: options.tools,
-    systemPrompt: SYSTEM_PROMPTS[docLanguage],
+    systemPrompt: withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
     maxTurns,
     budget: {
       // 显式 token 预算（不传则由 maxTurns 折算，见 resolveBudgetOptions）

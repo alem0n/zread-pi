@@ -15,6 +15,17 @@ export type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, Articl
 export { syncWiki } from './wiki/sync-wiki.js'
 export type { SyncResult } from './wiki/sync-wiki.js'
 
+// 目标仓库上下文文件（AGENTS.md / CLAUDE.md …）注入
+// 页面 / 蓝图 Agent 的系统提示会带上目标仓库自述（见 agents/context-files.ts）
+export {
+  CONTEXT_FILE_MAX_BYTES,
+  loadContextFileFromDir,
+  loadProjectContextFiles,
+  formatContextFiles,
+  withProjectContext,
+} from './agents/context-files.js'
+export type { ProjectContextFile, LoadProjectContextFilesOptions } from './agents/context-files.js'
+
 // Types
 export * from './types.js'
 
