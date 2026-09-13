@@ -317,6 +317,14 @@ export interface TranslationKeys {
     exit: string;
     /** 底部合计行：输入 / 输出 token 与缓存占比 */
     usageTotals: string;
+    /** 三阶段蓝图：阶段切换与分类级进度 */
+    stageClassify: string;
+    stageTopics: string;
+    stageTitles: string;
+    stageTopicsIdle: string;
+    stageTitlesIdle: string;
+    stageSection: string;
+    failedSections: string;
   };
   browse: {
     title: string;

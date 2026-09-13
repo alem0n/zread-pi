@@ -82,6 +82,62 @@ describe('catalogEventToState', () => {
     const failed = catalogEventToState(restarted, { type: 'error', error: 'boom' });
     expect(slotUsageTotal(failed)).toMatchObject(usage);
   });
+
+  test('三阶段：stage / section / 分类级进度会写进目录状态', () => {
+    let state = catalogEventToState(initialCatalogState, {
+      type: 'requesting',
+      stage: 'classify',
+    });
+    expect(state.stage).toBe('classify');
+    expect(state.sectionsProgress).toBeUndefined();
+
+    state = catalogEventToState(state, {
+      type: 'requesting',
+      stage: 'topics',
+      section: '核心架构',
+      progress: { current: 1, total: 4 },
+    });
+    expect(state.stage).toBe('topics');
+    expect(state.section).toBe('核心架构');
+    expect(state.sectionsProgress).toEqual({ current: 1, total: 4 });
+
+    state = catalogEventToState(state, {
+      type: 'tool_result',
+      stage: 'titles',
+      section: '核心架构',
+      progress: { current: 3, total: 4 },
+    });
+    expect(state.stage).toBe('titles');
+    expect(state.sectionsProgress).toEqual({ current: 3, total: 4 });
+  });
+
+  test('重新开始（scanning）会清空上一轮的阶段展示', () => {
+    const loading = catalogEventToState(initialCatalogState, {
+      type: 'requesting',
+      stage: 'topics',
+      section: '核心架构',
+      progress: { current: 1, total: 4 },
+    });
+    const restarted = catalogEventToState(loading, { type: 'scanning' });
+
+    expect(restarted.stage).toBeUndefined();
+    expect(restarted.section).toBeUndefined();
+    expect(restarted.sectionsProgress).toBeUndefined();
+    expect(restarted.failedSections).toBeUndefined();
+  });
+
+  test('complete 携带失败分类（单分类失败不阻断整体）', () => {
+    const failed = [{ section: '核心模块', stage: 'topics' as const, error: '模型未调用 submit_section_topics' }];
+    const done = catalogEventToState(initialCatalogState, {
+      type: 'complete',
+      usage,
+      durationMs: 10,
+      failedSections: failed,
+    });
+
+    expect(done.status).toBe('completed');
+    expect(done.failedSections).toEqual(failed);
+  });
 });
 
 describe('articleEventToState', () => {

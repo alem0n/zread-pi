@@ -310,5 +310,13 @@ export const enUS: TranslationKeys = {
     retry: 'Regenerate',
     exit: 'Exit',
     usageTotals: 'Total input {input} · output {output} · cache hit {ratio}',
+    // Three-stage blueprint: stage switch + per-section progress
+    stageClassify: 'Classifying',
+    stageTopics: 'Topics {current}/{total}',
+    stageTitles: 'Titles {current}/{total}',
+    stageTopicsIdle: 'Planning topics',
+    stageTitlesIdle: 'Refining titles',
+    stageSection: ' · {section}',
+    failedSections: '{n} section(s) failed',
   },
 };

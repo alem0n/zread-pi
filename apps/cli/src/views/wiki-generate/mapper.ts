@@ -49,6 +49,11 @@ function catalogStateEquals(a: CatalogState, b: CatalogState): boolean {
     a.status === b.status &&
     a.phase === b.phase &&
     a.currentTool === b.currentTool &&
+    a.stage === b.stage &&
+    a.section === b.section &&
+    a.sectionsProgress?.current === b.sectionsProgress?.current &&
+    a.sectionsProgress?.total === b.sectionsProgress?.total &&
+    (a.failedSections ?? null) === (b.failedSections ?? null) &&
     tokenUsageEquals(a.usage, b.usage) &&
     tokenUsageEquals(a.carryUsage, b.carryUsage) &&
     a.durationMs === b.durationMs &&
@@ -57,6 +62,32 @@ function catalogStateEquals(a: CatalogState, b: CatalogState): boolean {
     a.maxRetries === b.maxRetries &&
     a.delayMs === b.delayMs
   );
+}
+
+/**
+ * 三阶段附加字段：stage / section / 分类级进度 / 失败分类。
+ * 无变化时返回原状态（保持 mapper 的引用相等语义）。
+ */
+function applyStageFields(state: CatalogState, event: CatalogEventPayload): CatalogState {
+  const needsStage = event.stage !== undefined && state.stage !== event.stage;
+  const needsSection = event.section !== undefined && state.section !== event.section;
+  const needsProgress =
+    event.progress !== undefined &&
+    event.stage !== undefined &&
+    (state.sectionsProgress?.current !== event.progress.current ||
+      state.sectionsProgress?.total !== event.progress.total);
+  const needsFailed =
+    event.failedSections !== undefined && state.failedSections !== event.failedSections;
+
+  if (!needsStage && !needsSection && !needsProgress && !needsFailed) return state;
+
+  return {
+    ...state,
+    ...(needsStage ? { stage: event.stage } : {}),
+    ...(needsSection ? { section: event.section } : {}),
+    ...(needsProgress ? { sectionsProgress: { ...event.progress! } } : {}),
+    ...(needsFailed ? { failedSections: event.failedSections } : {}),
+  };
 }
 
 function reuseCatalogStateIfUnchanged(
@@ -108,6 +139,11 @@ export function catalogEventToState(
         status: 'loading',
         phase: 'scanning',
         error: undefined,
+        // 新一轮从分类开始：清空上一轮残留的阶段展示
+        stage: undefined,
+        section: undefined,
+        sectionsProgress: undefined,
+        failedSections: undefined,
       });
       break;
 
@@ -187,7 +223,7 @@ export function catalogEventToState(
       return state;
   }
 
-  return reuseCatalogStateIfUnchanged(state, nextState);
+  return reuseCatalogStateIfUnchanged(state, applyStageFields(nextState, event));
 }
 
 // ==================== 文章状态转换 ====================
