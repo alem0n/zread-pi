@@ -96,6 +96,9 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 约束：**不得重命名工具**（提示词与测试依赖名字）；新增/改行为必须补 `bun run test:tools` 断言；
 移植上游实现时**逐条保留平台适配分支**（Windows 路径分隔符、macOS 文件名变体、gitignore 语义）。
 移植自 `vendor/pi` 或上游 `pi/packages/**` 的文件必须在文件头注明来源（走「复制 + 改写」，不改 vendor）。
+**优先直接用 pi 的实现**：能通过 `@earendil-works/pi-agent-core`（根入口或 `./harness/*` 子路径）复用的一律直接 import，
+不得再维护本地副本；只有确需适配签名/宿主能力时才保留**薄包装**（如 `tools/file-mutation-queue.ts` 只负责提供
+`NodeExecutionEnv` 与 `Context`，排队逻辑仍在 pi 里）。见 MIGRATION.md §13。
 
 ### 1.4 外部工具安装与配置界面（第七步：rg / fd）
 
@@ -151,7 +154,7 @@ bun run cli history        # 查看全局记忆：清理已失效项目并列出
 | `test:context`     | 上下文与首尾机制：harness 内建压缩与 `system/compact_boundary`、溢出→`error_context_full`、**token 预算以 usage 事件/ledger 为权威**（小用量 10 轮不触发、大用量 2 轮即触发）、两段式提示（`before_run` 注入）、`before_run_end` 终止与强制交卷、预算耗尽→`error_budget_exhausted`、`maxTurns` 折算 token 预算 | 45/45                                   |
 | `test:agent:http`  | 真实 HTTP/SSE：baseURL + apiKey 注入、增量 tool_call 解析                                                                                                                                                                                                                                                                                                                                                                                                                            | 7/7                                     |
 | `test:provider`    | `createProvider().createMessage()`（browse-chat 路径）                                                                                                                                                                                                                                                                                                                                                                                                                         | 5/5                                     |
-| `test:analyzer`    | RepoAnalyzer 扫描 + Tree-sitter 解析                                                                                                                                                                                                                                                                                                                                                                                                                                           | 5/5                                     |
+| `test:analyzer`    | RepoAnalyzer 扫描 + Tree-sitter 解析（5/5）+ Repo Map 单测（`bun test packages/repo-analyzer/src/repo-map`：构建/优先级/预算/formatter/模块路径，17/17） | 5/5 + 17/17                             |
 | `test:blueprint`   | Orchestrator 端到端：`generateWikiCatalog()` 落盘 `wiki.json`；模型不产出蓝图时必须报错（不再假装目录完成）                                                                                                                                                                                                                                                                                                                                                                                             | 7/7                                     |
 | `test:pages`       | 并行页面生成：`generateWikiContent()` + `write_page` + Mermaid 校验；页面未落盘（未调用 `write_page` / 写入路径不符 / Mermaid 拦截）必须记失败并发出 `page_error`；预算耗尽后仍无产物同样计页失败（工具熔断 → 强制交卷 → 仍无 `write_page`） | 15/15 + 7/7                             |
 | `test:browse`      | 「浏览文档」服务器 + pi-tui 浏览页：静态资源/API 同端口、SPA fallback、未知 API 404、`close()` 后可连性；页面显示真实地址、ESC 停止；源码无产物时进程内 Vite 兜底；无效资源目录报错                                                                                                                                                                                                                                                                                                                                                      | 28/28（有 `apps/browse/dist` 时兜底 4 项自动跳过） |
@@ -167,7 +170,7 @@ bun run cli history        # 查看全局记忆：清理已失效项目并列出
 
 | 改动                                                                                                  | 必做                                                                 | 说明                                                                                                                |
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| 业务层（orchestrator / repo-analyzer / utils / types / browse）                                          | `bun run typecheck` + `bun run test`                               | 若触及 wiki 产物结构，额外跑 `bun run mock:wiki` 并核对 `wiki.json` 与页面文件                                                       |
+| 业务层（orchestrator / repo-analyzer / utils / types / browse）                                          | `bun run typecheck` + `bun run test`                               | 若触及 wiki 产物结构，额外跑 `bun run mock:wiki` 并核对 `wiki.json` 与页面文件；repo-analyzer 的行为改动会被 `test:analyzer` 里的 Repo Map 单测覆盖（`bun test …/repo-map`） |
 | 配置结构 / Provider 目录（types 的 `LLMConfig`、agent-runtime 的 `pi/*`）                                      | `bun run typecheck` + `bun run test:catalog` + `bun run test`      | 旧 `config.yaml`（仅扁平字段）必须仍可启动；`auth.json` 损坏需自愈                                                                    |
 | CLI TUI（`apps/cli/src/**`）                                                                          | `bun run typecheck` + `bun run test:tui`                           | 布局/快捷键/文案改动必须同步 `smoke-tui.ts` 的断言；列表分页行为（窗口/位置指示/PageUp·PageDown·Home·End）也归该套断言覆盖                               |
 | 适配层 `packages/agent-runtime/**`                                                                     | `bun run test`（全部套件）+ 新增/更新针对性断言                                   | 契约面改动必须同步 `MIGRATION.md` §3/§4；首尾机制（预算/提示/终止）改动必须补 `test:context` 断言 |
@@ -306,6 +309,10 @@ Refs: MIGRATION.md §4
 - 全新 clone：`bun install && bun run vendor:build`（顺序 telemetry → chord → ai → agent → tui）。
 - 要改 pi 源码：`bun run vendor:src`（免构建，Bun 直接跑 TS）→ 改 `src/` → `bun run vendor:dist` → `bun run vendor:build`。
 - **不要手改 `dist/`**：会被下次 `vendor:build` 覆盖。
+- `vendor/pi/packages/agent/package.json` 的 `exports` 除上游原有的入口外，额外露出 3 个**内核实现子路径**（仅 manifest 改动，源码零改动）：
+  `./harness/tools/edit-diff`、`./harness/tools/image`、`./harness/tools/file-mutation-queue`。
+  上游把这三个模块当内部实现（`harness/tools/index.ts` 与根入口都不 re-export，`pi-coding-agent` 里是自己再拷一份）；
+  本仓库不引入 `pi-coding-agent`，因此用子路径导出直接消费同一份构建产物（见 MIGRATION.md §13）。
 - `ai` 包用 `tsconfig.app.json` 构建，现包含：`src/index.ts`、3 个 api lazy 入口、`src/providers/all.ts`（40 个内置 Provider + 模型目录）、`src/bun-oauth.ts`（静态注册 OAuth 流程）、`src/auth/oauth/*.ts`。
   对应的 `src/providers/data/*.json`（含 `.manifest.json`，0.6MB）已从**同版本 0.85.1** 的 npm 发布包补齐并入库（上游是构建期生成，快照里原本没有）。
   OAuth 流程在 pi 里是「变量 specifier 动态 import」，打包器无法静态解析，所以 `provider-catalog.ts` 在构建 catalog 前调用 `registerBunOAuthFlows()`——**打包后的 CLI 也必须保留这一步**，否则 OAuth 登录会在运行时报找不到模块。

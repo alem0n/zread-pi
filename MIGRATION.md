@@ -623,3 +623,67 @@ apps/cli ──► orchestrator ──► agent-runtime ──► vendor/pi（Ag
    `JsonlSessionRepo` 即可，driver 的分段驱动天然兼容（`create` 会返回 open operations）。
 5. **`watchSession` 未用**：harness 的 `watchSession` 在 vendor 版本里仍是 `SliceNotImplemented`
    桩，本层只用 `watch` 之外的显式事件订阅。
+---
+
+## 13. 去掉手工副本/手工实现，改用 pi 原生功能（第十一步）
+
+### 13.1 目标
+
+`packages/agent-runtime` 里有几处「从 pi 拷过来的副本」与「自己写的等价实现」：
+一旦上游修 bug（编辑模糊匹配、图片判型、写队列竞态、重试分类）它们不会跟上游一起修。
+本轮把这几处换成 **pi 的原生实现**，本地只保留必要的薄适配。
+
+### 13.2 逐项落地
+
+| 本地（迁移前） | 现在用的 pi 实现 | 处理方式 |
+|---|---|---|
+| `agent-runtime/src/tools/edit-diff.ts`（257 行副本，逐行等于上游） | `@earendil-works/pi-agent-core/harness/tools/edit-diff` | **删除本地文件**，`tools/edit.ts` 直接 import pi 的实现（BOM/CRLF 归一化、fuzzy 兜底、多段编辑、diff/patch 全部由 pi 提供） |
+| `agent-runtime/src/tools/image.ts`（副本） | `@earendil-works/pi-agent-core/harness/tools/image` | **删除本地文件**，`tools/read.ts` + `tools/index.ts` 直接 re-export pi 的 `detectSupportedImageMimeType` / `encodeBase64` |
+| `agent-runtime/src/tools/file-mutation-queue.ts`（自写队列） | `@earendil-works/pi-agent-core/harness/tools/file-mutation-queue` + `.../harness/env/nodejs` 的 `NodeExecutionEnv` | 保留**薄适配**：本文件只提供「进程级共享的 `NodeExecutionEnv`」与「把 `abortSignal` 包进 `Context`」，排队键（canonical path）与队列状态全在 pi 里 |
+| `agent-runtime/src/retry.ts` 的 `isRetryableMessage` / `computeBackoff` | pi-ai 的 `isRetryableAssistantError` / `retryDelayMs` / `retryAssistantCall` | **删除自写判定与退避**；`retry.ts` 只剩业务契约（`RetryConfig`）与桥接（`toRetryPolicy`，从 `agent.ts` 移入） |
+| Repo Map 的上下文 token 估算：`repo-analyzer/src/repo-map/token-counter.ts`（「行数 × 10」）、`formatter.ts` 的 `lines * 10`、`index.ts` 的 `lines * 10` | `@earendil-works/pi-agent-core` 的 `estimateTokens`（chars/4 启发式，与 harness 判定上下文压力同一算法） | 三处全部改为 `estimateTextTokens()`；`estimateTokens(symbol, referenceCount)` 估算「真正会输出到 Repo Map 的文本」（树缩进 + 文件行 + Ref 标签 + 符号行），内容行由 `formatter.formatSymbolContentLines()` 提供（渲染与估算共用一份构造，不会漂移） |
+
+### 13.3 为什么给 vendor 加了 3 个子路径导出
+
+上游把 `edit-diff` / `image` / `file-mutation-queue` 当**内部实现**：`harness/tools/index.ts` 与包根入口都不 re-export，
+`pi-coding-agent` 里是自己又拷一份。本仓库不引入 `pi-coding-agent`（见 §1 判定），所以选择在
+`vendor/pi/packages/agent/package.json` 的 `exports` 里补 3 个指向 `dist/` 的子路径：
+
+```json
+"./harness/tools/edit-diff": { "types": "./dist/harness/tools/edit-diff.d.ts", "import": "./dist/harness/tools/edit-diff.js" }
+"./harness/tools/image":       { ... }
+"./harness/tools/file-mutation-queue": { ... }
+```
+
+- 只动 vendor 包的 manifest（该文件本来就已是裁剪版：`private: true` + 去掉上游 scripts/files），**源码零改动**；
+- 消费的是 `bun run vendor:build` 产出的同一份 dist，升级 pi 快照时无需额外步骤（新版本若重命名文件需同步这 3 行）；
+- 除这三个子路径外，其余 pi 能力仍从包根入口消费。
+
+### 13.4 行为差异（有意为之）
+
+| 差异 | 说明 |
+|---|---|
+| Repo Map 的 token 估算口径 | 从「行数 × 10」改为 pi 的 chars/4（并计入树缩进 + Ref 标签）。同一份 mock 数据下，单文件估算从 60 → 34 tokens：预算内的页面/符号选择会变化，但**预算语义不变**（同一个 `tokenBudget` 参数，同一套 estimator 用于选择与最终统计，自洽），且与 harness 的上下文估算同源 |
+| `RetryConfig.retryableStatusCodes` | 不再参与判定（判定统一走 pi 的 `isRetryableAssistantError`）；字段保留只为兼容旧配置形状 |
+| `isRetryableMessage` / `computeBackoff` / `estimateTotalTokens` | 已删除（前者只有 index.ts 的公共转发，后者是死代码）；如需判定/退避请直接用 `isRetryableAssistantError` / `retryDelayMs` / `retryAssistantCall` |
+| 写队列 | 行为不变：仍按 canonical path（realpath，软链接归一）串行化，不同文件仍并行；`withFileMutationQueue(path, fn, signal?)` 签名不变，调用点只多了 `context.abortSignal` |
+
+### 13.5 改动清单
+
+| 动作 | 对象 |
+|---|---|
+| 删除 | `packages/agent-runtime/src/tools/edit-diff.ts`、`src/tools/image.ts` |
+| 薄适配 | `packages/agent-runtime/src/tools/file-mutation-queue.ts`（pi 队列 + `NodeExecutionEnv`）、`src/retry.ts`（pi 判定/退避 + 业务契约桥接） |
+| 修改 | `src/tools/{edit,read,index,write}.ts`、`src/agent.ts`（`toRetryPolicy` 移到 retry.ts）、`src/index.ts`（导出 pi 重试原语） |
+| 修改 | `packages/repo-analyzer/src/repo-map/{token-counter,formatter,index,prioritizer}.ts` + 单测；`packages/repo-analyzer/package.json`（新增 `@earendil-works/pi-agent-core` 依赖） |
+| vendor | `vendor/pi/packages/agent/package.json`（3 个子路径导出） |
+
+### 13.6 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误（子路径导出的类型解析正常） |
+| `bun run test:tools` | 95/95（含 16 路并发编辑不丢更新、图片 magic number 判型与 image 块回传、Edit 的 BOM/CRLF/fuzzy 行为） |
+| `bun test packages/repo-analyzer/src/repo-map` | 17/17（`estimateTokens` 断言已改为「pi 的 chars/4 + 渲染文本」） |
+| `bun run test` | 全部套件通过（test:analyzer 5/5、test:agent 11/11、test:context 45/45、test:pages 15/15 + 7/7、test:tui 187+9+25+21+28） |
+| `bun run mock:wiki` | `completed=4 failed=0`（真实跑过 buildRepoMap + 页面生成） |
