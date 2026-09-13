@@ -603,7 +603,7 @@ apps/cli ──► orchestrator ──► agent-runtime ──► vendor/pi（Ag
 | `bun run test:context` | **45/45**（harness 内建压缩 + 溢出归类 + token 预算 + 两段式提示 + `before_run_end` 终止 + 强制交卷 + 权威 usage 口径 + `maxTurns` 折算） |
 | `bun run test:agent` | 11/11（含钩子映射、429 流级重试、thinkingLevel、工具落盘） |
 | `bun run test:agent:http` | 8/8（真实 HTTP/SSE：单次 usage 与累计 usage 分别断言） |
-| `bun run test:pages` | 11/11 + 7/7（含新增预算页：预算耗尽 → 强制交卷后仍无 write_page → `page_error`，页面未落盘） |
+| `bun run test:pages` | 15/15 + 7/7（含新增预算页：预算耗尽 → 工具熔断 → 强制交卷后仍无 write_page → `page_error`，页面未落盘） |
 | `bun run test:blueprint` / `test:tools` / `test:catalog` / `test:installer` / `test:history` / `test:provider` / `test:analyzer` | 7/7 · 95/95 · 34/34 · 70/70 · 61+24+10 · 5/5 · 5/5 |
 | `bun run test:tui` | 187 + 9 + 25 + 21 + 28 全绿（含真实终端启动与 mock LLM 全链路） |
 | `bun run mock:wiki` | `completed=4 failed=0` |
