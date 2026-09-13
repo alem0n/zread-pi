@@ -23,12 +23,14 @@ export const zhCN: TranslationKeys = {
     failed: '历史记录读取失败: {error}',
   },
   layout: {
-    provider: '提供商',
     model: '模型',
-    baseUrl: 'Base URL',
-    thinking: '思考深度',
-    directory: '目录',
     intro: '将本地代码库转化为可读的 Wiki 文档。',
+    docs: '文档',
+    docsNone: '未生成',
+    docsGenerated: '已生成',
+    docsUnit: '篇',
+    docsLegacy: '默认',
+    docsTarget: '目标',
   },
   config: {
     title: 'Zread — 编辑配置',

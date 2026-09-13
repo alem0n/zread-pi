@@ -191,11 +191,12 @@ console.log("▶ TUI 冒烟测试");
     indent(stripAnsi(raw[0] ?? "")),
   );
   checkContains("标题行包含项目名与版本", text, `zread-pi ${projectVersion}`);
-  checkContains("标题行包含提供商", text, "提供商: openai-compatible");
-  checkContains("标题行包含模型", text, "模型: gpt-4o-mini");
+  checkContains("标题行包含目录（~ 缩写）", text, " ─ ");
+  checkContains("标题行包含模型（provider/model）", text, "模型: openai-compatible/gpt-4o-mini");
   checkContains("标题行包含思考深度", text, "思考深度: 关闭 (off)");
-  checkContains("标题行包含 Base URL", text, "Base URL: http://127.0.0.1:1/v1");
-  checkContains("标题行包含目录", text, "目录: ");
+  checkContains("标题行包含蓝图档位（写盘目标，恒显）", text, "蓝图细节档位: high");
+  checkContains("文档状态行：无产物显示未生成", text, "文档: 未生成");
+  check("头部不再包含 Provider / Base URL / 独立目录行", !text.includes("提供商:") && !text.includes("Base URL:") && !text.includes("目录: "));
   checkContains("包含介绍文字", text, "将本地代码库转化为可读的 Wiki 文档。");
   check(
     "不再显示开源项目链接",

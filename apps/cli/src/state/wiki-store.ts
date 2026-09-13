@@ -11,7 +11,15 @@
  */
 
 import type { BlueprintDetailLevel, WikiOutput } from "@zread-pi/types";
-import { fileExists, getWikiJsonPath, loadConfig, readJsonFile, resolveWikiVariant } from "@zread-pi/utils";
+import type { WikiVariantInfo } from "@zread-pi/utils";
+import {
+  fileExists,
+  getWikiJsonPath,
+  listWikiVariants,
+  loadConfig,
+  readJsonFile,
+  resolveWikiVariant,
+} from "@zread-pi/utils";
 
 export class WikiStore {
   /** 活动变体的 catalog（首页展示 / 进度用；无任何变体时为 null） */
@@ -22,6 +30,8 @@ export class WikiStore {
   targetDetail: BlueprintDetailLevel = "high";
   /** 写盘目标档位的 catalog（活动变体不是配置档位时为 null → 视为「尚无目录」） */
   targetCatalog: WikiOutput | null = null;
+  /** 所有已存在的变体元信息（含骨架 pages 为空的；头部文档状态行展示用） */
+  variants: WikiVariantInfo[] = [];
 
   /** 重新加载（每次调用都重新解析变体，配置档位切换后进入页面即可生效） */
   async reload(): Promise<void> {
@@ -32,6 +42,7 @@ export class WikiStore {
       // 配置不可读时用默认档位（与 validateConfig 的回退一致）
     }
 
+    this.variants = listWikiVariants();
     const resolved = resolveWikiVariant(preferred);
     this.detail = resolved === undefined ? null : resolved;
     this.targetDetail = preferred;

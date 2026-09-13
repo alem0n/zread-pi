@@ -23,12 +23,14 @@ export const enUS: TranslationKeys = {
     failed: 'Failed to read history: {error}',
   },
   layout: {
-    provider: 'Provider',
     model: 'Model',
-    baseUrl: 'Base URL',
-    thinking: 'Thinking',
-    directory: 'Directory',
     intro: 'Transform your local codebase into readable Wiki docs.',
+    docs: 'Docs',
+    docsNone: 'not generated',
+    docsGenerated: 'generated',
+    docsUnit: 'pages',
+    docsLegacy: 'default',
+    docsTarget: 'target',
   },
   config: {
     title: 'Zread — Edit Configuration',

@@ -1,14 +1,21 @@
 /**
- * Layout - 统一布局（对齐迁移前的 apps/cli/src/layout/layout.tsx）
+ * Layout - 统一布局
  *
- * ┌ 项目信息框（全局显示）
+ * ┌ 项目信息框（全局显示，3 行）
  * ├ 介绍文字
  * └ 当前页面内容
+ *
+ * 项目信息框：
+ * - 第 1 行：项目名 + 版本 + 当前目录（~ 缩写）
+ * - 第 2 行：模型（provider/model）+ 思考深度 + 蓝图档位（写盘目标，恒显）
+ * - 第 3 行：文档状态（未生成 / 已生成 + 各档位变体列表）
  *
  * 页面内容宽度 = 终端宽度 - 4（左右各 2 个字符的 paddingX）。
  */
 
+import { homedir } from "os";
 import type { Component } from "@earendil-works/pi-tui";
+import type { WikiVariantInfo } from "@zread-pi/utils";
 import type { App } from "./app";
 import { style } from "./ansi";
 import { RoundedBox } from "./components/rounded-box";
@@ -18,9 +25,9 @@ import { thinkingLevelLabel } from "../utils/thinking";
 
 const PROJECT_NAME = "zread-pi";
 
-/** 获取简短路径 */
+/** 获取简短路径（家目录缩写为 ~） */
 function getShortPath(path: string): string {
-  const home = process.env.HOME || "";
+  const home = homedir();
   if (home && path.startsWith(home)) {
     return "~" + path.slice(home.length);
   }
@@ -77,28 +84,71 @@ export class Layout implements Component {
 
   private buildHeader(_width: number): string[] {
     const { config } = this.app.config;
+    const wiki = this.app.wiki;
     const t = this.app.t.bind(this.app);
 
-    const llmProvider = config.llm.provider || "未设置";
-    const llmModel = config.llm.model || "未设置";
-    // base_url 优先看当前 provider 的覆盖配置（凭据/端点已迁到 per-provider 配置）
-    const providerBaseUrl = config.llm.provider
-      ? config.llm.providers?.[config.llm.provider]?.base_url
-      : null;
-    const llmBaseUrl = providerBaseUrl || config.llm.base_url || "default";
-    const currentDir = getShortPath(process.cwd());
-
-    return [
+    // 第 1 行：项目名 + 版本 + 目录
+    const title =
       style(PROJECT_NAME, { bold: true, color: "cyan" }) +
-        style(" " + getVersion(), { dim: true }),
-      "",
-      style(`${t("layout.provider")}: `, { dim: true }) + style(llmProvider, { color: "cyan" }),
-      style(`${t("layout.model")}: `, { dim: true }) + llmModel,
-      style(`${t("layout.thinking")}: `, { dim: true }) +
-        thinkingLevelLabel(config.llm.thinking_level, (key) => t(key)),
-      style(`${t("layout.baseUrl")}: `, { dim: true }) + style(llmBaseUrl, { dim: true }),
-      style(`${t("layout.directory")}: `, { dim: true }) + currentDir,
-    ];
+      style(" " + getVersion() + " ─ " + getShortPath(process.cwd()), { dim: true });
+
+    // 第 2 行：模型（provider/model，provider 为 dim 文字）+ 思考深度 + 蓝图档位
+    const llmModel = config.llm.model || t("config.notConfigured");
+    const modelText = config.llm.provider
+      ? style(config.llm.provider, { dim: true }) + "/" + llmModel
+      : llmModel;
+    const detail = config.blueprint?.detail ?? "high";
+    const modelLine =
+      style(`${t("layout.model")}: `, { dim: true }) +
+      modelText +
+      style(`  ${t("config.thinkingLevel")}: `, { dim: true }) +
+        thinkingLevelLabel(config.llm.thinking_level, (key) => t(key)) +
+      style(`  ${t("config.blueprintDetail")}: `, { dim: true }) +
+        detail;
+
+    // 第 3 行：文档状态（已生成的变体列表，活动档位在前）
+    const docsLine = this.buildDocsLine(t, wiki.variants, wiki.detail, wiki.targetDetail);
+
+    return [title, modelLine, docsLine];
+  }
+
+  /** 第 3 行：文档状态——未生成 / 已生成 · [档位 - N 篇]，目标档位未生成时附加提示 */
+  private buildDocsLine(
+    t: App["t"],
+    variants: WikiVariantInfo[],
+    activeDetail: WikiVariantInfo["detail"],
+    targetDetail: NonNullable<WikiVariantInfo["detail"]>,
+  ): string {
+    // 只有已生成内容的变体才进入列表（骨架 pages 为空不算）
+    const generated = variants.filter((variant) => variant.pagesCount > 0);
+    const label = (variant: WikiVariantInfo): string =>
+      variant.legacy ? t("layout.docsLegacy") : String(variant.detail);
+    const badge = (variant: WikiVariantInfo): string =>
+      `[${label(variant)} - ${variant.pagesCount} ${t("layout.docsUnit")}]`;
+
+    if (generated.length === 0) {
+      return style(`${t("layout.docs")}: `, { dim: true }) + t("layout.docsNone");
+    }
+
+    // 活动档位排到最前，其余保持 listWikiVariants 的既有顺序（档位序 + 遗留最后）
+    const ordered = [...generated].sort((a, b) => {
+      const aActive = a.detail === activeDetail;
+      const bActive = b.detail === activeDetail;
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      return 0;
+    });
+
+    let line =
+      style(`${t("layout.docs")}: `, { dim: true }) +
+      t("layout.docsGenerated") +
+      " · " +
+      ordered.map(badge).join(" ");
+
+    // 写盘目标档位尚无已生成变体时才提示（遗留变体的 detail 为 null，不会匹配）
+    if (!generated.some((variant) => variant.detail === targetDetail)) {
+      line += style(`  ${t("layout.docsTarget")}: ${targetDetail}`, { dim: true });
+    }
+    return line;
   }
 
   private buildIntro(width: number): string[] {
