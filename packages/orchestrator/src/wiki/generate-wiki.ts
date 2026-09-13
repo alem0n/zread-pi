@@ -25,6 +25,7 @@ import {
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { WritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
+import { polishPageFile } from './polish.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import type { WikiPage } from '@zread-pi/types';
@@ -415,6 +416,19 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           }
         }
 
+        // 落盘完成后的兜底润色（第 2 层，polish.mode = 'full' 才真正执行）。
+        // 失败不判页失败：页面产物已存在，polish 是增强不是必需（polishPageFile 内部只告警）。
+        const polish = await polishPageFile({
+          filePath: outputFile,
+          slug: page.slug,
+          title: page.title,
+        });
+        if (polish.applied) {
+          logger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms）`);
+        } else if (polish.reason === 'mermaid-rollback') {
+          logger.warn(`[${page.slug}] polish 未保留：Mermaid 复检未通过，已回滚`);
+        }
+
         // Success
         progress.completed++;
         const pageResult: PageResult = {
@@ -423,6 +437,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           outputPath: `.zread-pi/wiki/${page.section}/${page.file}`,
           durationMs: Math.round(performance.now() - pageStartTime),
           tokenUsage: result.tokenUsage,
+          polish,
         };
         progress.results.push(pageResult);
         options?.onProgress?.(progress);

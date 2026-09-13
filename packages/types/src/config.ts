@@ -136,6 +136,25 @@ export interface ToolConfig {
 export type ToolsConfig = Record<string, ToolConfig>;
 
 /**
+ * PolishMode - 文风纪律（humanizer）的作用模式
+ *
+ * - prompt-only：只做第 1 层预防——把风格纪律拼进蓝图 / 页面 Agent 的系统提示（零额外调用）；
+ * - full：预防 + 第 2 层兜底——每页落盘后多跑一次轻量 polish Agent（每页多一次 LLM 调用）。
+ */
+export type PolishMode = 'prompt-only' | 'full';
+
+/**
+ * PolishConfig - 文风润色配置（配置界面 /config/polish 维护）
+ *
+ * `enabled = false` = 完全关闭：既不注入风格纪律，也不跑 polish Agent。
+ * 旧 config.yaml 没有该段时由 validateConfig 补齐默认值（启用 + prompt-only）。
+ */
+export interface PolishConfig {
+  enabled: boolean;
+  mode: PolishMode;
+}
+
+/**
  * AppConfig - Configuration
  */
 export interface AppConfig {
@@ -144,6 +163,8 @@ export interface AppConfig {
   llm: LLMConfig;
   /** Agent 运行时配置（旧 config.yaml 缺少该段时由 validateConfig 补齐默认值） */
   agent: AgentConfig;
+  /** 文风纪律 / 页面润色（旧 config.yaml 缺少该段时由 validateConfig 补齐默认值） */
+  polish: PolishConfig;
   /** 外部工具（rg / fd …）的启用开关，配置界面 /config/tools 维护 */
   tools: ToolsConfig;
   concurrency: {

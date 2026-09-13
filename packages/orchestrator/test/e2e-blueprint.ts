@@ -227,6 +227,16 @@ check(
 	}),
 	`prompts=${seenSystemPrompts.length}`,
 );
+check(
+	"文风纪律（humanizer）注入系统提示，且排在 <project_context> 之后",
+	seenSystemPrompts.some(
+		(prompt) =>
+			prompt.includes("<writing_discipline>") &&
+			prompt.indexOf("<writing_discipline>") > prompt.indexOf("<project_context>") &&
+			prompt.includes("Writing discipline"),
+	),
+	`prompts=${seenSystemPrompts.length}`,
+);
 
 // ---------------------------------------------------------------------------
 // 5) 反向场景：模型不产出 wiki.json 时必须报错（不能假装目录完成）

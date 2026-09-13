@@ -9,7 +9,9 @@ export { generateWikiCatalog } from './orchestrator.js'
 
 // Phase 2: Wiki Content Generation
 export { generateWikiContent } from './wiki/generate-wiki.js'
-export type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './wiki/types.js'
+// Phase 2b: 页面落盘后的兜底润色（polish.mode = 'full' 时启用）
+export { polishPageFile, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
+export type { WikiResult, ProgressState, PageResult, PolishOutcome, GenerateWikiOptions, ArticleEventPayload } from './wiki/types.js'
 
 // Phase 3: Wiki Sync
 export { syncWiki } from './wiki/sync-wiki.js'
@@ -25,6 +27,18 @@ export {
   withProjectContext,
 } from './agents/context-files.js'
 export type { ProjectContextFile, LoadProjectContextFilesOptions } from './agents/context-files.js'
+
+// 文风纪律（humanizer）：预防层注入 + polish Agent 提示词（见 MIGRATION.md §15）
+export {
+  STYLE_DISCIPLINE_TAG,
+  getStyleDiscipline,
+  formatStyleDiscipline,
+  withStyleDiscipline,
+  POLISH_EMBEDDED_MODE,
+  buildPolishSystemPrompt,
+  buildPolishTaskPrompt,
+} from './agents/style-discipline.js'
+export type { StyleLanguage } from './agents/style-discipline.js'
 
 // Types
 export * from './types.js'

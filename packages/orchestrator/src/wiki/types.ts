@@ -47,6 +47,38 @@ export interface PageResult {
   durationMs?: number;
   /** Token usage (if available) */
   tokenUsage?: TokenUsage;
+  /** 页面落盘后的兜底润色结果（polish.mode = 'full' 时才可能 applied） */
+  polish?: PolishOutcome;
+}
+
+/**
+ * Polish Outcome - 单页 polish 后处理的结果
+ *
+ * polish 是增强而非必需：任何失败都只记录在这里，不影响页面成功与否
+ * （失败语义与 history 写入「失败不阻断」一致）。
+ */
+export interface PolishOutcome {
+  /**
+   * 文件是否被实际修改且通过 Mermaid 复检。
+   * 例外：Mermaid 回滚失败时 applied=false，error 里带失败详情（页面内容已被改坏，需人工检查）。
+   */
+  applied: boolean;
+  /**
+   * 未应用/未执行的原因：
+   * - disabled：polish.enabled = false；
+   * - mode：polish.mode != 'full'（仅第 1 层预防）；
+   * - missing-file：页面文件不存在（理论上不会发生，防御性分支）；
+   * - no-change：polish Agent 未改动文件；
+   * - mermaid-rollback：polish 改坏了 Mermaid，已回滚到润色前内容；
+   * - error：polish Agent 抛错（文件若已被改动且 Mermaid 复检通过则 applied=true）。
+   */
+  reason?: 'disabled' | 'mode' | 'missing-file' | 'no-change' | 'mermaid-rollback' | 'error';
+  /** 错误/回滚原因详情（诊断用） */
+  error?: string;
+  /** 耗时（毫秒） */
+  durationMs: number;
+  /** polish Agent 的 token 用量 */
+  tokenUsage?: TokenUsage;
 }
 
 /**

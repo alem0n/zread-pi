@@ -66,7 +66,11 @@ function isQuotedLabel(label: string): boolean {
   );
 }
 
-function validateMermaidContent(content: string): MermaidValidationIssue[] {
+/**
+ * Mermaid 校验（导出供 polish 后处理复用）：返回 flowchart 节点标签未加引号的问题列表。
+ * WritePageTool 内部用它拦截非法图表；polish 用它判定是否回滚。
+ */
+export function validateMermaidContent(content: string): MermaidValidationIssue[] {
   const issues: MermaidValidationIssue[] = [];
 
   for (const [blockIndex, block] of extractMermaidBlocks(content).entries()) {
@@ -94,7 +98,8 @@ function validateMermaidContent(content: string): MermaidValidationIssue[] {
   return issues;
 }
 
-function formatMermaidValidationError(issues: MermaidValidationIssue[]): string {
+/** 把校验问题格式化成可读的错误文本（工具错误与 polish 回滚告警共用同一文案） */
+export function formatMermaidValidationError(issues: MermaidValidationIssue[]): string {
   const details = issues
     .map(issue =>
       `- Mermaid block ${issue.block}, line ${issue.line}: node "${issue.nodeId}" label contains Mermaid structural characters and must be quoted: ${issue.nodeId}["${issue.label}"]`,

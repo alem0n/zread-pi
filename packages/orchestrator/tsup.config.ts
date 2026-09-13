@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup'
+import { mdTextPlugin } from '../../tools/tsup-md-text'
 
 export default defineConfig(() => {
   const isDev = process.env.NODE_ENV !== 'production'
@@ -10,6 +11,8 @@ export default defineConfig(() => {
     sourcemap: isDev,
     minify: !isDev,
     clean: true,
+    // 文风纪律提示词（src/prompts/*.md）以字符串形式内联进产物
+    esbuildPlugins: [mdTextPlugin()],
     external: [
       '@zread-pi/agent',
       '@zread-pi/skeleton',

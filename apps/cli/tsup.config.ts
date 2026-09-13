@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { cp } from 'fs/promises'
 import { join, resolve } from 'path'
 import { defineConfig } from 'tsup'
+import { mdTextPlugin } from '../../tools/tsup-md-text'
 
 function findFileRecursively(dir: string, target: string): string | null {
   try {
@@ -35,6 +36,8 @@ export default defineConfig(() => {
     bundle: true,
     noExternal: [/.*/],
     platform: 'node',
+    // 文风纪律提示词（orchestrator 的 prompts/*.md）以字符串形式内联进产物
+    esbuildPlugins: [mdTextPlugin()],
     define: {
       // 替换 globalThis.CLI_VERSION 为版本号常量
       'globalThis.CLI_VERSION': JSON.stringify(pkg.version),
