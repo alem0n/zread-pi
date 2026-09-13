@@ -10,6 +10,8 @@
 #
 # 触发方式：
 #   1. 推送 tag（v*）→ 构建并创建 Release，附上三个平台的 zip
+#      正文：若仓库内存在 .github/release-notes/<tag>.md 就用它（人工编写的发布说明），
+#            否则回落到 GitHub 自动生成的变更列表
 #   2. workflow_dispatch → 手动构建，zip 上传到 workflow artifacts
 name: build-binary
 
@@ -107,3 +109,6 @@ jobs:
         with:
           files: dist-bin/*.zip
           generate_release_notes: true
+          # 可选：仓库内准备了发布说明时用它作为 Release 正文
+          # （.github/release-notes/<tag>.md），否则回落到自动生成的变更列表
+          body_path: ${{ hashFiles(format('.github/release-notes/{0}.md', github.ref_name)) != '' && format('.github/release-notes/{0}.md', github.ref_name) || '' }}
