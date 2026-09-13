@@ -143,6 +143,7 @@ const baseURL = `http://127.0.0.1:${server.port}/v1`;
 const events: string[] = [];
 let resultSubtype: string | undefined;
 let usage: { input_tokens: number; output_tokens: number } | undefined;
+const assistantUsages: Array<{ input_tokens: number; output_tokens: number }> = [];
 
 const agent = createAgent({
 	providerId: "openai-compatible",
@@ -162,6 +163,12 @@ console.log("▶ 通过本地 mock OpenAI 服务运行 createAgent().query() …
 for await (const event of agent.query("写文件")) {
 	const message = event as SDKMessage;
 	events.push(message.type === "system" ? `system/${message.subtype}` : message.type);
+	if (message.type === "assistant" && message.usage) {
+		assistantUsages.push({
+			input_tokens: message.usage.input_tokens,
+			output_tokens: message.usage.output_tokens,
+		});
+	}
 	if (message.type === "result") {
 		resultSubtype = message.subtype;
 		usage = message.usage ? { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens } : undefined;
@@ -177,7 +184,16 @@ check("请求体带 model 与 stream:true", seenBodies[0]?.model === "mock-model
 check("工具被真实执行并写入文件", (await readFile(targetFile, "utf-8").catch(() => "")) === "# via http\n");
 check("tool_result 事件已映射", events.includes("tool_result"), events.join(","));
 check("最终结果为 success", resultSubtype === "success", String(resultSubtype));
-check("usage 来自 HTTP 分片", usage?.input_tokens === 42 && usage?.output_tokens === 7, JSON.stringify(usage));
+check(
+	"每次 assistant 事件的 usage 来自该次 HTTP 分片",
+	assistantUsages.length === 2 && assistantUsages.every((entry) => entry.input_tokens === 42 && entry.output_tokens === 7),
+	JSON.stringify(assistantUsages),
+);
+check(
+	"result.usage 是 harness usage ledger 的累计值（2 次请求 × 42/7）",
+	usage?.input_tokens === 84 && usage?.output_tokens === 14,
+	JSON.stringify(usage),
+);
 
 await rm(workdir, { recursive: true, force: true });
 

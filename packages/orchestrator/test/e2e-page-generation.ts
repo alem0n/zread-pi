@@ -78,6 +78,21 @@ const misplacedPage = {
 	level: "Beginner",
 };
 
+/**
+ * 故意一直探索、不调用 write_page，直到 token 预算耗尽：
+ * 用于验证「预算耗尽 → before_run_end 强制交卷 → 仍无产物 → 编排层照旧判页失败」
+ */
+const budgetPage = {
+	slug: "7-budget",
+	title: "预算耗尽",
+	file: "7-budget.md",
+	section: "参考",
+	level: "Beginner",
+};
+
+/** 预算页的工具轮数（一直调 ls 探索，从不交卷） */
+let budgetPageRounds = 0;
+
 let requests = 0;
 const server = Bun.serve({
 	port: 0,
@@ -90,6 +105,7 @@ const server = Bun.serve({
 		const isBadPage = promptText.includes(badPage.slug);
 		const isNoWritePage = promptText.includes(noWritePage.slug);
 		const isMisplacedPage = promptText.includes(misplacedPage.slug);
+		const isBudgetPage = promptText.includes(budgetPage.slug);
 		const page =
 			(pages.find((candidate) => promptText.includes(candidate.slug)) ?? pages[0]) as
 				| (typeof pages)[number]
@@ -101,7 +117,34 @@ const server = Bun.serve({
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const write = (text: string) => controller.enqueue(encoder.encode(text));
-				if (isNoWritePage) {
+				if (isBudgetPage) {
+					// 预算页：前三轮一直调 ls 探索（从不调 write_page），之后才给出文字收尾；
+					// token 预算耗尽后工具会被 before_tool 熔断，最后仍无产物。
+					budgetPageRounds += 1;
+					if (budgetPageRounds <= 3) {
+						write(chunk(baseChunk({ role: "assistant", content: "" }, null)));
+						write(
+							chunk(
+								baseChunk(
+									{
+										tool_calls: [
+											{
+												index: 0,
+												id: `call_budget_${budgetPageRounds}`,
+												type: "function",
+												function: { name: "ls", arguments: JSON.stringify({ path: "." }) },
+											},
+										],
+									},
+									"tool_calls",
+								),
+							),
+						);
+					} else {
+						write(chunk(baseChunk({ role: "assistant", content: "预算耗尽，仍未产出页面" }, null)));
+						write(chunk(baseChunk({}, "stop")));
+					}
+				} else if (isNoWritePage) {
 					// 不调工具，直接给出最终答复（模拟模型忘记/放弃调用 write_page）
 					write(chunk(baseChunk({ role: "assistant", content: "未落盘 完成" }, null)));
 					write(chunk(baseChunk({}, "stop")));
@@ -173,6 +216,9 @@ await writeFile(
 		"  model: mock-model",
 		"  api_key: sk-mock",
 		`  base_url: http://127.0.0.1:${server.port}/v1`,
+		// token 预算：每次 mock 响应计 40 tokens（30+10）→ 120 tokens 时正好耗尽
+		"agent:",
+		"  token_budget: 120",
 		"concurrency:",
 		"  max_concurrent: 3",
 		"  max_retries: 0",
@@ -191,7 +237,7 @@ const progress: string[] = [];
 const events: string[] = [];
 console.log("▶ generateWikiContent({ maxConcurrent: 3 }) …");
 const result = await generateWikiContent({
-	pages: [...pages, badPage, noWritePage, misplacedPage],
+	pages: [...pages, badPage, noWritePage, misplacedPage, budgetPage],
 	maxConcurrent: 3,
 	onEvent: (event) => {
 		events.push(`${event.type}:${event.slug}`);
@@ -217,8 +263,8 @@ check(
 );
 check("frontmatter 标题被写入", contents[0].includes('title: "概览"'), contents[0].split("\n")[1] ?? "");
 check(
-	"并发任务：4 页成功，2 页因未落盘被计为失败",
-	result.completed === 4 && result.failed === 2,
+	"并发任务：4 页成功，3 页因未落盘/预算耗尽被计为失败",
+	result.completed === 4 && result.failed === 3,
 	`completed=${result.completed} failed=${result.failed} (${result.results.map((entry) => `${entry.slug}:${entry.success}`).join(", ")})`,
 );
 check(
@@ -263,6 +309,32 @@ check(
 	(await readFile(misplacedWrongPath, "utf-8").catch(() => "")) === "",
 );
 check("每个页面都发生了真实模型调用（>=8 次请求）", requests >= 8, `requests=${requests}`);
+
+// ---- 预算耗尽：before_run_end 强制交卷后仍无 write_page → 编排层判页失败 ----
+const budgetTarget = join(repo, ".zread-pi", "wiki", "参考", budgetPage.file);
+const budgetResult = result.results.find((entry) => entry.slug === budgetPage.slug);
+check(
+	"预算耗尽且仍无 write_page：页面计为失败并发出 page_error",
+	events.includes(`page_start:${budgetPage.slug}`) &&
+		events.includes(`page_error:${budgetPage.slug}`) &&
+		budgetResult?.success === false,
+	budgetResult?.error ?? "(无结果)",
+);
+check(
+	"失败原因来自内核的预算耗尽分类（编排层不依赖内核细节）",
+	budgetResult?.error?.includes("Token budget exhausted") === true,
+	budgetResult?.error ?? "(无结果)",
+);
+check(
+	"预算耗尽的页面没有落盘",
+	(await readFile(budgetTarget, "utf-8").catch(() => "")) === "",
+	`budgetPageWritten=${(await readFile(budgetTarget, "utf-8").catch(() => "")) !== ""}`,
+);
+check(
+	"预算耗尽后探索轮数有限（3 轮探索 + 1 轮熔断后收尾 + 1 轮强制交卷）",
+	budgetPageRounds === 5,
+	`budgetPageRounds=${budgetPageRounds}`,
+);
 
 process.chdir(join(repo, ".."));
 await rm(repo, { recursive: true, force: true });

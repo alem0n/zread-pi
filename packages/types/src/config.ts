@@ -94,11 +94,19 @@ export interface LLMConfig {
  */
 export interface AgentConfig {
   /**
-   * 每次 Agent 运行（单个页面/蓝图）的最大轮次（turn）。
+   * 每次 Agent 运行的 token 预算（首尾机制升级后的权威预算）。
    *
-   * pi 侧由 `shouldStopAfterTurn` 计数，达到上限后优雅停止并产出
-   * `subtype: "error_max_turns"`；缺省 30（旧实现硬编码值）。
-   * `0` = 不限制轮次（不倒数收尾、不因轮次停止，仍受上下文窗口与取消约束）。
+   * 判据是 harness usage 事件/ledger 的**累计 tokens**（input + output + cache），
+   * 比轮数更精准：软提示（默认 70% 预算）与硬提示都在钩子里按累计 tokens 判定。
+   * 缺省 0 = 未显式配置，按 `max_turns * 25000`（见 `TOKENS_PER_TURN`）折算；
+   * 显式 `max_turns: 0` 且本字段为 0 = 不限制预算（仍受上下文窗口与取消约束）。
+   */
+  token_budget: number;
+  /**
+   * @deprecated 轮数已不再是停止判据（内核不再数轮次）。
+   *
+   * 该字段折算成 token 预算：`max_turns * 25000` tokens；`0` = 不限制预算。
+   * 配置界面 /config/max-turns 仍维护本字段。
    */
   max_turns: number;
 }

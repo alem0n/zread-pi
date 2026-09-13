@@ -8,10 +8,29 @@ import { getProjectHome, projectHomePath } from '../project-home.js';
 import { toolIds } from '../tools/registry';
 
 /**
+ * Agent 每次运行的 token 预算（首尾机制升级后的权威预算）
+ *
+ * 0 = 未显式配置，运行时按 `agent.max_turns * 25000` 折算（见 `@zread-pi/agent-runtime`
+ * 的 `TOKENS_PER_TURN`）；显式配置则直接使用该值。
+ */
+export const DEFAULT_TOKEN_BUDGET = 0;
+
+/** 归一化 token 预算：0 = 折算自 max_turns；非法值回退 0 */
+export function normalizeTokenBudget(value: unknown): number {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+  }
+  return DEFAULT_TOKEN_BUDGET;
+}
+
+/**
  * Agent 每次运行的最大轮次（turn）配置
  *
  * 旧实现硬编码 30；现在由 `agent.max_turns` 控制，配置界面 /config/max-turns 维护。
- * `0` = 不限制轮次（不倒数收尾、不因轮次停止，仍受上下文窗口与取消约束）。
+ * 内核已不再数轮次：该值在适配层折算成 token 预算（`max_turns * TOKENS_PER_TURN`）。
+ * `0` = 不限制预算（不倒数收尾、不因预算停止，仍受上下文窗口与取消约束）。
  */
 export const DEFAULT_MAX_TURNS = 30;
 export const MIN_MAX_TURNS = 0;
@@ -119,6 +138,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   agent: {
     max_turns: DEFAULT_MAX_TURNS,
+    token_budget: DEFAULT_TOKEN_BUDGET,
   },
   tools: normalizeToolsConfig(undefined),
   concurrency: {
@@ -286,6 +306,7 @@ export function validateConfig(raw: unknown): AppConfig {
     },
     agent: {
       max_turns: normalizeMaxTurns(agent.max_turns),
+      token_budget: normalizeTokenBudget(agent.token_budget),
     },
     tools: normalizeToolsConfig(config.tools),
     concurrency: {

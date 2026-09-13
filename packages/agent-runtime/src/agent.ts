@@ -1,96 +1,60 @@
 /**
  * createAgent —— zread-pi 业务层唯一依赖的 Agent 入口。
  *
- * 对外契约与旧 agent-sdk 完全一致：
- *   const agent = createAgent({ model, apiKey, baseURL, tools, systemPrompt, maxTurns, hooks, retryConfig })
+ * 对外契约与旧 agent-sdk 完全一致（业务层 22 处 import 零改动）：
+ *   const agent = createAgent({ model, apiKey, baseURL, tools, systemPrompt, hooks, retryConfig })
  *   for await (const event of agent.query(prompt)) { ... }
  *   await agent.close()
  *
- * 内部实现全部交给 pi：
- *   - Agent 循环 / 事件 / 工具执行 / 取消：@earendil-works/pi-agent-core 的 Agent
- *   - 多提供商请求、API Key 注入、错误分类、退避计算：@earendil-works/pi-ai
- *   - 重试编排：本文件（pi 的 Agent 循环不内置重试，避免污染会话记录）
- *   - 上下文压缩：pi 的 `transformContext` + `prepareCompaction` / `compact`
- *     （超过 `model.contextWindow - reserveTokens` 时摘要历史，发出 `compact_boundary`）
- *   - 优雅停止：`shouldStopAfterTurn` 计数 `maxTurns`，并在上下文将满且压缩无法腾空时产出 `error_context_full`
+ * 内部实现全部交给 pi 的 **AgentHarness**（不再是裸 agent loop）：
+ *   - 会话 / 泳道 / 操作状态机 / 恢复：`AgentHarness` + `MemorySessionRepo`（每 query 一个内存会话，
+ *     与迁移前「每次运行新建 Agent」的语义一致）
+ *   - 请求、凭据、错误分类、重试编排：harness 的 retry policy（`drive/response.ts`）
+ *   - 上下文压缩：harness 内建 threshold / overflow 压缩（`compaction` 设置）
+ *   - 首尾机制：token 预算（usage 事件/ledger）替代轮数硬顶，
+ *     `before_run` 注入两段式提示，`before_run_end` 决定终止或强制交卷
+ *     —— 详见 `harness/budget.ts` 与 MIGRATION.md §12
  */
 
-import {
-	Agent as PiAgent,
-	BACKGROUND_CONTEXT,
-	compact,
-	convertToLlm,
-	createCompactionSummaryMessage,
-	DEFAULT_COMPACTION_SETTINGS,
-	estimateContextTokens,
-	estimateTokens,
-	prepareCompaction,
-	shouldCompact,
-	withAbortSignal,
-	type AgentEvent,
-	type AgentMessage,
-	type AgentTool,
-	type CompactionSettings,
-	type Entry,
-	type ShouldStopAfterTurnContext,
-} from "@earendil-works/pi-agent-core";
-import {
-	type AssistantMessage,
-	type AssistantMessageEvent,
-	type Model as PiModel,
-	type MutableModels,
-	type SimpleStreamOptions,
-	type Usage,
-	type Context as PiContext,
-	type TSchema,
-} from "@earendil-works/pi-ai";
-import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import type { Api, Model, Models, Provider } from "@earendil-works/pi-ai";
+import { createModels } from "@earendil-works/pi-ai";
+import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-agent-core";
 import { createRuntimeModel, inferProviderId, type RuntimeModel } from "./pi/runtime-model.js";
 import { hasZreadProvider } from "./pi/provider-catalog.js";
-import { computeBackoff, isRetryableMessage, sleep, type RetryConfig } from "./retry.js";
+import type { RetryConfig } from "./retry.js";
 import type { ThinkingLevel } from "@zread-pi/types";
-import type {
-	ContentBlock,
-	JsonValue,
-	PermissionMode,
-	SDKMessage,
-	TokenUsage,
-	ToolDefinition,
-	ToolInputParams,
-	ToolContext,
-	ToolResult,
-} from "./types.js";
+import type { SDKMessage, PermissionMode, ToolDefinition } from "./types.js";
 import type { ApiType } from "./providers/types.js";
+import {
+	BudgetController,
+	DEFAULT_HARD_BUDGET_NOTICE,
+	DEFAULT_SOFT_BUDGET_NOTICE,
+	type BudgetOptions,
+} from "./harness/budget.js";import { queryHarness, type HarnessQueryRequest } from "./harness/driver.js";
+import { bridgeModels, type HarnessStreamFn } from "./harness/models.js";
+import type { HookConfig } from "./hooks.js";
+
+export type { HookConfig } from "./hooks.js";
+export { runToolHooks } from "./hooks.js";
+export {
+	BudgetController,
+	DEFAULT_CONTINUE_PROMPT,
+	DEFAULT_HARD_BUDGET_NOTICE,
+	DEFAULT_SOFT_BUDGET_NOTICE,
+	usageTokens,
+} from "./harness/budget.js";
+export type { BudgetNotices, BudgetOptions, BudgetSnapshot } from "./harness/budget.js";
 
 // ---------------------------------------------------------------------------
-// 钩子契约（与旧 agent-sdk 的 hooks 配置形状一致）
-// ---------------------------------------------------------------------------
-
-type HookHandler = (
-	input: Record<string, unknown>,
-	toolUseId: string,
-	context: { signal: AbortSignal },
-) => Promise<unknown>;
-
-interface HookMatcher {
-	matcher?: string;
-	hooks: HookHandler[];
-	timeout?: number;
-}
-
-export type HookConfig = Record<string, HookMatcher[]>;
-
-// ---------------------------------------------------------------------------
-// 上下文压缩（pi compaction）
+// 上下文压缩（harness 内建 compaction）
 // ---------------------------------------------------------------------------
 
 /**
- * 自动上下文压缩配置。
+ * 自动上下文压缩配置（与 harness 的 `CompactionSettings` 同形）。
  *
- * 运行时在每次请求前（pi 的 `transformContext`）检查上下文用量，
- * 超过 `contextWindow - reserveTokens` 时调用 pi 的 `prepareCompaction` / `compact`
- * 生成结构化摘要，并用「摘要 + 保留的近期消息」继续请求；
- * 当压缩无法再腾出空间时，`shouldStopAfterTurn` 会在下一轮结束时优雅停止。
+ * 运行时在每个 run 边界检查上下文用量，超过 `contextWindow - reserveTokens` 时
+ * 生成结构化摘要并用「摘要 + 保留的近期消息」继续请求；
+ * 泄漏到 provider 的溢出会被 harness 识别为 overflow 并做一次恢复压缩。
  */
 export interface CompactionOptions {
 	/** 是否启用自动压缩（缺省 true） */
@@ -102,98 +66,56 @@ export interface CompactionOptions {
 }
 
 // ---------------------------------------------------------------------------
-// 轮次收尾（maxTurns 提示 + 宽限轮）
+// 首尾机制：token 预算 + 两段式提示（见 harness/budget.ts）
 // ---------------------------------------------------------------------------
 
-/** `finalization.notice` 的缺省文案（业务侧通常用 create-agent 下发本地化文案） */
-export const DEFAULT_FINALIZATION_NOTICE =
-	"[System notice] Turn budget will be exhausted soon. Stop exploring and produce the final result now: call the required output tool with the complete result in this turn, otherwise this run will be stopped and marked as failed.";
+/** 兼容旧字段：`finalization.notice` 的缺省硬提示文案 */
+export const DEFAULT_FINALIZATION_NOTICE = DEFAULT_HARD_BUDGET_NOTICE;
 
-/**
- * 轮次用尽前的收尾策略。
- *
- * 行为（按 `shouldStopAfterTurn` 的轮次计数）：
- * - 倒数第 1 轮（turnCount = maxTurns - 1）结束时注入一次提示；
- * - 到达 maxTurns 后允许 `graceTurns` 轮宽限，并在每个宽限轮前再注入一次提示；
- * - 宽限轮用完仍未收敛 → 优雅停止，结果 subtype = `error_max_turns`。
- *
- * 上下文将满时不会获得宽限轮（优先级高于轮次）。
- */
+/** 兼容旧字段：收尾策略（已折叠进 token 预算） */
 export interface FinalizationOptions {
 	/**
-	 * maxTurns 之后允许的收尾轮数（缺省 1；0 = 到达上限立即停止，即旧行为；负数按 0 处理）。
+	 * @deprecated 由 `budget.forcedTurns` 承担：预算耗尽后允许的强制交卷轮数
+	 * （缺省 1；0 = 预算耗尽即终止，等同于旧「到达上限立即停止」）。
 	 */
 	graceTurns?: number;
 	/**
-	 * 收尾提示文案（在最后一轮与每个宽限轮前各注入一次，作为 steering user 消息）。
-	 * 缺省 `DEFAULT_FINALIZATION_NOTICE`；传空字符串关闭提示。
+	 * @deprecated 由 `budget.notices.hard` 承担：预算耗尽的硬提示文案。
+	 * 缺省 `DEFAULT_HARD_BUDGET_NOTICE`；传空字符串关闭提示。
 	 */
 	notice?: string;
 }
 
-/** 单次运行内的压缩状态（摘要 + 保留段 + 压缩时的消息位置） */
-interface CompactionState {
-	summary: string;
-	tokensBefore: number;
-	timestamp: number;
-	/** 压缩后保留的近期消息（不含摘要消息） */
-	tail: AgentMessage[];
-	/** 压缩发生时 context.messages 的长度，用于拼接之后新增的消息 */
-	fromIndex: number;
-}
+/** 每「轮」折算的 token 预算（兼容 `maxTurns` 配置时使用） */
+export const TOKENS_PER_TURN = 25_000;
 
-/** 把「摘要 + 保留段 + 新增消息」拼成当前请求的真实上下文 */
-function buildEffectiveMessages(messages: AgentMessage[], state: CompactionState | undefined): AgentMessage[] {
-	if (!state) return messages;
-	const appended = messages.length > state.fromIndex ? messages.slice(state.fromIndex) : [];
-	return [
-		createCompactionSummaryMessage(state.summary, state.tokensBefore, state.timestamp),
-		...state.tail,
-		...appended,
-	];
-}
+/** 缺省折算轮数（与迁移前适配层兜底值一致：`maxTurns ?? 30`） */
+export const DEFAULT_MAX_TURNS_EQUIVALENT = 30;
 
 /**
- * 把消息列表转成 pi compaction 需要的 Entry[]。
+ * 把旧字段归一化成 token 预算。
  *
- * 已有压缩状态时，第一条合成一个 compaction 条目，让 pi 按「迭代压缩」语义
- * 复用 previousSummary 与 retainedTail，而不是把旧摘要再总结一遍。
+ * `maxTurns` 不再表示「轮数硬顶」，而是折算成 `maxTurns * TOKENS_PER_TURN` 的
+ * 累计 token 预算（0 = 不限制）；显式 `budget.maxTokens` 优先。
  */
-function toCompactionEntries(effective: AgentMessage[], state: CompactionState | undefined): Entry[] {
-	const entries: Entry[] = [];
-	if (state) {
-		entries.push({
-			type: "compaction",
-			id: "zread-pi-compaction",
-			parentId: null,
-			seq: 0,
-			timestamp: state.timestamp,
-			summary: state.summary,
-			retainedTail: state.tail,
-			tokensBefore: state.tokensBefore,
-			fromHook: false,
-		});
-	}
-	const offset = state ? state.tail.length + 1 : 0;
-	for (let index = offset; index < effective.length; index++) {
-		const message = effective[index];
-		entries.push({
-			type: "message",
-			id: `zread-pi-entry-${index}`,
-			parentId: index === 0 ? null : `zread-pi-entry-${index - 1}`,
-			seq: index,
-			timestamp: typeof message.timestamp === "number" ? message.timestamp : Date.now(),
-			message,
-		});
-	}
-	return entries;
-}
-
-/** 逐条消息的字符启发式估算（用于比较压缩前后是否真的腾出空间） */
-function sumEstimatedTokens(messages: AgentMessage[]): number {
-	let total = 0;
-	for (const message of messages) total += estimateTokens(message);
-	return total;
+export function resolveBudgetOptions(options: Pick<AgentOptions, "budget" | "maxTurns" | "finalization">): BudgetOptions {
+	const explicit = options.budget?.maxTokens;
+	const maxTurns = options.maxTurns;
+	const effectiveTurns = maxTurns === undefined ? DEFAULT_MAX_TURNS_EQUIVALENT : maxTurns;
+	const derived =
+		explicit !== undefined ? explicit : effectiveTurns > 0 ? effectiveTurns * TOKENS_PER_TURN : 0;
+	const hardNotice = options.budget?.notices?.hard ?? options.finalization?.notice ?? DEFAULT_HARD_BUDGET_NOTICE;
+	return {
+		...options.budget,
+		maxTokens: derived,
+		notices: {
+			soft: options.budget?.notices?.soft ?? DEFAULT_SOFT_BUDGET_NOTICE,
+			hard: hardNotice,
+		},
+		...(options.budget?.forcedTurns === undefined && options.finalization?.graceTurns !== undefined
+			? { forcedTurns: options.finalization.graceTurns }
+			: {}),
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +127,7 @@ export interface AgentOptions {
 	model?: string;
 	/** providerId（anthropic / openai / deepseek / 任意 OpenAI 兼容网关） */
 	providerId?: string;
-	/** @deprecated 兼容旧字段；pi 版本里等价于显式指定 apiType */
+	/** @deprecated 兼容旧字段；等价于显式指定 apiType */
 	apiType?: ApiType;
 	apiKey?: string;
 	baseURL?: string;
@@ -213,7 +135,7 @@ export interface AgentOptions {
 	systemPrompt?: string;
 	appendSystemPrompt?: string;
 	tools?: ToolDefinition[] | string[];
-	/** 每次运行的最大轮次（缺省 30；`0` = 不限制轮次。业务默认来自 `config.agent.max_turns`） */
+	/** @deprecated 由 `budget.maxTokens` 承担（缺省折算为 `maxTurns * TOKENS_PER_TURN`）；0 = 不限制 */
 	maxTurns?: number;
 	maxTokens?: number;
 	canUseTool?: (tool: ToolDefinition, input: unknown) => Promise<{ behavior: "allow" | "deny"; message?: string }>;
@@ -224,43 +146,31 @@ export interface AgentOptions {
 	hooks?: HookConfig;
 	retryConfig?: RetryConfig;
 	/**
-	 * 重试范围：
-	 * - "stream"（默认）：仅在"本次 API 调用尚未产生任何内容"时重试，等价旧 SDK 的 API 级重试，不污染会话；
-	 * - "stream+run"：允许在产生内容后整轮重跑该 prompt（更强健壮性，代价是重复消耗 Token）。
+	 * @deprecated harness 的重试发生在「本次响应尚未落地」的窗口内（等价旧 `"stream"`，
+	 * 失败尝试不会写进会话）；`"stream+run"`（整轮重跑）已移除。
 	 */
 	retryScope?: "stream" | "stream+run";
-	/** 模型上下文窗口（用于 pi 的上下文记账，缺省 200k） */
+	/** 模型上下文窗口（用于 harness 的上下文记账，缺省 200k） */
 	contextWindow?: number;
-	/**
-	 * pi 的思考深度（thinking level）：off / minimal / low / medium / high / xhigh / max。
-	 *
-	 * 缺省 "off"（与迁移前行为一致，不发送 reasoning 参数）；
-	 * 模型不支持所选等级时由 pi-ai 在请求时自动调整到最近的受支持等级。
-	 */
+	/** pi 的思考深度（thinking level），缺省 "off" */
 	thinkingLevel?: ThinkingLevel;
-	/**
-	 * 自动上下文压缩（pi compaction）。
-	 *
-	 * 缺省启用；上下文逼近模型窗口时在 `transformContext` 里生成摘要，
-	 * 并在无法继续压缩时由 `shouldStopAfterTurn` 优雅停止。
-	 */
+	/** 自动上下文压缩（harness 内建 compaction），缺省启用 */
 	compaction?: CompactionOptions;
 	/**
-	 * 轮次收尾策略（倒数第 1 轮提示 + 宽限轮），缺省启用：
-	 * 提示模型在预算耗尽前直接产出最终结果，避免“一直在探索、从不输出”的失败模式。
+	 * token 预算 + 两段式提示 + 强制交卷（harness 首尾机制的配置面）。
+	 * 缺省：不限制 token（但仍受上下文窗口约束）。
 	 */
+	budget?: BudgetOptions;
+	/** @deprecated 已折叠进 `budget`（见 `resolveBudgetOptions`） */
 	finalization?: FinalizationOptions;
 	/**
 	 * 高级/测试用途：直接注入 pi 的 Model 与 streamFn（例如 pi-ai 的 faux provider），
 	 * 跳过 provider / baseURL / apiKey 的解析。业务代码不设置该选项。
-	 *
-	 * `models` 仅用于上下文压缩时的摘要请求（`compact()` 需要 pi 的 Models 集合）；
-	 * 不传时该次运行不进行自动压缩。
 	 */
 	runtimeOverride?: {
-		model: PiModel<any>;
-		streamFn: BaseStreamFn;
-		models?: MutableModels;
+		model: Model<Api>;
+		streamFn: HarnessStreamFn;
+		models?: Models;
 	};
 }
 
@@ -271,285 +181,101 @@ export interface AgentInstance {
 }
 
 // ---------------------------------------------------------------------------
-// 工具桥接：ToolDefinition（zread-pi 契约）→ AgentTool（pi 契约）
+// 归一化
 // ---------------------------------------------------------------------------
 
-interface ToolBridgeContext {
-	cwd: string;
-	model?: string;
-	providerId?: string;
-	apiType?: ApiType;
-	/** 当前模型是否接受图片输入（决定 Read 是否回传 image 内容块） */
-	supportsImages?: boolean;
-	hooks?: HookConfig;
-	canUseTool?: AgentOptions["canUseTool"];
+interface ResolvedRuntime {
+	model: Model<Api>;
+	models: Models;
+	apiType: ApiType;
+	providerId: string;
 }
-
-/** pi 的工具结果内容块形态（与 pi-ai 的 TextContent / ImageContent 对齐）。 */
-type BridgeToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 /**
- * 把 ToolResult.content 映射成 pi 的内容块数组。
- *
- * 契约扩展：`content` 可以是 `ContentBlockParam[]`（含 image 块），这样 Read 能把图片
- * 以多模态形式回传给模型；此前非字符串内容会被 JSON.stringify 成文本（图片会变成 base64 垃圾）。
+ * 测试注入路径的最小 Models 回退：只需要 harness 真正会用到的两个入口
+ * （`getModel` 解析模型、`streamSimple` 发请求）；其余方法不存在于测试语义中。
+ * 生产路径永远走 catalog 的 `MutableModels`。
  */
-function toolResultContent(result: ToolResult): BridgeToolContent[] {
-	if (typeof result.content === "string") {
-		return [{ type: "text", text: result.content }];
-	}
-	const blocks: BridgeToolContent[] = [];
-	for (const block of result.content) {
-		if (block.type === "text") {
-			blocks.push({ type: "text", text: block.text });
-		} else if (block.type === "image" && block.source.type === "base64") {
-			blocks.push({ type: "image", data: block.source.data, mimeType: block.source.media_type });
-		}
-	}
-	if (blocks.length === 0) blocks.push({ type: "text", text: "" });
-	return blocks;
-}
-
-/** 纯文本视图（错误结果必须退化成文本，pi 用抛异常表达工具失败）。 */
-function toolResultToText(result: ToolResult): string {
-	return toolResultContent(result)
-		.map((block) => (block.type === "text" ? block.text : `[image ${block.mimeType}]`))
-		.join("\n");
-}
-
-async function runToolHooks(
-	hooks: HookConfig | undefined,
-	eventName: string,
-	payload: Record<string, unknown>,
-	toolUseId: string,
-	signal: AbortSignal,
-	toolName?: string,
-): Promise<unknown[]> {
-	const matchers = hooks?.[eventName];
-	if (!matchers?.length) return [];
-
-	const results: unknown[] = [];
-	for (const matcher of matchers) {
-		if (matcher.matcher && toolName) {
-			try {
-				if (!new RegExp(matcher.matcher).test(toolName)) continue;
-			} catch {
-				continue;
-			}
-		}
-		for (const handler of matcher.hooks ?? []) {
-			const executed = handler(payload, toolUseId, { signal });
-			results.push(
-				matcher.timeout
-					? await Promise.race([
-							executed,
-							new Promise((resolve) => setTimeout(() => resolve(undefined), matcher.timeout)),
-						])
-					: await executed,
-			);
-		}
-	}
-	return results;
-}
-
-function toAgentTool(definition: ToolDefinition, context: ToolBridgeContext): AgentTool {
-	return {
-		name: definition.name,
-		label: definition.name,
-		description: definition.description,
-		parameters: definition.inputSchema as unknown as TSchema,
-		executionMode: definition.isConcurrencySafe?.() ? "parallel" : "sequential",
-		async execute(toolCallId, params, signal, _onUpdate) {
-			const toolContext: ToolContext = {
-				cwd: context.cwd,
-				abortSignal: signal,
-				model: context.model,
-				apiType: context.apiType,
-				supportsImages: context.supportsImages,
-			};
-			const result = await definition.call(params as ToolInputParams, toolContext);
-			if (result.is_error) {
-				// pi 的工具以"抛异常"表达失败，错误文本仍会进入模型上下文
-				throw new Error(toolResultToText(result));
-			}
-			return {
-				content: toolResultContent(result),
-				// details 与 content 分离：不会进入模型上下文，供钩子 / UI 消费
-				details: { toolUseId: toolCallId, ...(result.details !== undefined ? { details: result.details } : {}) },
-			};
+function minimalModels(model: Model<Api>, streamSimple: HarnessStreamFn): Models {
+	const provider = {
+		id: model.provider,
+		name: model.provider,
+		baseUrl: model.baseUrl,
+		getModels: () => [model],
+	} as unknown as Provider;	return {
+		getProviders: () => [provider],
+		getProvider: (id: string) => (id === model.provider ? provider : undefined),
+		getModels: () => [model],
+		getModel: (providerId: string, id: string) => (providerId === model.provider && id === model.id ? model : undefined),
+		getAuth: async () => undefined,
+		getAvailable: async () => [model],
+		checkAuth: async () => undefined,
+		refresh: async () => ({ refreshed: [], failed: [] }) as never,
+		login: async () => {
+			throw new Error("runtimeOverride models do not support login");
 		},
-	};
+		logout: async () => undefined,
+		stream: (m: Model<Api>, context: Parameters<HarnessStreamFn>[1], options?: Parameters<HarnessStreamFn>[2]) =>
+			streamSimple(m, context, options),
+		complete: async (m: Model<Api>, context: Parameters<HarnessStreamFn>[1], options?: Parameters<HarnessStreamFn>[2]) =>
+			streamSimple(m, context, options).result(),
+		streamSimple,
+		completeSimple: async (
+			m: Model<Api>,
+			context: Parameters<HarnessStreamFn>[1],
+			options?: Parameters<HarnessStreamFn>[2],
+		) => streamSimple(m, context, options).result(),
+		streamDeferred: () => {
+			throw new Error("runtimeOverride models do not support deferred responses");
+		},
+		fetchDeferred: async () => {
+			throw new Error("runtimeOverride models do not support deferred responses");
+		},
+		cancelDeferred: async () => undefined,
+	} as unknown as Models;
 }
 
-// ---------------------------------------------------------------------------
-// 事件与用量映射：pi -> SDKMessage
-// ---------------------------------------------------------------------------
+/** 解析运行时（catalog 优先；测试可注入 runtimeOverride） */
+function resolveRuntime(options: AgentOptions, modelId: string | undefined): ResolvedRuntime {
+	const override = options.runtimeOverride;
+	if (override) {
+		return {
+			model: override.model,
+			models: bridgeModels(
+				override.models ?? minimalModels(override.model, override.streamFn),
+				{ resolved: override.model, streamSimple: override.streamFn },
+			),
+			apiType: override.model.api === "anthropic-messages" ? "anthropic-messages" : "openai-completions",
+			providerId: String(override.model.provider),
+		};
+	}
 
-function mapUsage(usage: Usage | undefined): TokenUsage | undefined {
-	if (!usage) return undefined;
+	const runtime: RuntimeModel = createRuntimeModel({
+		providerId: options.providerId,
+		modelId: modelId as string,
+		apiKey: options.apiKey,
+		baseURL: options.baseURL,
+		apiType: options.apiType,
+		contextWindow: options.contextWindow,
+		maxTokens: options.maxTokens,
+	});
 	return {
-		input_tokens: usage.input,
-		output_tokens: usage.output,
-		cache_creation_input_tokens: usage.cacheWrite,
-		cache_read_input_tokens: usage.cacheRead,
+		model: runtime.model,
+		models: bridgeModels(runtime.models, { resolved: runtime.model }),
+		apiType: runtime.apiType,
+		providerId: runtime.providerId,
 	};
 }
 
-function mapAssistantContent(message: AssistantMessage): ContentBlock[] {
-	const blocks: ContentBlock[] = [];
-	for (const block of message.content) {
-		if (block.type === "text") {
-			blocks.push({ type: "text", text: block.text });
-		} else if (block.type === "thinking") {
-			blocks.push({ type: "thinking", thinking: block.thinking });
-		} else if (block.type === "toolCall") {
-			blocks.push({
-				type: "tool_use",
-				id: block.id,
-				name: block.name,
-				input: (block.arguments ?? {}) as ToolInputParams,
-			});
-		}
-	}
-	return blocks;
-}
-
-function mapPartial(event: AssistantMessageEvent): SDKMessage | undefined {
-	switch (event.type) {
-		case "text_delta":
-			return { type: "partial_message", partial: { type: "text", text: event.delta } };
-		case "toolcall_delta":
-			return { type: "partial_message", partial: { type: "tool_use", input: event.delta } };
-		default:
-			return undefined;
-	}
-}
-
-function toolResultText(content: AssistantMessage["content"] | unknown): string {
-	if (typeof content === "string") return content;
-	if (Array.isArray(content)) {
-		return content
-			.map((block) => {
-				if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
-					return String((block as { text?: string }).text ?? "");
-				}
-				// 图片块没有文本表示：给 SDK 事件一个可读占位（图片本体在模型上下文里，不在这里）
-				if (block && typeof block === "object" && (block as { type?: string }).type === "image") {
-					const mediaType = (block as { mimeType?: string }).mimeType ?? "image";
-					return `[image ${mediaType}]`;
-				}
-				return "";
-			})
-			.join("")
-			.trim();
-	}
-	return "";
-}
-
-// ---------------------------------------------------------------------------
-// 流级重试：pi 的 Agent 循环不内置重试，这里在 streamFn 层补上
-// ---------------------------------------------------------------------------
-
-type BaseStreamFn = (
-	model: PiModel<any>,
-	context: PiContext,
-	options?: SimpleStreamOptions,
-) => AssistantMessageEventStream;
-
-/**
- * 判定一个流事件是否已经产生了"对用户可见/对上下文有影响"的内容。
- * 注意：text_start / text_end 即使内容为空也会被部分 provider 发出（如 faux、部分网关），
- * 因此只有非空的 delta 或带参数的 toolcall 才视为"已产出内容"。
- */
-function hasMeaningfulContent(event: AssistantMessageEvent): boolean {
-	switch (event.type) {
-		case "text_delta":
-		case "thinking_delta":
-		case "toolcall_delta":
-			return event.delta.length > 0;
-		case "text_end":
-			return event.content.length > 0;
-		case "toolcall_end":
-			return Object.keys(event.toolCall.arguments ?? {}).length > 0;
-		default:
-			return false;
-	}
-}
-
-/**
- * 包一层"无内容即重试"的流：
- * 缓冲 start/终止事件，只有在确认本次尝试已经产出内容后才向 Agent 循环转发。
- * 这样重试不会向会话记录里塞入半截的失败消息。
- */
-function createRetryingStreamFn(
-	base: BaseStreamFn,
-	policy: RetryConfig | undefined,
-	signal: AbortSignal | undefined,
-): BaseStreamFn {
-	return (model, context, options) => {
-		const outer = new AssistantMessageEventStream();
-
-		void (async () => {
-			let attempt = 0;
-			for (;;) {
-				const inner = base(model, context, options);
-				const buffered: AssistantMessageEvent[] = [];
-				let sawContent = false;
-				let terminal: AssistantMessageEvent | undefined;
-				let streamError: unknown;
-
-				try {
-					for await (const event of inner) {
-						if (event.type === "done" || event.type === "error") {
-							terminal = event;
-							continue;
-						}
-						if (hasMeaningfulContent(event)) {
-							sawContent = true;
-							for (const pending of buffered.splice(0)) outer.push(pending);
-							outer.push(event);
-						} else if (sawContent) {
-							outer.push(event);
-						} else {
-							buffered.push(event);
-						}
-					}
-				} catch (error) {
-					streamError = error;
-				}
-
-				const finalMessage = await inner.result().catch(() => undefined);
-				const failed = finalMessage !== undefined && finalMessage.stopReason === "error";
-				const retriable =
-					policy !== undefined &&
-					!sawContent &&
-					((failed && isRetryableMessage(finalMessage as AssistantMessage, policy)) || streamError !== undefined);
-
-				if (retriable && attempt < policy.maxRetries) {
-					attempt += 1;
-					const delay = computeBackoff(policy, attempt);
-					const errorText =
-						(failed ? (finalMessage as AssistantMessage).errorMessage : undefined) ??
-						(streamError instanceof Error ? streamError.message : String(streamError ?? "unknown error"));
-					policy.onRetry?.({ attempt, maxRetries: policy.maxRetries, delayMs: delay, error: errorText });
-					await sleep(delay, signal);
-					continue;
-				}
-
-				// 不再重试：把缓冲的事件按序补发，然后转发终止事件
-				for (const pending of buffered) outer.push(pending);
-				if (terminal) {
-					outer.push(terminal); // push 终止事件即完成流并解析 result()
-				} else if (finalMessage) {
-					outer.end(finalMessage);
-				} else {
-					outer.end();
-				}
-				return;
-			}
-		})();
-
-		return outer;
+/** 旧扁平 RetryConfig → harness 的 RetryPolicy（pi-ai） */
+function toRetryPolicy(retryConfig: RetryConfig | undefined) {
+	if (!retryConfig || retryConfig.maxRetries <= 0) return undefined;
+	return {
+		enabled: true,
+		maxRetries: retryConfig.maxRetries,
+		baseDelayMs: retryConfig.baseDelayMs,
+		// 旧配置里 maxDelayMs 就是硬上限（create-agent 传 10000 = 固定延迟）
+		...(retryConfig.maxDelayMs !== undefined ? { maxAgentDelayMs: retryConfig.maxDelayMs } : {}),
 	};
 }
 
@@ -573,7 +299,7 @@ class AgentRuntimeImpl implements AgentInstance {
 
 	async *query(prompt: string, overrides?: Partial<AgentOptions>): AsyncGenerator<SDKMessage, void> {
 		if (this.closed) throw new Error("Agent is closed");
-		const options = { ...this.options, ...overrides };
+		const options: AgentOptions = { ...this.options, ...overrides };
 		const modelId = options.model;
 		const override = options.runtimeOverride;
 		if (!modelId && !override) throw new Error("Agent option `model` is required");
@@ -590,438 +316,54 @@ class AgentRuntimeImpl implements AgentInstance {
 			}
 		}
 
-		const cwd = options.cwd ?? process.cwd();
-
-		// 运行时模型：默认由 zread-pi 的 LLM 配置构建；测试可注入 pi 原生 Model/streamFn
-		let model: PiModel<any>;
-		let streamBase: BaseStreamFn;
-		let apiTypeForContext: ApiType;
-		let providerIdForContext: string;
-		let compactionModels: MutableModels | undefined;
-		if (override) {
-			model = override.model;
-			streamBase = override.streamFn;
-			compactionModels = override.models;
-			apiTypeForContext =
-				override.model.api === "anthropic-messages" ? "anthropic-messages" : "openai-completions";
-			providerIdForContext = String(override.model.provider);
-		} else {
-			const runtime: RuntimeModel = createRuntimeModel({
-				providerId: options.providerId,
-				modelId: modelId as string,
-				apiKey: options.apiKey,
-				baseURL: options.baseURL,
-				apiType: options.apiType,
-				contextWindow: options.contextWindow,
-				maxTokens: options.maxTokens,
-			});
-			model = runtime.model;
-			apiTypeForContext = runtime.apiType;
-			providerIdForContext = runtime.providerId;
-			compactionModels = runtime.models;
-			streamBase = (streamModel, streamContext, streamOptions) =>
-				runtime.streamSimple(streamModel, streamContext, streamOptions);
-		}
-
+		const runtime = resolveRuntime(options, modelId);
+		const budgetOptions = resolveBudgetOptions(options);
+		const budget = new BudgetController(budgetOptions);
 		const toolDefinitions = (options.tools ?? []).filter(
 			(candidate): candidate is ToolDefinition => typeof candidate === "object",
 		);
+		const retryConfig = options.retryConfig;
+		const retryPolicy = toRetryPolicy(retryConfig);
 
-		const retryPolicy = options.retryConfig;
-		const retryScope = options.retryScope ?? "stream";
-		const compactionSettings: CompactionSettings = {
-			enabled: options.compaction?.enabled ?? true,
-			reserveTokens: options.compaction?.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,
-			keepRecentTokens: options.compaction?.keepRecentTokens ?? DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
+		const request: HarnessQueryRequest = {
+			prompt,
+			sessionId: `zread-pi-${Date.now()}`,
+			cwd: options.cwd ?? process.cwd(),
+			modelId: modelId ?? String(runtime.model.id),
+			apiType: runtime.apiType,
+			providerId: runtime.providerId,
+			permissionMode: options.permissionMode ?? "bypassPermissions",
+			includePartialMessages: options.includePartialMessages !== false,
+			toolNames: toolDefinitions.map((tool) => tool.name),
+			tools: toolDefinitions,
+			models: runtime.models,
+			model: runtime.model,
+			systemPrompt: [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n"),
+			thinkingLevel: options.thinkingLevel ?? "off",
+			retry: retryPolicy,
+			compaction: {
+				enabled: options.compaction?.enabled ?? true,
+				reserveTokens: options.compaction?.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,
+				keepRecentTokens: options.compaction?.keepRecentTokens ?? DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
+			},
+			budget,
+			hookConfig: options.hooks,
+			canUseTool: options.canUseTool,
+			signal: this.abortController.signal,
+			onRetry: retryConfig?.onRetry
+				? (info) =>
+					retryConfig.onRetry?.({
+						// harness 的 attempt 是「即将进行的第几次尝试」（1-based）；
+						// 旧契约的 attempt 是「第几次重试」（1 = 首次重试）
+						attempt: Math.max(1, info.attempt - 1),
+						maxRetries: Math.max(0, info.maxRetries - 1),
+						delayMs: info.delayMs,
+						error: info.error,
+					})
+				: undefined,
 		};
-		// 轮次收尾：提示文案 + 宽限轮数（每次 query 固定）
-		const graceTurns = Math.max(0, Math.floor(options.finalization?.graceTurns ?? 1));
-		const finalizationNotice = options.finalization?.notice ?? DEFAULT_FINALIZATION_NOTICE;
-		const finalizationNoticeEnabled = finalizationNotice.length > 0;
-		const createFinalizationNotice = (): AgentMessage => ({
-			role: "user",
-			content: [{ type: "text", text: finalizationNotice }],
-			timestamp: Date.now(),
-		});
-		const startedAt = Date.now();
-		let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
-		let runAttempt = 0;
 
-		// 系统提示：等价旧 SDK 的 systemPrompt + appendSystemPrompt
-		const systemPrompt = [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n");
-
-		for (;;) {
-			const queue = new AsyncQueue<SDKMessage>();
-			let turnCount = 0;
-			let stoppedByMaxTurns = false;
-			let stoppedByContextFull = false;
-			let contextFullInfo: { tokens: number; window: number } | undefined;
-			let lastAssistant: AssistantMessage | undefined;
-			let resultEmitted = false;
-
-			// 上下文压缩状态（每次运行重置：run 级重试会新建空会话的 Agent）
-			let compactionState: CompactionState | undefined;
-			let compactionExhausted = false;
-			let compactionFailed = false;
-
-			const bridge: ToolBridgeContext = {
-				cwd,
-				model: modelId,
-				providerId: providerIdForContext,
-				apiType: apiTypeForContext,
-				supportsImages: Array.isArray(model.input) ? model.input.includes("image") : undefined,
-				hooks: options.hooks,
-				canUseTool: options.canUseTool,
-			};
-			const tools = toolDefinitions.map((definition) => toAgentTool(definition, bridge));
-
-			const streamFn = createRetryingStreamFn(streamBase, retryPolicy, this.abortController.signal);
-
-			// shouldStopAfterTurn 需要 agent 实例来入队收尾提示（pi 对外 API 是 agent.steer）
-			let agentRef: PiAgent | undefined;
-			const agent = new PiAgent({
-				initialState: {
-					systemPrompt,
-					model,
-					thinkingLevel: options.thinkingLevel ?? "off",
-					tools,
-					messages: [],
-				},
-				streamFn,
-				convertToLlm,
-				transformContext: async (messages, signal) => {
-					// 契约：不得抛出；失败时返回可用的回退值
-					const effective = buildEffectiveMessages(messages, compactionState);
-					if (!compactionSettings.enabled || !compactionModels || !(model.contextWindow > 0)) {
-						return effective;
-					}
-					try {
-						const tokensBefore = estimateContextTokens(effective).tokens;
-						if (!shouldCompact(tokensBefore, model.contextWindow, compactionSettings)) return effective;
-
-						const preparation = prepareCompaction(
-							toCompactionEntries(effective, compactionState),
-							compactionSettings,
-						);
-						if (
-							!preparation.ok ||
-							!preparation.value ||
-							(preparation.value.messagesToSummarize.length === 0 &&
-								preparation.value.turnPrefixMessages.length === 0)
-						) {
-							// 没有可总结的内容：压缩无法腾出空间
-							compactionExhausted = true;
-							return effective;
-						}
-
-						const piContext = signal ? withAbortSignal(signal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT;
-						const compacted = await compact(
-							preparation.value,
-							compactionModels,
-							model,
-							undefined,
-							options.thinkingLevel && options.thinkingLevel !== "off" ? options.thinkingLevel : undefined,
-							undefined,
-							undefined,
-							piContext,
-						);
-						if (!compacted.ok) {
-							compactionFailed = true;
-							compactionExhausted = true;
-							return effective;
-						}
-
-						compactionState = {
-							summary: compacted.value.summary,
-							tokensBefore: compacted.value.tokensBefore,
-							timestamp: Date.now(),
-							tail: compacted.value.retainedTail,
-							fromIndex: messages.length,
-						};
-						const view = buildEffectiveMessages(messages, compactionState);
-						// 压缩没腾出空间（摘要 + 保留段不小于原上下文）：下一轮结束优雅停止，避免反复压缩
-						if (sumEstimatedTokens(view) >= sumEstimatedTokens(effective)) {
-							compactionExhausted = true;
-						}
-						queue.push({ type: "system", subtype: "compact_boundary", summary: compacted.value.summary });
-						return view;
-					} catch {
-						compactionFailed = true;
-						compactionExhausted = true;
-						return effective;
-					}
-				},
-				beforeToolCall: async (context, signal) => {
-					const toolName = context.toolCall.name;
-					const abortSignal = signal ?? this.abortController.signal;
-
-					if (options.canUseTool) {
-						const definition = toolDefinitions.find((tool) => tool.name === toolName);
-						if (definition) {
-							const decision = await options.canUseTool(definition, context.args);
-							if (decision.behavior === "deny") {
-								return { block: true, reason: decision.message ?? `Tool ${toolName} denied` };
-							}
-						}
-					}
-
-					const hookResults = await runToolHooks(
-						options.hooks,
-						"PreToolUse",
-						{ toolName, toolInput: context.args, toolUseId: context.toolCall.id },
-						context.toolCall.id,
-						abortSignal,
-						toolName,
-					);
-					for (const result of hookResults) {
-						if (result && typeof result === "object" && (result as { block?: boolean }).block === true) {
-							const reason = (result as { message?: string }).message;
-							return { block: true, reason: reason ?? `Blocked by PreToolUse hook: ${toolName}` };
-						}
-					}
-					return undefined;
-				},
-				afterToolCall: async (context, signal) => {
-					const abortSignal = signal ?? this.abortController.signal;
-					await runToolHooks(
-						options.hooks,
-						"PostToolUse",
-						{
-							toolName: context.toolCall.name,
-							toolInput: context.args,
-							toolOutput: toolResultText(context.result?.content),
-							toolUseId: context.toolCall.id,
-							isError: context.isError,
-						},
-						context.toolCall.id,
-						abortSignal,
-						context.toolCall.name,
-					);
-					return undefined;
-				},
-				shouldStopAfterTurn: (turnContext: ShouldStopAfterTurnContext) => {
-					turnCount += 1;
-					const maxTurns = options.maxTurns ?? 30;
-					// 本轮已经给出最终答复（无工具调用）：循环会自然结束，不按预算/上下文记失败
-					const assistantRequestedTools = turnContext.message.content.some((block) => block.type === "toolCall");
-					if (!assistantRequestedTools) return false;
-
-					// ---- 1) 上下文保护（优先于轮次宽限：不为即将溢出的上下文追加请求）----
-					if (model.contextWindow > 0) {
-						try {
-							const effective = buildEffectiveMessages(turnContext.context.messages, compactionState);
-							const tokens = estimateContextTokens(effective).tokens;
-							if (tokens >= model.contextWindow - compactionSettings.reserveTokens) {
-								let canCompact = false;
-								if (
-									compactionSettings.enabled &&
-									compactionModels &&
-									!compactionExhausted &&
-									!compactionFailed
-								) {
-									const preparation = prepareCompaction(
-										toCompactionEntries(effective, compactionState),
-										compactionSettings,
-									);
-									canCompact =
-										preparation.ok &&
-										preparation.value !== undefined &&
-										(preparation.value.messagesToSummarize.length > 0 ||
-											preparation.value.turnPrefixMessages.length > 0);
-									if (!canCompact) compactionExhausted = true;
-								}
-								if (!canCompact) {
-									stoppedByContextFull = true;
-									contextFullInfo = { tokens, window: model.contextWindow };
-									return true;
-								}
-							}
-						} catch {
-							stoppedByContextFull = true;
-							contextFullInfo = { tokens: 0, window: model.contextWindow };
-							return true;
-						}
-					}
-
-					// ---- 2) 轮次收尾：最后一轮软提示 → 宽限轮提示 → 停止 ----
-					// maxTurns <= 0 = 不限制轮次（配置界面 0 轮）：不发收尾提示，也不因轮次停止
-					if (maxTurns <= 0) return false;
-					if (turnCount < maxTurns) {
-						if (turnCount === maxTurns - 1 && finalizationNoticeEnabled) {
-							agentRef?.steer(createFinalizationNotice());
-						}
-						return false;
-					}
-					if (turnCount < maxTurns + graceTurns) {
-						// 宽限轮：再提示一次，仍允许模型调用工具完成收尾
-						if (finalizationNoticeEnabled) agentRef?.steer(createFinalizationNotice());
-						return false;
-					}
-					stoppedByMaxTurns = true;
-					return true;
-				},
-				sessionId: `zread-pi-${Date.now()}`,
-				toolExecution: "parallel",
-			});
-			agentRef = agent;
-
-			const unsubscribe = agent.subscribe((event: AgentEvent) => {
-				switch (event.type) {
-					case "message_update": {
-						if (options.includePartialMessages === false) return;
-						const partial = mapPartial(event.assistantMessageEvent);
-						if (partial) queue.push(partial);
-						return;
-					}
-					case "message_end": {
-						const message = event.message;
-						if (message.role === "assistant") {
-							lastAssistant = message;
-							const usage = mapUsage(message.usage);
-							if (usage) totalUsage = usage;
-							queue.push({
-								type: "assistant",
-								message: { role: "assistant", content: mapAssistantContent(message) },
-								usage,
-							});
-						}
-						return;
-					}
-					case "tool_execution_end": {
-						const endDetails = (event.result as { details?: Record<string, unknown> } | undefined)?.details;
-						const toolDetails = endDetails && typeof endDetails === "object" ? endDetails.details : undefined;
-						queue.push({
-							type: "tool_result",
-							result: {
-								tool_use_id: event.toolCallId,
-								tool_name: event.toolName,
-								output: toolResultText(event.result?.content),
-								...(toolDetails !== undefined ? { details: toolDetails as JsonValue } : {}),
-							},
-						});
-						return;
-					}
-					case "agent_end": {
-						// 一轮运行结束：关闭事件队列，让 query() 的 for-await 自然收敛
-						queue.close();
-						return;
-					}
-					default:
-						return;
-				}
-			});
-
-			// 会话初始化事件（与旧引擎的 system/init 对齐）
-			queue.push({
-				type: "system",
-				subtype: "init",
-				session_id: `zread-pi-${startedAt}`,
-				tools: toolDefinitions.map((tool) => tool.name),
-				model: modelId ?? String(model.id),
-				cwd,
-				mcp_servers: [],
-				permission_mode: options.permissionMode ?? "bypassPermissions",
-			});
-
-			const runPromise = agent
-				.prompt(prompt)
-				.catch((error: unknown) => {
-					lastAssistant = lastAssistant ?? {
-						role: "assistant",
-						content: [],
-						api: apiTypeForContext,
-						provider: providerIdForContext,
-						model: modelId ?? "unknown",
-						usage: {
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							totalTokens: 0,
-							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-						},
-						stopReason: "error",
-						errorMessage: error instanceof Error ? error.message : String(error),
-						timestamp: Date.now(),
-					};
-				})
-				.finally(() => {
-					queue.close();
-				});
-
-			// 把 pi 的事件流转换为 SDKMessage 流
-			for await (const message of queue) {
-				yield message;
-			}
-
-			await runPromise;
-			unsubscribe();
-
-			const failure = lastAssistant as AssistantMessage | undefined;
-			const failedRun =
-				stoppedByMaxTurns ||
-				stoppedByContextFull ||
-				(failure !== undefined && failure.stopReason === "error") ||
-				agent.state.errorMessage !== undefined;
-
-			if (!resultEmitted) {
-				resultEmitted = true;
-				const subtype = stoppedByMaxTurns
-					? "error_max_turns"
-					: stoppedByContextFull
-						? "error_context_full"
-						: failure && failure.stopReason === "error"
-							? "error_during_execution"
-							: failure && failure.stopReason === "aborted"
-								? "error_during_execution"
-								: "success";
-
-				const errors = stoppedByContextFull
-					? [
-							`Context window nearly full (estimated ${contextFullInfo?.tokens ?? 0} / ${contextFullInfo?.window ?? model.contextWindow} tokens); stopped gracefully before overflow.`,
-						]
-					: stoppedByMaxTurns
-						? [
-								`Reached max turns (${options.maxTurns ?? 30}${graceTurns > 0 ? ` + ${graceTurns} grace turn${graceTurns > 1 ? "s" : ""}` : ""}); stopped gracefully before completing the task.`,
-							]
-						: failure?.errorMessage
-							? [failure.errorMessage]
-							: undefined;
-				yield {
-					type: "result",
-					subtype,
-					is_error: subtype !== "success",
-					num_turns: turnCount,
-					usage: totalUsage,
-					duration_ms: Date.now() - startedAt,
-					stop_reason: failure?.stopReason ?? null,
-					errors,
-				};
-			}
-
-			if (!failedRun) return;
-
-			// run 级重试（可选）：仅在允许且仍有预算时整轮重跑
-			const canRetryRun =
-				retryScope === "stream+run" &&
-				!stoppedByMaxTurns &&
-				!stoppedByContextFull &&
-				retryPolicy !== undefined &&
-				runAttempt < retryPolicy.maxRetries &&
-				isRetryableMessage(failure as AssistantMessage, retryPolicy);
-
-			if (!canRetryRun) return;
-
-			runAttempt += 1;
-			const delay = computeBackoff(retryPolicy, runAttempt);
-			retryPolicy.onRetry?.({
-				attempt: runAttempt,
-				maxRetries: retryPolicy.maxRetries,
-				delayMs: delay,
-				error: failure?.errorMessage ?? "run failed",
-			});
-			await sleep(delay, this.abortController.signal);
-		}
+		yield* queryHarness(request);
 	}
 
 	close(): Promise<void> {
@@ -1040,38 +382,4 @@ export function createAgent(options: AgentOptions = {}): AgentInstance & { abort
 	return new AgentRuntimeImpl(options);
 }
 
-// ---------------------------------------------------------------------------
-// 简易异步队列：把订阅式事件转成 AsyncGenerator
-// ---------------------------------------------------------------------------
-
-class AsyncQueue<T> implements AsyncIterable<T> {
-	private readonly items: T[] = [];
-	private readonly waiters: Array<(value: IteratorResult<T>) => void> = [];
-	private closed = false;
-
-	push(item: T): void {
-		if (this.closed) return;
-		const waiter = this.waiters.shift();
-		if (waiter) waiter({ value: item, done: false });
-		else this.items.push(item);
-	}
-
-	close(): void {
-		if (this.closed) return;
-		this.closed = true;
-		for (const waiter of this.waiters.splice(0)) {
-			waiter({ value: undefined as unknown as T, done: true });
-		}
-	}
-
-	[Symbol.asyncIterator](): AsyncIterator<T> {
-		return {
-			next: (): Promise<IteratorResult<T>> => {
-				const item = this.items.shift();
-				if (item !== undefined) return Promise.resolve({ value: item, done: false });
-				if (this.closed) return Promise.resolve({ value: undefined as unknown as T, done: true });
-				return new Promise((resolve) => this.waiters.push(resolve));
-			},
-		};
-	}
-}
+// 供诊断/测试复用的纯函数（token 口径与预算一致，见 harness/budget.ts 的重导出）

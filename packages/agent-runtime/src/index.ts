@@ -15,7 +15,13 @@
 // Agent 入口
 // ---------------------------------------------------------------------------
 
-export { createAgent, DEFAULT_FINALIZATION_NOTICE } from "./agent.js";
+export {
+	createAgent,
+	DEFAULT_FINALIZATION_NOTICE,
+	DEFAULT_MAX_TURNS_EQUIVALENT,
+	resolveBudgetOptions,
+	TOKENS_PER_TURN,
+} from "./agent.js";
 export type { AgentInstance, AgentOptions, CompactionOptions, FinalizationOptions, HookConfig } from "./agent.js";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +39,19 @@ export type {
 	NormalizedTool,
 	NormalizedResponseBlock,
 } from "./providers/index.js";
+
+// ---------------------------------------------------------------------------
+// 首尾机制：token 预算（usage 事件/ledger 为权威来源）
+// ---------------------------------------------------------------------------
+
+export {
+	BudgetController,
+	DEFAULT_CONTINUE_PROMPT,
+	DEFAULT_HARD_BUDGET_NOTICE,
+	DEFAULT_SOFT_BUDGET_NOTICE,
+	usageTokens,
+} from "./harness/budget.js";
+export type { BudgetNotices, BudgetOptions, BudgetSnapshot } from "./harness/budget.js";
 
 // ---------------------------------------------------------------------------
 // Provider 目录（pi-ai 登录 / 模型列表 / 多 Provider 配置）
