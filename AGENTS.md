@@ -260,6 +260,14 @@ git diff master --stat             # 改动范围
 #      git merge --no-ff docs/agents-md -m "merge: 补充 AGENTS.md 手动合并与版本号规则"
 #      bun run test                 # 合并后复验（防止合并引入偏差）
 #      git branch -d docs/agents-md # 复验通过后清理分支
+
+# 7) 打 tag 并提交发布说明（§4.5；打 tag / push 由用户手动执行，AI 只起草说明与建议 tag 摘要）
+#    tag 名与根 package.json 的 version 一致（v 前缀 + 三段版本号）；注释 tag 带一句话摘要
+git tag -a v0.2.0 -m "v0.2.0 —— <一句话摘要>"
+#    发布说明落 .github/release-notes/v0.2.0.md，随合并后的 master 一起提交（先于 tag push 入库）
+git add .github/release-notes/v0.2.0.md
+git commit -m "docs: 添加 v0.2.0 发布说明（Release 正文由 CI 读取）"
+git push origin master --follow-tags
 ```
 
 ### 4.2 Commit 消息规范
@@ -312,6 +320,18 @@ Refs: MIGRATION.md §4
 - 版本号只增不减，禁止回退或复用已用过的版本号。
 - 多分支并行发生版本号冲突时，以先合并进 `master` 的版本为基线重新计算并追加提交，不做历史改写。
 
+### 4.5 Tag 与 Release 发布
+
+合并复验通过后，由**用户手动**打 tag 触发发布；AI 负责起草发布说明文件与建议 tag 摘要，并随分支提交入库。
+
+- **tag 名**：`v<主>.<次>.<修>`，必须与根 `package.json` 的 `version` 完全一致；只增不减，禁止复用已删除的版本号。
+- **tag 只打在 `master` 上**（即合并复验之后的提交），不在功能分支上打。
+- **注释 tag**：消息格式 `vX.Y.Z —— <一句话摘要>`（与 v0.14.0 / v0.15.0 既有风格一致），摘要概括本次版本的核心变更。
+- **发布说明**：正文写入 `.github/release-notes/<tag>.md`（人工编写的发布说明），与 tag 摘要随分支提交、随合并后的 `master` 入库。
+- **CI 机制**：推送 `v*` tag 触发 `.github/workflows/build-binary.yml`，自动构建三平台产物并创建 Release——仓库内存在对应说明文件就用它作正文，否则回落到自动生成的变更列表；因此**说明文件必须先于（或与 tag 同批）推送入库**。
+- **职责边界**：AI 不得自行执行 `git tag` / `git push`；提请合并时交付建议的 tag 名、tag 摘要与发布说明文件，实际打 tag 与 push 由用户执行。
+- **异常处理**：tag 打错或摘要笔误，仅在 Release 尚未对外使用时删除本地与远端 tag 重建（`git tag -d` + `git push origin :refs/tags/<tag>`）；Release 已发布后禁止改写历史，走前向修复 + 新版本号。
+
 ---
 
 ## 5. 完成定义（Definition of Done）
@@ -324,6 +344,7 @@ Refs: MIGRATION.md §4
 - [ ] 文档同步：`README.md`（命令/用法）、`MIGRATION.md`（决策/行为差异/风险）
 - [ ] 跨平台检查：代码/脚本/命令示例均遵循 §6.8（路径分隔符、家目录、换行符、shell 兼容性）
 - [ ] 版本号已按 §4.4 升级（根 `package.json`），并在交付信息中写明"当前版本 → 目标版本"与依据
+- [ ] 发布说明 `.github/release-notes/v<版本>.md` 已随分支提交，tag 摘要已建议（tag 由用户在 master 上手动打，见 §4.5）
 - [ ] 分支已提请用户手动合并（`--no-ff`），分支名 / 验证结果 / 合并命令已交付
 - [ ] 用户合并后在 master 上复验通过、分支已删除（删除由用户执行，或经用户确认后由 AI 执行）
 - [ ] 工作区干净：`git status --short` 为空
