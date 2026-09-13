@@ -912,7 +912,8 @@ console.log("▶ TUI 冒烟测试");
 
 // --- 用例 10：wiki 生成页的文章列表分页（长列表）---
 {
-  const wikiDir = join(repo, ".zread-pi", "wiki");
+  // 默认配置档位 high：fixture 写在变体子目录（与生成落盘位置一致）
+  const wikiDir = join(repo, ".zread-pi", "wiki", "high");
   const pages = [];
   for (let i = 1; i <= 40; i++) {
     pages.push({

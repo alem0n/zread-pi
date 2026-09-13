@@ -64,7 +64,7 @@ const pageContent = (slug: string): string => {
 
 const pagePath = (slug: string): string => {
 	const page = pages.find((candidate) => candidate.slug === slug)!;
-	return join(repo, ".zread-pi", "wiki", page.section, page.file);
+	return join(repo, ".zread-pi", "wiki", "high", page.section, page.file);
 };
 
 // ---------------------------------------------------------------------------

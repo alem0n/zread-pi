@@ -1,8 +1,24 @@
 // apps/browse/src/components/WikiSidebar.tsx
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useWiki } from '@/hooks/useWiki';
-import { BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
-import type { TreeNode, WikiPage } from '@/types/wiki';
+import { BookOpen, ChevronDown, ChevronRight, ChevronUp, Layers } from 'lucide-react';
+import type { BlueprintDetailLevel, TreeNode, WikiPage } from '@/types/wiki';
+
+/** 档位展示名（与 CLI `/config/detail` 的文案保持一致） */
+const DETAIL_LABELS: Record<BlueprintDetailLevel, string> = {
+  minimal: '极简',
+  low: '精简',
+  medium: '标准',
+  high: '详细',
+  max: '最详尽',
+};
+
+/** 变体展示名：遗留目录 = 「默认」 */
+function variantLabel(detail: BlueprintDetailLevel | null): string {
+  if (detail === null) return '默认';
+  return DETAIL_LABELS[detail] ?? detail;
+}
 
 interface TreeItemProps {
   node: TreeNode;
@@ -94,11 +110,20 @@ function TreeItem({ node, level = 0, onSelectPage }: TreeItemProps) {
 }
 
 export function WikiSidebar() {
-  const { tree, leftPanelCollapsed, toggleLeftPanel } = useWiki();
+  const { tree, leftPanelCollapsed, toggleLeftPanel, variants, detail, setDetail } = useWiki();
   const navigate = useNavigate();
+  const [selectorOpen, setSelectorOpen] = useState(false);
 
   const handleSelectPage = (page: WikiPage) => {
     navigate(`/${page.slug}`);
+  };
+
+  // 切换档位：同 slug 页面保留，否则落到新档位首页
+  const handleSelectVariant = async (next: BlueprintDetailLevel | null) => {
+    setSelectorOpen(false);
+    if (next === detail) return;
+    const page = await setDetail(next);
+    navigate(page ? `/${page.slug}` : '/');
   };
 
   if (leftPanelCollapsed) {
@@ -136,6 +161,46 @@ export function WikiSidebar() {
           <TreeItem key={node.id} node={node} onSelectPage={handleSelectPage} />
         ))}
       </div>
+
+      {/* 档位选择器（列表向上弹出；无变体时不渲染） */}
+      {variants.length > 0 && (
+        <div className="relative border-t border-gray-100 p-3">
+          {selectorOpen && (
+            <div className="absolute bottom-full left-3 right-3 mb-2 rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+              {variants.map((variant) => {
+                const isCurrent = variant.detail === detail;
+                return (
+                  <button
+                    key={variant.legacy ? 'legacy' : variant.detail}
+                    onClick={() => void handleSelectVariant(variant.detail)}
+                    className={`
+                      w-full flex items-center justify-between px-3 py-2 text-left text-sm
+                      transition-colors duration-150
+                      ${isCurrent ? 'bg-gray-100 text-blue-600 font-medium' : 'text-gray-700 hover:bg-gray-50'}
+                    `}
+                  >
+                    <span>{variantLabel(variant.detail)}</span>
+                    <span className="text-xs text-gray-400">{variant.pagesCount} 篇</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <button
+            onClick={() => setSelectorOpen((open) => !open)}
+            className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150"
+          >
+            <span className="flex items-center gap-2">
+              <Layers size={14} className="text-gray-400" />
+              <span>{variantLabel(detail)}</span>
+            </span>
+            <ChevronUp
+              size={14}
+              className={`text-gray-400 transition-transform duration-150 ${selectorOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

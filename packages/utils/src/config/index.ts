@@ -2,11 +2,21 @@ import { readFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, BlueprintConfig, BlueprintDetailLevel, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
 import { ensureDir, writeTextFileAtomic } from '../file-io';
 import { withFileLock } from '../lockfile.js';
 import { getProjectHome, projectHomePath } from '../project-home.js';
 import { toolIds } from '../tools/registry';
+import { normalizeBlueprintConfig } from '../blueprint-detail.js';
+
+// 档位常量与归一化在 blueprint-detail.ts（零依赖，file-io 也用它拼变体目录），这里统一再导出
+export {
+  BLUEPRINT_DETAIL_LEVELS,
+  DEFAULT_BLUEPRINT_DETAIL,
+  isBlueprintDetailLevel,
+  normalizeBlueprintDetail,
+  normalizeBlueprintConfig,
+} from '../blueprint-detail.js';
 
 /**
  * Agent 每次运行的 token 预算（首尾机制升级后的权威预算）
@@ -75,46 +85,6 @@ export function normalizePolishConfig(value: unknown): PolishConfig {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_POLISH_ENABLED,
     mode: isPolishMode(raw.mode) ? raw.mode : DEFAULT_POLISH_MODE,
   };
-}
-
-/**
- * 蓝图细节档位（blueprint.detail）
- *
- * 决定分类 / 每分类文章的数量目标与是否精修标题（详见 @zread-pi/types 的 BlueprintDetailLevel）：
- * - minimal：1 个分类（概览）· 1 篇全景导览，跳过标题精修；
- * - low：3~5 个分类 · 每分类 1~3 篇，跳过标题精修；
- * - medium：4~6 个分类 · 每分类 3~5 篇；
- * - high（默认）：4~8 个分类 · 每分类 3~10 篇（与旧行为一致）；
- * - max：4~8 个分类 · 每分类 5~12 篇。
- */
-export const BLUEPRINT_DETAIL_LEVELS: BlueprintDetailLevel[] = [
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'max',
-];
-
-/** 旧 config.yaml 缺少 blueprint 段时的默认档位（老用户零变化） */
-export const DEFAULT_BLUEPRINT_DETAIL: BlueprintDetailLevel = 'high';
-
-/** 判断任意值是否是合法的蓝图细节档位 */
-export function isBlueprintDetailLevel(value: unknown): value is BlueprintDetailLevel {
-  return typeof value === 'string' && (BLUEPRINT_DETAIL_LEVELS as string[]).includes(value);
-}
-
-/** 归一化蓝图细节档位：非法/缺省值回退 high（旧配置无需迁移） */
-export function normalizeBlueprintDetail(value: unknown): BlueprintDetailLevel {
-  return isBlueprintDetailLevel(value) ? value : DEFAULT_BLUEPRINT_DETAIL;
-}
-
-/** 归一化蓝图配置：只保留 detail 一个字段，非法值回退 high */
-export function normalizeBlueprintConfig(value: unknown): BlueprintConfig {
-  const raw =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  return { detail: normalizeBlueprintDetail(raw.detail) };
 }
 
 /**

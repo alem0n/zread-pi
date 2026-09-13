@@ -10,6 +10,8 @@ import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import type { Server } from "http";
 import { fileURLToPath, pathToFileURL } from "url";
+import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant } from "@zread-pi/utils";
+import type { BlueprintDetailLevel } from "@zread-pi/types";
 import { resolveBrowseChat, serializeBrowseChatError } from "./browse-chat";
 import {
   deleteBrowseChatSession,
@@ -247,26 +249,110 @@ function readCodeSnippet(
   return lines.slice(start, end).join("\n");
 }
 
+/** 遗留（无档位）变体的 API 标识（与前端「默认」条目对应） */
+const LEGACY_VARIANT_PARAM = "default";
+
+/** 解析后的请求变体（档位子目录或遗留目录） */
+interface ResolvedWikiVariant {
+  /** 档位名；null = 遗留目录 */
+  detail: BlueprintDetailLevel | null;
+  legacy: boolean;
+  wikiDir: string;
+  wikiJsonPath: string;
+}
+
+type VariantResolution =
+  | { ok: true; variant: ResolvedWikiVariant }
+  | { ok: false; status: number; message: string };
+
+/** 构造某个变体的路径（相对目标项目，不依赖进程 cwd） */
+function makeVariant(projectPath: string, detail: BlueprintDetailLevel | null): ResolvedWikiVariant {
+  const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
+  const dir = detail ? path.join(wikiRoot, detail) : wikiRoot;
+  return {
+    detail,
+    legacy: detail === null,
+    wikiDir: dir,
+    wikiJsonPath: path.join(dir, "wiki.json"),
+  };
+}
+
+/**
+ * 解析请求的档位变体（`?detail=`）：
+ * - 显式：档位名 → 对应子目录；`default` → 遗留目录；非法值 / 目录不存在 → 404；
+ * - 缺省：配置档位 → 遗留目录 → 第一个存在的档位；一个都没有 → 404。
+ */
+function resolveRequestVariant(projectPath: string, detailParam: unknown): VariantResolution {
+  const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
+  const notFound = (message: string): VariantResolution => ({ ok: false, status: 404, message });
+
+  if (typeof detailParam === "string" && detailParam.trim().length > 0) {
+    const requested = detailParam.trim();
+    if (requested === LEGACY_VARIANT_PARAM) {
+      const variant = makeVariant(projectPath, null);
+      if (!existsSync(variant.wikiJsonPath)) return notFound("Wiki variant not found: default");
+      return { ok: true, variant };
+    }
+    if (!isBlueprintDetailLevel(requested)) return notFound(`Unknown wiki variant: ${requested}`);
+    const variant = makeVariant(projectPath, requested);
+    if (!existsSync(variant.wikiJsonPath)) {
+      return notFound(`Wiki variant not found: ${requested}`);
+    }
+    return { ok: true, variant };
+  }
+
+  const preferred = loadConfigSync()?.blueprint.detail;
+  const resolved = resolveWikiVariant(preferred, wikiRoot);
+  if (resolved === undefined) return notFound("Wiki catalog not found");
+  return { ok: true, variant: makeVariant(projectPath, resolved) };
+}
+
+/** 读取并解析某个变体的 wiki.json（结构无效时抛错） */
+function readVariantCatalog(variant: ResolvedWikiVariant): WikiCatalog {
+  const catalog = JSON.parse(readFileSync(variant.wikiJsonPath, "utf-8")) as WikiCatalog;
+  if (!catalog || !Array.isArray(catalog.pages)) {
+    throw new Error(`Invalid wiki.json: ${variant.wikiJsonPath}`);
+  }
+  return catalog;
+}
+
 /** 创建 Express app（API 路由） */
 function createWikiApp(projectPath: string) {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
-  // Wiki data path
-  const wikiPath = path.join(projectPath, ".zread-pi", "wiki");
-  const wikiJsonPath = path.join(wikiPath, "wiki.json");
-
-  // 1. Get wiki catalog
-  app.get("/api/wiki/catalog", (_req: Request, res: Response) => {
+  // 0. List available wiki variants (+ active variant for the switcher)
+  app.get("/api/wiki/variants", (_req: Request, res: Response) => {
     try {
-      if (!existsSync(wikiJsonPath)) {
-        return res.status(404).json({ error: "Wiki catalog not found" });
-      }
+      const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
+      const variants = listWikiVariants(wikiRoot).map((variant) => ({
+        detail: variant.detail,
+        name: variant.legacy ? "默认" : variant.detail,
+        legacy: variant.legacy,
+        generatedAt: variant.generatedAt ?? null,
+        pagesCount: variant.pagesCount,
+        sectionsCount: variant.sectionsCount ?? null,
+      }));
+      const preferred = loadConfigSync()?.blueprint.detail;
+      const resolved = resolveWikiVariant(preferred, wikiRoot);
+      res.json({ variants, active: resolved === undefined ? null : resolved });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to list wiki variants",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 
-      const catalog: WikiCatalog = JSON.parse(
-        readFileSync(wikiJsonPath, "utf-8"),
-      );
-      res.json(catalog);
+  // 1. Get wiki catalog (selected variant via ?detail=; default = config detail → legacy → first)
+  app.get("/api/wiki/catalog", (req: Request, res: Response) => {
+    const resolution = resolveRequestVariant(projectPath, req.query.detail);
+    if (!resolution.ok) {
+      return res.status(resolution.status).json({ error: resolution.message });
+    }
+
+    try {
+      res.json(readVariantCatalog(resolution.variant));
     } catch (error) {
       res.status(500).json({
         error: "Failed to load wiki catalog",
@@ -275,27 +361,26 @@ function createWikiApp(projectPath: string) {
     }
   });
 
-  // 2. Get wiki content by slug
+  // 2. Get wiki content by slug (page files resolved under the selected variant)
   app.get("/api/wiki/content/:slug", (req: Request, res: Response) => {
+    const resolution = resolveRequestVariant(projectPath, req.query.detail);
+    if (!resolution.ok) {
+      return res.status(resolution.status).json({ error: resolution.message });
+    }
+
     try {
       const { slug } = req.params;
-
-      if (!existsSync(wikiJsonPath)) {
-        return res.status(404).json({ error: "Wiki catalog not found" });
-      }
-
-      const catalog: WikiCatalog = JSON.parse(
-        readFileSync(wikiJsonPath, "utf-8"),
-      );
+      const variant = resolution.variant;
+      const catalog = readVariantCatalog(variant);
       const page = catalog.pages.find((p) => p.slug === slug);
 
       if (!page) {
         return res.status(404).json({ error: `Wiki page not found: ${slug}` });
       }
 
-      // Find markdown file
-      const sectionPath = path.join(wikiPath, page.section, page.file);
-      const directPath = path.join(wikiPath, page.file);
+      // Find markdown file（变体目录内 `<section>/<file>`，兼容直接 `<file>`）
+      const sectionPath = path.join(variant.wikiDir, page.section, page.file);
+      const directPath = path.join(variant.wikiDir, page.file);
 
       let mdPath: string | null = null;
       if (existsSync(sectionPath)) {
@@ -329,8 +414,17 @@ function createWikiApp(projectPath: string) {
     }
   });
 
-  // 3. Get source code snippet by file path
+  // 3. Get source code snippet by file path（源码属项目级，与档位无关；
+  //    显式传 ?detail= 时仍校验档位合法性，与 catalog / content 语义一致）
   app.get("/api/wiki/source", (req: Request, res: Response) => {
+    const detailParam = req.query.detail;
+    if (typeof detailParam === "string" && detailParam.trim().length > 0) {
+      const resolution = resolveRequestVariant(projectPath, detailParam);
+      if (!resolution.ok) {
+        return res.status(resolution.status).json({ error: resolution.message });
+      }
+    }
+
     try {
       const { file, startLine, endLine } = req.query;
 
@@ -505,8 +599,8 @@ export async function startWikiBrowseServer(
   };
 }
 
-/** 检查是否存在 wiki.json */
+/** 检查是否存在任一 wiki 变体（档位子目录或遗留目录） */
 export function hasWikiCatalog(projectPath: string): boolean {
-  const wikiJsonPath = path.join(projectPath, ".zread-pi", "wiki", "wiki.json");
-  return existsSync(wikiJsonPath);
+  const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
+  return listWikiVariants(wikiRoot).length > 0;
 }

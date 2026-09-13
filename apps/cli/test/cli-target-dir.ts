@@ -378,7 +378,7 @@ const canonicalTarget = await canonical(targetRepo);
   check("--dir 目录无 wiki 时状态为「尚无文档目录」", homeRendered);
 
   run.send("\r");
-  const wikiJsonPath = join(targetRepo, ".zread-pi", "wiki", "wiki.json");
+  const wikiJsonPath = join(targetRepo, ".zread-pi", "wiki", "high", "wiki.json");
   // 三阶段流程会先落盘骨架（pages 为空）；等到页面归并完成再断言
   const readWiki = async (): Promise<{ sections?: Array<{ title: string }>; pages: Array<{ slug: string; file: string; section: string }> } | null> => {
     try {
@@ -414,7 +414,7 @@ const canonicalTarget = await canonical(targetRepo);
 
   // 页面文件由并行 Agent 逐个 write_page 落盘，必须在「文章 2/2」之后再判定
   const pageFiles = generatedPages.map((page) =>
-    join(targetRepo, ".zread-pi", "wiki", page.section, page.file),
+    join(targetRepo, ".zread-pi", "wiki", "high", page.section, page.file),
   );
   const pagesWritten = await waitFor(
     async () => (await Promise.all(pageFiles.map((file) => exists(file)))).every(Boolean),
@@ -422,7 +422,7 @@ const canonicalTarget = await canonical(targetRepo);
     "页面文件全部落盘",
   );
   for (const page of generatedPages) {
-    check(`页面文件已生成：${page.section}/${page.file}`, await exists(join(targetRepo, ".zread-pi", "wiki", page.section, page.file)));
+    check(`页面文件已生成：${page.section}/${page.file}`, await exists(join(targetRepo, ".zread-pi", "wiki", "high", page.section, page.file)));
   }
   check("全部页面文件在超时前落盘", pagesWritten);
   check("调用目录未被写入 .zread-pi", !(await exists(join(workspace, ".zread-pi"))));

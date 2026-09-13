@@ -4,6 +4,8 @@
  * Wiki page definitions and output format
  */
 
+import type { BlueprintDetailLevel } from './config.js';
+
 /**
  * Wiki 难度级别
  * - Beginner: 初学者，适合入门章节
@@ -80,6 +82,13 @@ export interface WikiOutput {
   generated_at: string;
   language: string;
   pages: WikiPage[];
+  /**
+   * 生成时使用的蓝图细节档位（多档共存布局下 = 变体子目录名）。
+   *
+   * 旧版 wiki.json（含遗留的无档位 `wiki/wiki.json`）没有该字段；
+   * 读取方以目录名 / 查询参数为准，字段仅作记录与展示。
+   */
+  detail?: BlueprintDetailLevel;
   /**
    * 分类阶段落盘的一级结构清单（可选）。
    *

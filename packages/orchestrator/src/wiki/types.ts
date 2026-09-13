@@ -4,7 +4,7 @@
  * Types for Wiki content generation system.
  */
 
-import type { WikiPage } from '@zread-pi/types';
+import type { BlueprintDetailLevel, WikiPage } from '@zread-pi/types';
 import type { TokenUsage } from '@zread-pi/agent-runtime';
 
 // ==================== 进度状态（批量回调） ====================
@@ -145,12 +145,17 @@ export interface ArticleEventPayload {
  * Generate Wiki Content Options
  */
 export interface GenerateWikiOptions {
-  /** Blueprint file path (default: .zread-pi/wiki/wiki.json) */
+  /** Blueprint file path (default: .zread-pi/wiki[/<detail>]/wiki.json) */
   blueprintPath?: string;
   /** 待生成的页面列表（如果传入，则不从 blueprint 加载，只生成这些页面） */
   pages?: WikiPage[];
   /** Custom concurrency limit (overrides config) */
   maxConcurrent?: number;
+  /**
+   * 写盘变体（蓝图细节档位）。
+   * 缺省 = 配置的 `blueprint.detail`；`null` = 遗留 `.zread-pi/wiki`（只读兼容）。
+   */
+  detail?: BlueprintDetailLevel | null;
   /** 单个页面的最大轮次（覆盖 config.agent.max_turns；0 = 不限制轮次） */
   maxTurns?: number;
   /** 细粒度事件回调（实时） */

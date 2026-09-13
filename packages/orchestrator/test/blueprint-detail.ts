@@ -17,7 +17,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { QuantityToolState } from '../src/agents/blueprint-detail.js';
-import type { WikiSection, WikiTopic } from '@zread-pi/types';
+import type { BlueprintDetailLevel, WikiSection, WikiTopic } from '@zread-pi/types';
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -306,16 +306,20 @@ const {
 	normalizeBlueprintSections,
 	getWikiJsonPath,
 	getLogFile,
+	listWikiVariants,
+	resolveWikiVariant,
 } = await import("@zread-pi/utils");
 const { generateWikiCatalog } = await import("../src/orchestrator.js");
 
 const ctx = { cwd: repo, abortSignal: new AbortController().signal } as never;
-const wikiJsonPath = getWikiJsonPath();
+
+/** 变体目录下的 wiki.json（null = 遗留目录） */
+const wikiJsonPath = (detail: BlueprintDetailLevel | null): string => getWikiJsonPath(detail);
 const resetWiki = async (): Promise<void> => {
 	await rm(join(repo, ".zread-pi"), { recursive: true, force: true });
 };
-const wikiExists = async (): Promise<boolean> =>
-	readFile(wikiJsonPath, "utf-8").then(
+const wikiExists = async (detail: BlueprintDetailLevel | null): Promise<boolean> =>
+	readFile(wikiJsonPath(detail), "utf-8").then(
 		() => true,
 		() => false,
 	);
@@ -563,7 +567,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 		firstText.split("\n")[0],
 	);
 	check("B1 越界提交：返回归并策略并请求重提", firstText.includes("分类数超出上限") && firstText.includes("重新调用 submit_sections"));
-	check("B1 越界提交：不落盘", !(await wikiExists()));
+	check("B1 越界提交：不落盘", !(await wikiExists("high")));
 	check("B1 越界提交：state.outOfRange=1 且未 persisted", state.outOfRange === 1 && !state.persisted);
 
 	const compliant = [...BASE_SECTIONS, { title: "领域A" }, { title: "领域B" }, { title: "领域C" }, { title: "领域D" }, { title: "领域E" }];
@@ -571,7 +575,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	const secondText = String(second.content);
 	check("B1 第 2 轮合规：落盘成功", state.persisted === true);
 	check("B1 第 2 轮合规：反馈当前 8", secondText.includes("分类数量反馈：当前 8 / 要求 4~8（当前档位：high）"));
-	const blueprint = await loadWikiBlueprint();
+	const blueprint = await loadWikiBlueprint(undefined, "high");
 	check("B1 第 2 轮合规：wiki.json sections=8", blueprint.sections?.length === 8, JSON.stringify(blueprint.sections?.map((section) => section.title)));
 }
 
@@ -586,7 +590,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 		state.exhausted === true && state.outOfRange === 2 && String(second.content).includes("已连续 2 次未收敛"),
 		String(second.content).split("\n").find((line) => line.includes("未收敛")) ?? "",
 	);
-	check("B2 两次越界：仍未落盘", !(await wikiExists()));
+	check("B2 两次越界：仍未落盘", !(await wikiExists("high")));
 }
 
 {
@@ -595,7 +599,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	const tool = createSubmitSectionsTool({ detail: "minimal", state });
 	const result = await tool.call({ sections: FOUR_SECTIONS }, ctx);
 	const text = String(result.content);
-	const blueprint = await loadWikiBlueprint();
+	const blueprint = await loadWikiBlueprint(undefined, "minimal");
 	check(
 		"B3 minimal：模型 4 个分类被代码收敛为「概览」",
 		blueprint.sections?.length === 1 && blueprint.sections[0].title === "概览",
@@ -612,6 +616,8 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	await initWikiSkeleton(
 		[...BASE_SECTIONS, { title: "领域A" }, { title: "领域B" }],
 		config,
+		undefined,
+		{ variant: "low" },
 	);
 	const state: QuantityToolState<WikiSection[]> = { called: false, persisted: false, outOfRange: 0, exhausted: false };
 	const tool = createSubmitSectionsTool({ merge: true, detail: "low", state });
@@ -623,11 +629,11 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 		overText.includes("分类数超出上限") && overText.includes("sync") && overText.includes("既有分类必须全部保留"),
 		overText.split("\n")[0],
 	);
-	const before = await loadWikiBlueprint();
+	const before = await loadWikiBlueprint(undefined, "low");
 	check("B4 sync：越界不落盘（仍 5 个分类）", before.sections?.length === 5, JSON.stringify(before.sections?.map((section) => section.title)));
 
 	const ok = await tool.call({ sections: [{ title: "领域A" }] }, ctx);
-	const after = await loadWikiBlueprint();
+	const after = await loadWikiBlueprint(undefined, "low");
 	const titles = (after.sections ?? []).map((section) => section.title);
 	check("B4 sync：既有分类必留 + 合规合并成功", state.persisted === true && titles.includes("领域A") && titles.includes("领域B") && titles.length === 5, JSON.stringify(titles));
 	check("B4 sync：成功结果带只校验上限的数量反馈", String(ok.content).includes("只校验上限"));
@@ -636,7 +642,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 {
 	await resetWiki();
 	const config = await loadConfig();
-	await initWikiSkeleton([...BASE_SECTIONS], config);
+	await initWikiSkeleton([...BASE_SECTIONS], config, undefined, { variant: "high" });
 	const state: QuantityToolState<WikiTopic[]> = { called: false, persisted: false, outOfRange: 0, exhausted: false };
 	const tool = createSubmitSectionTopicsTool({ title: "核心架构" }, { detail: "high", state });
 
@@ -647,22 +653,22 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 		overText.includes("本分类主题数超出上限") && overText.includes("文章数量反馈：当前 12 / 要求 3~10（当前档位：high）"),
 		overText.split("\n")[0],
 	);
-	const before = await loadWikiBlueprint();
+	const before = await loadWikiBlueprint(undefined, "high");
 	check("B5 主题越界：不落盘（pages=0）", before.pages.length === 0);
 
 	await tool.call({ section: "核心架构", topics: OVER_TOPICS.slice(0, 4) }, ctx);
-	const after = await loadWikiBlueprint();
+	const after = await loadWikiBlueprint(undefined, "high");
 	check("B5 第 2 轮合规：落盘 4 篇", state.persisted === true && after.pages.length === 4, `pages=${after.pages.length}`);
 }
 
 {
 	await resetWiki();
 	const config = await loadConfig();
-	await initWikiSkeleton([...BASE_SECTIONS], config);
+	await initWikiSkeleton([...BASE_SECTIONS], config, undefined, { variant: "minimal" });
 	const state: QuantityToolState<WikiTopic[]> = { called: false, persisted: false, outOfRange: 0, exhausted: false };
 	const tool = createSubmitSectionTopicsTool({ title: "概览" }, { detail: "minimal", state });
 	const result = await tool.call({ section: "概览", topics: topicsFor("概览") }, ctx);
-	const blueprint = await loadWikiBlueprint();
+	const blueprint = await loadWikiBlueprint(undefined, "minimal");
 	check(
 		"B6 minimal 主题：只保留首篇 + 代码收尾注记",
 		state.persisted === true && blueprint.pages.length === 1 && blueprint.pages[0].title === "概览主题1" && String(result.content).includes(QUANTITY_FALLBACK_NOTE),
@@ -683,17 +689,80 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	check("B7 缩编主题工具：捕获结果", topicCapture.topics?.[0]?.title === "T1");
 }
 
+// ---- B8：变体目录落盘 / 遗留兼容 / listWikiVariants / resolveWikiVariant ----
+{
+	await resetWiki();
+	const config = await loadConfig();
+
+	// 档位目录各自独立，遗留目录同时存在
+	await initWikiSkeleton([...BASE_SECTIONS, { title: "领域A" }], config, undefined, {
+		variant: "high",
+	});
+	await initWikiSkeleton([...BASE_SECTIONS], config, undefined, { variant: "low" });
+	await initWikiSkeleton([...BASE_SECTIONS, { title: "遗留域" }], config);
+
+	check("B8 档位目录落盘：wiki/high/wiki.json", await wikiExists("high"));
+	check("B8 档位目录落盘：wiki/low/wiki.json", await wikiExists("low"));
+	check("B8 遗留目录落盘：wiki/wiki.json", await wikiExists(null));
+
+	const highBlueprint = await loadWikiBlueprint(undefined, "high");
+	check(
+		"B8 按变体读取互不串档",
+		highBlueprint.sections?.some((section) => section.title === "领域A") === true &&
+			highBlueprint.sections?.some((section) => section.title === "遗留域") !== true,
+		JSON.stringify(highBlueprint.sections?.map((section) => section.title)),
+	);
+	const legacyBlueprint = await loadWikiBlueprint();
+	check(
+		"B8 遗留兼容：loadWikiBlueprint() 读遗留目录",
+		legacyBlueprint.sections?.some((section) => section.title === "遗留域") === true,
+		JSON.stringify(legacyBlueprint.sections?.map((section) => section.title)),
+	);
+	check(
+		"B8 生成档位记录进 WikiOutput.detail",
+		highBlueprint.detail === "high" && legacyBlueprint.detail === undefined,
+		`high=${String(highBlueprint.detail)} legacy=${String(legacyBlueprint.detail)}`,
+	);
+
+	const variants = listWikiVariants();
+	check(
+		"B8 listWikiVariants：档位顺序 + 遗留最后",
+		JSON.stringify(variants.map((variant) => variant.detail)) === JSON.stringify(["low", "high", null]),
+		JSON.stringify(variants.map((variant) => variant.detail)),
+	);
+	check(
+		"B8 listWikiVariants：元信息（pagesCount / sectionsCount / generatedAt / legacy）",
+		variants.every(
+			(variant) =>
+				typeof variant.pagesCount === "number" &&
+				typeof variant.sectionsCount === "number" &&
+				typeof variant.generatedAt === "string",
+		) &&
+			variants.find((variant) => variant.detail === "high")?.legacy === false &&
+			variants.at(-1)?.legacy === true,
+		JSON.stringify(variants),
+	);
+
+	check("B8 resolveWikiVariant：优先配置档位", resolveWikiVariant("high") === "high");
+	check("B8 resolveWikiVariant：配置档位缺失 → 遗留", resolveWikiVariant("minimal") === null);
+
+	await rm(wikiJsonPath(null), { force: true });
+	check("B8 resolveWikiVariant：无遗留 → 第一个存在档位", resolveWikiVariant("minimal") === "low");
+
+	await resetWiki();
+	check("B8 resolveWikiVariant：无任何变体 → undefined", resolveWikiVariant("high") === undefined);
+}
+
 // ---------------------------------------------------------------------------
 // C) mock LLM 端到端：缩编成功 / 缩编失败降级 / minimal
 // ---------------------------------------------------------------------------
-
 console.log("\n▶ C1) 分类越界 → 缩编 subagent 收敛");
 {
 	scenario = "condense-ok";
 	await writeHomeConfig("high");
 	await resetWiki();
 	const result = await generateWikiCatalog();
-	const blueprint = await loadWikiBlueprint();
+	const blueprint = await loadWikiBlueprint(undefined, "high");
 	const titles = (blueprint.sections ?? []).map((section) => section.title);
 	check(
 		"C1 缩编结果落盘（基础 3 + 缩编 5 = 8）",
@@ -722,7 +791,7 @@ console.log("\n▶ C2) 主题越界 → 缩编失败 → 代码兜底");
 	await writeHomeConfig("high");
 	await resetWiki();
 	const result = await generateWikiCatalog();
-	const blueprint = await loadWikiBlueprint();
+	const blueprint = await loadWikiBlueprint(undefined, "high");
 	const corePages = blueprint.pages.filter((page) => page.section === "核心模块");
 	const keptTitles = corePages.map((page) => page.title);
 	check(
@@ -757,7 +826,7 @@ console.log("\n▶ C3) minimal：单分类 + 单篇 + 跳过标题精修");
 	const markPrompts = seenPromptTexts.length;
 	const markResults = seenToolResults.length;
 	const result = await generateWikiCatalog();
-	const blueprint = await loadWikiBlueprint();
+	const blueprint = await loadWikiBlueprint(undefined, "minimal");
 	check(
 		"C3 只保留「概览」一个分类",
 		blueprint.sections?.length === 1 && blueprint.sections[0].title === "概览",

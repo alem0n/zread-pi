@@ -10,7 +10,7 @@
  * - 页面状态（new / updated / archived / unchanged）由代码比较新旧页面机械判定，
  *   不再由模型输出 status；SyncDiff 的语义与旧实现一致。
  */
-import { loadConfig, logger, sectionsFromBlueprint, loadWikiBlueprint, writeWikiPages } from '@zread-pi/utils';
+import { loadConfig, logger, resolveWikiVariant, sectionsFromBlueprint, loadWikiBlueprint, writeWikiPages } from '@zread-pi/utils';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { scanFiles, parseFiles } from '@zread-pi/repo-analyzer';
@@ -28,6 +28,7 @@ import {
 } from '../agents/blueprint-stages.js';
 import { SYNC_TOPICS_RULES } from '../prompts/topics';
 import type { SyncDiff, WikiPage } from '@zread-pi/types';
+import type { BlueprintDetailLevel } from '@zread-pi/types';
 import type { BlueprintFailedSection, CatalogEvent } from '../types.js';
 import type { TokenUsage } from '@zread-pi/agent-runtime';
 
@@ -229,12 +230,23 @@ function buildSyncTopicsRules(
  * Sync Wiki
  *
  * @param onEvent - 进度回调（与 generateWikiCatalog 兼容的 CatalogEvent）
+ * @param options.detail - 要同步的档位变体；缺省 = 解析「当前活动变体」
+ *   （配置档位 → 遗留目录 → 第一个存在的档位）；`null` = 遗留目录。
+ *   sync 只读写这一个变体，不触碰并存的其他档位产物。
  * @returns SyncDiff containing new/updated/archived pages
  */
 export async function syncWiki(
   onEvent?: (event: CatalogEvent) => void,
+  options: { detail?: BlueprintDetailLevel | null } = {},
 ): Promise<SyncResult> {
   const startTime = Date.now();
+  const config = await loadConfig();
+  // 要同步的变体：显式指定 > 活动变体（配置档位 → 遗留 → 第一个存在的档位）
+  const variant =
+    options.detail !== undefined
+      ? options.detail
+      : (resolveWikiVariant(config.blueprint.detail) ?? null);
+  const detail = variant ?? config.blueprint.detail;
 
   // ——— 阶段1: 检测 ———
   onEvent?.({ type: 'scanning' });
@@ -244,7 +256,7 @@ export async function syncWiki(
     loadCachedManifest(),
     (async () => {
       try {
-        return await loadWikiBlueprint();
+        return await loadWikiBlueprint(undefined, variant);
       } catch {
         return null;
       }
@@ -284,9 +296,8 @@ export async function syncWiki(
   await Promise.all([saveCachedManifest(currentManifest), saveCachedSymbols(symbols)]);
 
   // ——— 阶段2: 按变更 section 增量修补 ———
-  const config = await loadConfig();
   const usage = new BlueprintUsageTracker();
-  const context = { config, onEvent, usage };
+  const context = { config, onEvent, usage, variant, detail };
 
   const oldPages = oldWikiJson.pages;
   const oldSections = sectionsFromBlueprint(oldWikiJson);
@@ -335,7 +346,7 @@ export async function syncWiki(
   }
 
   // 读取最新 sections（分类阶段可能补了新分类）
-  const latest = await loadWikiBlueprint();
+  const latest = await loadWikiBlueprint(undefined, variant);
   const sections = sectionsFromBlueprint(latest);
   const targetSections = sections.filter((section) =>
     affected.has(section.title.trim().toLowerCase()),
@@ -353,12 +364,12 @@ export async function syncWiki(
       })),
     );
 
-    const afterTopics = await loadWikiBlueprint();
+    const afterTopics = await loadWikiBlueprint(undefined, variant);
     failedSections.push(...(await runTitlesStage(context, targetSections, afterTopics.pages)));
   }
 
   // ——— 阶段3: 代码侧计算 SyncDiff 并写回 status ———
-  const afterStages = await loadWikiBlueprint();
+  const afterStages = await loadWikiBlueprint(undefined, variant);
   const { pages, diff: syncDiff } = computeSyncDiff({
     oldPages,
     newPages: afterStages.pages,
@@ -367,7 +378,7 @@ export async function syncWiki(
     // README / docs 等不在 manifest 里的关联路径：按文件系统实际存在判断
     isPathPresent: pathExistsOnDisk,
   });
-  await writeWikiPages(pages);
+  await writeWikiPages(pages, { variant });
 
   const durationMs = Date.now() - startTime;
   const tokenUsage = usage.total();

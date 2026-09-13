@@ -14,7 +14,10 @@ export {
   getWikiJsonPath,
   getCacheDir,
   getWikiDir,
+  listWikiVariants,
+  resolveWikiVariant,
 } from './file-io.js';
+export type { WikiVariantInfo } from './file-io.js';
 
 // Logger
 export { logger, getLogFile } from './logger.js';

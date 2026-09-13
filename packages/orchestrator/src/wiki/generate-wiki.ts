@@ -16,6 +16,7 @@ import { basename, dirname } from 'node:path';
 import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, logger } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { getDetailSpec, MINIMAL_PANORAMA_REQUIREMENT, type BlueprintDetailSpec } from '../agents/blueprint-detail.js';
+import { createWritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
 import {
   FileEditTool,
   FileReadTool,
@@ -26,21 +27,26 @@ import {
   type TokenUsage,
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
-import { WritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
 import { polishPageFile } from './polish.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
-import type { WikiPage } from '@zread-pi/types';
+import type { BlueprintDetailLevel, WikiPage } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
 /**
  * Build page-specific prompt
  *
  * minimal 档位会附加「全景导览」要求（唯一一篇必须用 Mermaid 架构图梳理模块关系与数据流）。
+ * `variant` 为写盘变体（档位子目录），只影响提示词里的输出路径说明。
  */
-export function buildPagePrompt(page: WikiPage, spec: BlueprintDetailSpec): string {
+export function buildPagePrompt(
+  page: WikiPage,
+  spec: BlueprintDetailSpec,
+  variant?: BlueprintDetailLevel | null,
+): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
   const panorama = spec.panorama ? `\n\n---\n\n${MINIMAL_PANORAMA_REQUIREMENT}` : '';
+  const wikiBase = variant ? `.zread-pi/wiki/${variant}` : '.zread-pi/wiki';
 
   return `${PageAgentPrompt}
 
@@ -67,7 +73,7 @@ ${associatedFilesList}
 - \`section\`: "${page.section}"
 - \`title\`: "${page.title}"
 
-输出文件将写入: \`.zread-pi/wiki/${page.section}/${page.file}\`
+输出文件将写入: \`${wikiBase}/${page.section}/${page.file}\`
 
 请按照三步工作流执行，最后使用 write_page 输出文档（务必传入完整的 file 和 section 参数）。${panorama}`;
 }
@@ -139,7 +145,12 @@ async function isExistingFile(path: string): Promise<boolean> {
  * 2. 按模型传入参数 + write_page 的解析规则复算出的路径；
  * 3. 依据页面元数据的常见错误落点（缺 section、误用 slug 命名等）。
  */
-function collectPageCandidates(page: WikiPage, attempts: PageWriteAttempt[], wikiDir: string): string[] {
+function collectPageCandidates(
+  page: WikiPage,
+  attempts: PageWriteAttempt[],
+  wikiDir: string,
+  variant?: BlueprintDetailLevel | null,
+): string[] {
   const candidates: string[] = [];
   const push = (value: string | undefined): void => {
     if (value && !candidates.includes(value)) candidates.push(value);
@@ -150,11 +161,15 @@ function collectPageCandidates(page: WikiPage, attempts: PageWriteAttempt[], wik
     push(attempt.outputPath);
     if (attempt.file || attempt.slug) {
       push(
-        resolvePageOutputPath(attempt.cwd, {
-          file: attempt.file,
-          section: attempt.section,
-          slug: attempt.slug ?? page.slug,
-        }),
+        resolvePageOutputPath(
+          attempt.cwd,
+          {
+            file: attempt.file,
+            section: attempt.section,
+            slug: attempt.slug ?? page.slug,
+          },
+          { variant },
+        ),
       );
     }
   }
@@ -222,6 +237,7 @@ export async function rescuePageFile(
   page: WikiPage,
   attempts: PageWriteAttempt[],
   wikiDir: string = getWikiDir(),
+  variant?: BlueprintDetailLevel | null,
 ): Promise<string | null> {
   const target = joinPath(wikiDir, page.section, page.file);
 
@@ -238,7 +254,7 @@ export async function rescuePageFile(
     }
   };
 
-  for (const candidate of collectPageCandidates(page, attempts, wikiDir)) {
+  for (const candidate of collectPageCandidates(page, attempts, wikiDir, variant)) {
     if (await tryRelocate(candidate)) return candidate;
   }
 
@@ -262,9 +278,14 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
   await rememberCurrentProject();
 
-  // 蓝图细节档位：minimal 会在页面提示词里附加「全景导览」要求
+  // 蓝图细节档位（写盘变体）：显式指定 > 配置档位；null = 遗留目录
   const config = await loadConfig();
-  const spec = getDetailSpec(config.blueprint.detail);
+  const variant: BlueprintDetailLevel | null =
+    options?.detail !== undefined ? options.detail : config.blueprint.detail;
+  // minimal 会在页面提示词里附加「全景导览」要求
+  const spec = getDetailSpec(variant ?? config.blueprint.detail);
+  const wikiDir = getWikiDir(variant);
+  const writeTool = createWritePageTool(variant);
 
   // 并发数由调用方传递（默认 1）
   const maxConcurrent = options?.maxConcurrent ?? 1;
@@ -274,7 +295,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   if (options?.pages && options.pages.length > 0) {
     pages = options.pages;
   } else {
-    const blueprint = await loadWikiBlueprint(options?.blueprintPath);
+    const blueprint = await loadWikiBlueprint(options?.blueprintPath, variant);
     pages = blueprint.pages;
   }
 
@@ -315,7 +336,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
       let lastUsage: TokenUsage | undefined;
       const writeAttempts: PageWriteAttempt[] = [];
       const writePageTool: ToolDefinition = {
-        ...WritePageTool,
+        ...writeTool,
         async call(input, context) {
           const attempt: PageWriteAttempt = {
             cwd: context.cwd,
@@ -325,7 +346,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           };
           writeAttempts.push(attempt);
 
-          const toolResult = await WritePageTool.call(input, context);
+          const toolResult = await writeTool.call(input, context);
           if (toolResult.is_error) {
             lastWriteError = summarizeWriteError(toolResult.content);
           } else {
@@ -349,7 +370,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
             LsTool,
             writePageTool
           ],
-          prompts: buildPagePrompt(page, spec),
+          prompts: buildPagePrompt(page, spec, variant),
           // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
           maxTurns: options?.maxTurns,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
@@ -414,9 +435,9 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         // 兜底：write_page 已成功时，模型可能把文件写到了别的路径
         // （典型：漏传 section 落到 wiki 根、只传 slug 写成 <slug>.md）。
         // 此时把真实写入的文件移动回约定位置，而不是直接记为失败。
-        const outputFile = joinPath(getWikiDir(), page.section, page.file);
+        const outputFile = joinPath(wikiDir, page.section, page.file);
         if (!(await fileExists(outputFile))) {
-          const rescuedFrom = wrotePage ? await rescuePageFile(page, writeAttempts, getWikiDir()) : null;
+          const rescuedFrom = wrotePage ? await rescuePageFile(page, writeAttempts, wikiDir, variant) : null;
           if (rescuedFrom) {
             logger.warn(
               `[${page.slug}] write_page 写入路径与 wiki.json 不一致，已兜底移动到约定位置：${rescuedFrom} -> ${outputFile}`,

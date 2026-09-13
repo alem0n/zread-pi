@@ -93,6 +93,16 @@ export interface BlueprintStageContext {
   config: AppConfig;
   onEvent?: (event: CatalogEvent) => void;
   usage: BlueprintUsageTracker;
+  /**
+   * 写盘变体（档位子目录）：`wiki/<variant>/`。
+   * `null` = 遗留目录（sync 只读兼容既有产物时）；生成阶段始终是档位名。
+   */
+  variant: BlueprintDetailLevel | null;
+  /**
+   * 数量控制档位（缺省 = 配置档位）。
+   * 与 `variant` 不同：sync 遗留目录没有档位，此时仍按配置档位做数量控制。
+   */
+  detail?: BlueprintDetailLevel;
 }
 
 /**
@@ -199,9 +209,9 @@ async function runAgentAndSettle(
   }
 }
 
-/** 当前档位（旧配置 / 非法值已在 validateConfig 回退 high） */
+/** 当前档位（数量控制用；旧配置 / 非法值已在 validateConfig 回退 high） */
 function detailOf(context: BlueprintStageContext): BlueprintDetailLevel {
-  return context.config.blueprint.detail;
+  return context.detail ?? context.config.blueprint.detail;
 }
 
 function buildClassifyPrompt(spec: BlueprintDetailSpec, merge: boolean, extraContext?: string): string {
@@ -282,7 +292,7 @@ export async function runClassifyStage(
     exhausted: false,
   };
   const tool = trackOutputTool(
-    createSubmitSectionsTool({ merge, detail: spec.level, state: quantity }),
+    createSubmitSectionsTool({ merge, detail: spec.level, variant: context.variant, state: quantity }),
     state,
   );
 
@@ -301,7 +311,7 @@ export async function runClassifyStage(
     await persistSectionsAfterQuantityFailure(context, quantity, { merge, spec });
   }
 
-  const blueprint = await loadWikiBlueprint().catch((err: unknown) => {
+  const blueprint = await loadWikiBlueprint(undefined, context.variant).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`分类阶段未产出有效 wiki.json：${message}`, { cause: err });
   });
@@ -314,8 +324,11 @@ export async function runClassifyStage(
 }
 
 /** 读取某个分类下既有页面的标题（sync 代码兜底时优先保留旧页面用） */
-async function loadSectionPageTitles(sectionTitle: string): Promise<string[]> {
-  const blueprint = await loadWikiBlueprint();
+async function loadSectionPageTitles(
+  sectionTitle: string,
+  variant: BlueprintDetailLevel | null,
+): Promise<string[]> {
+  const blueprint = await loadWikiBlueprint(undefined, variant);
   const key = sectionTitle.trim().toLowerCase();
   return blueprint.pages
     .filter((page) => page.section.trim().toLowerCase() === key)
@@ -377,7 +390,7 @@ async function persistSectionsAfterQuantityFailure(
   if (!sections) {
     let existing: WikiSection[] | null = null;
     if (options.merge) {
-      const current = await loadWikiBlueprint().catch(() => null);
+      const current = await loadWikiBlueprint(undefined, context.variant).catch(() => null);
       existing = current ? current.sections ?? sectionsFromBlueprint(current) : null;
     }
     sections = codeFallbackSections({ input: payload, language, spec: options.spec, existing });
@@ -390,11 +403,13 @@ async function persistSectionsAfterQuantityFailure(
     await mergeWikiSections(sections, context.config, {
       limit: options.spec.sections.max,
       minimal: options.spec.level === 'minimal',
+      variant: context.variant,
     });
   } else {
     await initWikiSkeleton(sections, context.config, undefined, {
       limit: options.spec.sections.max,
       minimal: options.spec.level === 'minimal',
+      variant: context.variant,
     });
   }
 
@@ -447,6 +462,7 @@ export async function runTopicsStage(
         createSubmitSectionTopicsTool(section, {
           reuseExisting: options.reuseExisting,
           detail: spec.level,
+          variant: context.variant,
           state: quantity,
         }),
         state,
@@ -572,7 +588,7 @@ async function persistTopicsAfterQuantityFailure(
   if (!topics) {
     const preserveTitles =
       options.reuseExisting === true
-        ? await loadSectionPageTitles(section.title).catch(() => [])
+        ? await loadSectionPageTitles(section.title, context.variant).catch(() => [])
         : [];
     topics = condenseTopicsToMax(payload, options.spec.topics.max, { preserveTitles });
     quantity.lastNote = QUANTITY_FALLBACK_NOTE;
@@ -581,7 +597,10 @@ async function persistTopicsAfterQuantityFailure(
   }
 
   try {
-    await mergeSectionTopics(section, topics, { reuseExisting: options.reuseExisting });
+    await mergeSectionTopics(section, topics, {
+      reuseExisting: options.reuseExisting,
+      variant: context.variant,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(`[topics] 分类「${section.title}」兜底落盘失败：${message}`);
@@ -641,7 +660,7 @@ export async function runTitlesStage(
       const section = target.section;
       const key = `titles:${section.title}`;
       const state = { succeeded: false, error: undefined as string | undefined };
-      const tool = trackOutputTool(createRefineSectionTitlesTool(section), state);
+      const tool = trackOutputTool(createRefineSectionTitlesTool(section, { variant: context.variant }), state);
 
       emitStageEvent(context, 'titles', {
         type: 'requesting',

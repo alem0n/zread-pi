@@ -15,6 +15,7 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import type {
   AppConfig,
+  BlueprintDetailLevel,
   WikiLevel,
   WikiOutput,
   WikiPage,
@@ -286,9 +287,14 @@ async function writeWikiOutput(path: string, output: WikiOutput): Promise<void> 
 /**
  * 在文件锁保护下对 wiki.json 做「读-改-写」。
  * wiki.json 必须已存在（分类阶段会先落盘骨架）；不存在时抛出可读错误。
+ *
+ * `variant` 指定变体子目录（null / 缺省 = 遗留 `wiki/wiki.json`）。
  */
-async function withWikiOutput<T>(fn: (output: WikiOutput) => T | Promise<T>): Promise<T> {
-  const path = getWikiJsonPath();
+async function withWikiOutput<T>(
+  variant: BlueprintDetailLevel | null | undefined,
+  fn: (output: WikiOutput) => T | Promise<T>,
+): Promise<T> {
+  const path = getWikiJsonPath(variant);
   return withFileLock(path, async () => {
     let output: WikiOutput;
     try {
@@ -314,6 +320,11 @@ async function withWikiOutput<T>(fn: (output: WikiOutput) => T | Promise<T>): Pr
 export interface BlueprintSkeletonOptions extends BlueprintSectionOptions {
   /** 分类数量上限（档位决定；缺省 MAX_BLUEPRINT_SECTIONS） */
   limit?: number;
+  /**
+   * 写盘变体（档位子目录）：`wiki/<variant>/wiki.json`。
+   * 缺省 / null = 遗留 `wiki/wiki.json`（只读兼容，新生成不再使用）。
+   */
+  variant?: BlueprintDetailLevel | null;
 }
 
 export async function initWikiSkeleton(
@@ -333,10 +344,11 @@ export async function initWikiSkeleton(
       { minimal: options.minimal },
     ),
     pages: [],
+    ...(options.variant ? { detail: options.variant } : {}),
     ...(techStackSummary ? { techStackSummary } : {}),
   };
 
-  const outputPath = getWikiJsonPath();
+  const outputPath = getWikiJsonPath(options.variant);
   await withFileLock(outputPath, () => writeWikiOutput(outputPath, output));
 
   logger.success(`Wiki 骨架已生成: ${outputPath}（${output.sections?.length ?? 0} 个分类）`);
@@ -348,14 +360,15 @@ export async function initWikiSkeleton(
  * 保持既有分类与页面不动，只把模型新增的分类补进 sections。
  *
  * `options.limit` 为合并后的分类数上限（由蓝图细节档位决定）；
- * `options.minimal` = minimal 档位：既有分类替换为唯一的「概览」（页面不动）。
+ * `options.minimal` = minimal 档位：既有分类替换为唯一的「概览」（页面不动）；
+ * `options.variant` = 写盘变体（缺省 = 遗留目录）。
  */
 export async function mergeWikiSections(
   incoming: WikiSection[],
   config: AppConfig,
   options: BlueprintSkeletonOptions = {},
 ): Promise<WikiSection[]> {
-  return withWikiOutput((output) => {
+  return withWikiOutput(options.variant, (output) => {
     output.sections = options.minimal
       ? normalizeBlueprintSections(incoming, config.doc_language, 1, { minimal: true })
       : mergeBlueprintSections(
@@ -389,6 +402,8 @@ export interface MergeTopicsOptions {
    * sync 的主题阶段开启，保证未改动的页面不换 URL、不产生重复页。
    */
   reuseExisting?: boolean;
+  /** 写盘变体（档位子目录；缺省 / null = 遗留目录） */
+  variant?: BlueprintDetailLevel | null;
 }
 
 /**
@@ -407,7 +422,7 @@ export async function mergeSectionTopics(
 
   const incoming = Array.isArray(topics) ? topics : [];
 
-  return withWikiOutput((output) => {
+  return withWikiOutput(options.variant, (output) => {
     if (!Array.isArray(output.sections)) output.sections = [];
     if (!output.sections.some((entry) => sameTitle(entry.title, sectionTitle))) {
       output.sections.push(
@@ -497,15 +512,21 @@ export interface ApplyTitlesResult {
  * 批量写回标题（标题阶段）：只改 title，slug/file/section 保持不变。
  * slug 不属于该分类时计入 unknown 并跳过（不允许跨分类改标题）。
  */
+export interface ApplyTitlesOptions {
+  /** 写盘变体（档位子目录；缺省 / null = 遗留目录） */
+  variant?: BlueprintDetailLevel | null;
+}
+
 export async function applySectionTitles(
   section: WikiSection,
   titles: Array<{ slug?: string; title?: string }>,
+  options: ApplyTitlesOptions = {},
 ): Promise<ApplyTitlesResult> {
   const sectionTitle = section.title?.trim();
   if (!sectionTitle) throw new Error('section.title 不能为空');
   const incoming = Array.isArray(titles) ? titles : [];
 
-  return withWikiOutput((output) => {
+  return withWikiOutput(options.variant, (output) => {
     const pages = output.pages.filter((page) => sameTitle(page.section, sectionTitle));
     const bySlug = new Map(pages.map((page) => [page.slug, page]));
     const usedTitles = new Set(pages.map((page) => page.title.trim().toLowerCase()));
@@ -548,9 +569,12 @@ export async function applySectionTitles(
  * 覆盖写页面清单（sync 写回 status 用）：sections/techStackSummary 原样保留。
  * 需要 wiki.json 已存在。
  */
-export async function writeWikiPages(pages: WikiPage[]): Promise<string> {
-  const outputPath = getWikiJsonPath();
-  await withWikiOutput((output) => {
+export async function writeWikiPages(
+  pages: WikiPage[],
+  options: { variant?: BlueprintDetailLevel | null } = {},
+): Promise<string> {
+  const outputPath = getWikiJsonPath(options.variant);
+  await withWikiOutput(options.variant, (output) => {
     output.pages = pages;
   });
   return outputPath;
@@ -568,16 +592,18 @@ export async function generateWikiJson(
   pages: WikiPage[],
   config: AppConfig,
   techStackSummary?: TechStackSummary,
+  variant?: BlueprintDetailLevel | null,
 ): Promise<string> {
   const wikiOutput: WikiOutput = {
     id: generateWikiId(),
     generated_at: new Date().toISOString(),
     language: config.doc_language,
     pages,
+    ...(variant ? { detail: variant } : {}),
     techStackSummary,
   };
 
-  const outputPath = getWikiJsonPath();
+  const outputPath = getWikiJsonPath(variant);
   await writeJsonFile(outputPath, wikiOutput);
 
   logger.success(`Blueprint generated: ${outputPath}`);
@@ -592,12 +618,16 @@ export async function generateWikiJson(
  * 三阶段流程中先写骨架（sections + 空 pages）、再增量补齐页面，
  * 因此「pages 为空」只有在 sections 也为空时才算非法。
  *
- * @param path - Optional custom path (defaults to .zread-pi/wiki/wiki.json)
+ * @param path - Optional custom path (defaults to `.zread-pi/wiki[/<variant>]/wiki.json`)
+ * @param variant - 变体子目录（缺省 / null = 遗留目录）
  * @returns WikiOutput with pages array
  * @throws Error if blueprint not found or invalid structure
  */
-export async function loadWikiBlueprint(path?: string): Promise<WikiOutput> {
-  const wikiDir = getWikiDir();
+export async function loadWikiBlueprint(
+  path?: string,
+  variant?: BlueprintDetailLevel | null,
+): Promise<WikiOutput> {
+  const wikiDir = getWikiDir(variant);
   const blueprintPath = path ?? join(wikiDir, DEFAULT_BLUEPRINT_FILE);
 
   try {

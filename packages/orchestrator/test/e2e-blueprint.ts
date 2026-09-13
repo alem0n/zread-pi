@@ -320,7 +320,9 @@ process.chdir(repo);
 const { generateWikiCatalog } = await import("../src/orchestrator.js");
 const { loadWikiBlueprint } = await import("@zread-pi/utils");
 
-const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
+// 默认配置档位 high：产物落在变体子目录 `.zread-pi/wiki/high/`
+const WIKI_DETAIL = "high";
+const wikiJsonPath = join(repo, ".zread-pi", "wiki", WIKI_DETAIL, "wiki.json");
 
 console.log("▶ generateWikiCatalog()（三阶段）…");
 const events: Array<{ type: string; stage?: string; section?: string; progressTotal?: number }> = [];
@@ -334,7 +336,7 @@ const result = await generateWikiCatalog((event) => {
 		progressTotal: event.progress?.total,
 	});
 	if (event.stage === "classify" && event.type === "tool_result" && !skeletonCheck) {
-		skeletonCheck = loadWikiBlueprint().then((blueprint) => ({
+		skeletonCheck = loadWikiBlueprint(undefined, WIKI_DETAIL).then((blueprint) => ({
 			pages: blueprint.pages.length,
 			sections: blueprint.sections?.length ?? 0,
 		}));

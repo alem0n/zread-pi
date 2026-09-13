@@ -273,7 +273,8 @@ server.stop(true);
 // 4) 汇报产物
 // ---------------------------------------------------------------------------
 
-const wikiDir = join(target, ".zread-pi", "wiki");
+// low 档位变体目录（tools/mock-wiki-run.ts 的配置写入 `blueprint.detail: low`）
+const wikiDir = join(target, ".zread-pi", "wiki", "low");
 const blueprint = JSON.parse(await readFile(join(wikiDir, "wiki.json"), "utf-8")) as {
 	sections?: Array<{ title: string }>;
 	pages: Array<{ file: string; section: string }>;

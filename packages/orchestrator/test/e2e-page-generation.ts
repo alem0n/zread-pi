@@ -5,7 +5,7 @@
  *   -> 每个页面一个独立 Agent（业务并发模型未改动）
  *   -> @zread-pi/agent-runtime 适配层 -> pi Agent 循环
  *   -> mock LLM 返回 write_page 工具调用
- *   -> 真实工具执行：写出 .zread-pi/wiki/<section>/<file>
+ *   -> 真实工具执行：写出 .zread-pi/wiki/<variant>/<section>/<file>
  *
  * 运行：bun run packages/orchestrator/test/e2e-page-generation.ts
  */
@@ -25,6 +25,9 @@ const repo = await mkdtemp(join(tmpdir(), "zread-pi-repo-"));
 await mkdir(join(home, ".zread-pi"), { recursive: true });
 await mkdir(join(repo, "src"), { recursive: true });
 await writeFile(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+
+/** 默认配置档位 high：页面产物落在 `.zread-pi/wiki/high/` */
+const wikiDir = join(repo, ".zread-pi", "wiki", "high");
 
 // ---------------------------------------------------------------------------
 // mock LLM：对每个页面 Agent 返回一次 write_page 工具调用，再返回收尾文本
@@ -150,7 +153,7 @@ const server = Bun.serve({
 					write(chunk(baseChunk({}, "stop")));
 				} else if (!hasToolResult) {
 					write(chunk(baseChunk({ role: "assistant", content: "" }, null)));
-					// misplacedPage 刻意漏传 file/section：模型把页面写到 .zread-pi/wiki/<slug>.md
+					// misplacedPage 刻意漏传 file/section：模型把页面写到 .zread-pi/wiki/<variant>/<slug>.md
 					const writeArgs = isMisplacedPage
 						? {
 							slug: page.slug,
@@ -258,9 +261,9 @@ server.stop(true);
 
 console.log("\n▶ 断言");
 const files = [
-	join(repo, ".zread-pi", "wiki", "入门指南", "1-overview.md"),
-	join(repo, ".zread-pi", "wiki", "入门指南", "2-arch.md"),
-	join(repo, ".zread-pi", "wiki", "参考", "3-api.md"),
+	join(wikiDir, "入门指南", "1-overview.md"),
+	join(wikiDir, "入门指南", "2-arch.md"),
+	join(wikiDir, "参考", "3-api.md"),
 ];
 const contents = await Promise.all(files.map((file) => readFile(file, "utf-8").catch(() => "")));
 check(
@@ -276,9 +279,9 @@ check(
 );
 check(
 	"非法 Mermaid 被 WritePageTool 拦截：页面未落盘，其它页面不受影响",
-	(await readFile(join(repo, ".zread-pi", "wiki", "参考", "4-bad-mermaid.md"), "utf-8").catch(() => "")) === "" &&
+	(await readFile(join(wikiDir, "参考", "4-bad-mermaid.md"), "utf-8").catch(() => "")) === "" &&
 		contents.every((content) => content.includes("由 pi 驱动生成")),
-	`badPageWritten=${(await readFile(join(repo, ".zread-pi", "wiki", "参考", "4-bad-mermaid.md"), "utf-8").catch(() => "")) !== ""}`,
+	`badPageWritten=${(await readFile(join(wikiDir, "参考", "4-bad-mermaid.md"), "utf-8").catch(() => "")) !== ""}`,
 );
 check("进度回调被触发", progress.length >= 1, progress.join(","));
 check(
@@ -296,8 +299,8 @@ check(
 );
 
 // ---- 落盘兜底：write_page 写错路径时移回 wiki.json 约定位置 ----
-const misplacedTarget = join(repo, ".zread-pi", "wiki", "参考", "6-misplaced.md");
-const misplacedWrongPath = join(repo, ".zread-pi", "wiki", "6-misplaced.md");
+const misplacedTarget = join(wikiDir, "参考", "6-misplaced.md");
+const misplacedWrongPath = join(wikiDir, "6-misplaced.md");
 const misplacedContent = await readFile(misplacedTarget, "utf-8").catch(() => "");
 check(
 	"write_page 写错路径时被兜底移动到 wiki.json 约定位置",
@@ -318,7 +321,7 @@ check(
 check("每个页面都发生了真实模型调用（>=8 次请求）", requests >= 8, `requests=${requests}`);
 
 // ---- 预算耗尽：before_run_end 强制交卷后仍无 write_page → 编排层判页失败 ----
-const budgetTarget = join(repo, ".zread-pi", "wiki", "参考", budgetPage.file);
+const budgetTarget = join(wikiDir, "参考", budgetPage.file);
 const budgetResult = result.results.find((entry) => entry.slug === budgetPage.slug);
 check(
 	"预算耗尽且仍无 write_page：页面计为失败并发出 page_error",

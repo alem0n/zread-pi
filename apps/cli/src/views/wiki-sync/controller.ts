@@ -6,6 +6,7 @@
  */
 
 import { loadConfig, WikiStore } from "@zread-pi/utils";
+import type { BlueprintDetailLevel } from "@zread-pi/types";
 import {
   generateWikiContent,
   syncWiki,
@@ -17,7 +18,12 @@ import { syncArticleEventToState, syncCatalogEventToState, type SyncCatalogEvent
 import type { WikiSyncState } from "./types";
 
 export interface WikiSyncControllerOptions {
-  wiki: { reload: () => Promise<void> };
+  /** TUI 的 WikiStore（变体感知）：`detail` = 活动变体，`targetDetail` = 写盘目标 */
+  wiki: {
+    reload: () => Promise<void>;
+    detail: BlueprintDetailLevel | null;
+    targetDetail: BlueprintDetailLevel;
+  };
   onChange: () => void;
 }
 
@@ -72,6 +78,7 @@ export class WikiSyncController {
     try {
       await generateWikiContent({
         pages: [page],
+        detail: this.syncDetail,
         maxConcurrent: concurrent,
         onEvent: (event) => this.handleArticleEvent(event),
       });
@@ -86,13 +93,22 @@ export class WikiSyncController {
 
   // ==================== 内部实现 ====================
 
+  /**
+   * 同步读写的档位变体：优先活动变体；活动变体是遗留目录（null）时用配置档位，
+   * 但**遗留目录本身不会被写入**（若目标档位尚无 wiki.json，syncWiki 会报可读错误）。
+   */
+  private get syncDetail(): BlueprintDetailLevel {
+    return this.options.wiki.detail ?? this.options.wiki.targetDetail;
+  }
+
   private async runSync(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
 
     try {
-      // 阶段1-2: syncWiki
-      const result = await syncWiki((event) => this.handleCatalogEvent(event));
+      // 阶段1-2: syncWiki（只读写一个变体目录）
+      const detail = this.syncDetail;
+      const result = await syncWiki((event) => this.handleCatalogEvent(event), { detail });
 
       // 设置 syncPages
       const allPages = [
@@ -106,8 +122,8 @@ export class WikiSyncController {
       this.options.onChange();
 
       // 阶段3: 执行
-      // 3a: 归档
-      const store = new WikiStore();
+      // 3a: 归档（变体目录内 `<detail>/archived/...`）
+      const store = new WikiStore(detail);
       for (const page of result.diff.archivedPages) {
         await store.archivePage(page);
       }
@@ -123,6 +139,7 @@ export class WikiSyncController {
         const concurrent = await this.loadConcurrency();
         await generateWikiContent({
           pages: [...result.diff.newPages, ...result.diff.updatedPages],
+          detail,
           maxConcurrent: concurrent,
           onEvent: (event) => this.handleArticleEvent(event),
         });
