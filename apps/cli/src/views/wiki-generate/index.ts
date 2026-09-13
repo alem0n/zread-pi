@@ -18,6 +18,7 @@ import { Screen } from "../../tui/screen";
 import { theme } from "../../theme";
 import { formatBytes, formatDuration } from "../../utils/display";
 import { WikiGenerateController } from "./controller";
+import { cacheHitRatio, collectUsageTotals, formatPercent } from "./usage";
 import type { WikiPage } from "./types";
 
 type ArticleItem = { value: string; page: WikiPage };
@@ -98,7 +99,7 @@ export default class WikiGeneratePage extends Screen {
     // 目录生成部分
     lines.push(...this.renderCatalogSection(width));
 
-    // 底部导航（marginTop={1}）
+    // 底部导航（marginTop={1}）+ 用量合计（有数据时才是最后一行）
     const footer = [
       "",
       style(
@@ -106,11 +107,34 @@ export default class WikiGeneratePage extends Screen {
         { dim: true },
       ),
     ];
+    const usageTotals = this.renderUsageTotals();
+    if (usageTotals) footer.push(usageTotals);
 
     // 文章生成部分（目录完成后显示）
     lines.push(...this.renderArticlesSection(width, lines.length, footer.length));
 
     return [...lines, ...footer];
+  }
+
+  /**
+   * 底部合计行：全部 Agent（目录 + 每个页面）的输入 / 输出 token 与缓存占比。
+   *
+   * 用量为 0（尚未开始或打开的文档已全部存在）时返回 null，不占屏幕行。
+   * 并发正确性见 ./usage.ts 的模块注释：每页各自的累计快照做幂等 reduce。
+   */
+  private renderUsageTotals(): string | null {
+    const { catalog, articles } = this.controller.state;
+    const totals = collectUsageTotals(catalog, articles);
+    if (totals.total <= 0) return null;
+
+    return style(
+      this.t("wikiGenerate.usageTotals", {
+        input: formatBytes(totals.totalInput),
+        output: formatBytes(totals.output),
+        ratio: formatPercent(cacheHitRatio(totals)),
+      }),
+      { dim: true },
+    );
   }
 
   // ==================== 目录段 ====================

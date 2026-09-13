@@ -9,7 +9,7 @@
  * - LLM 重试与 token 预算由适配层（harness）处理
  */
 
-import { createAgent as CreateAgentSdk, hasZreadProvider, DEFAULT_MAX_AGENT_RETRY_DELAY_MS, DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
+import { createAgent as CreateAgentSdk, hasZreadProvider, DEFAULT_MAX_AGENT_RETRY_DELAY_MS, DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS, addTokenUsage, emptyTokenUsage, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
 import { getProjectHome, loadConfig, logger } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
@@ -134,8 +134,10 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       `${tokenBudget === undefined && maxTurns > 0 ? ` (由 max_turns=${maxTurns} 折算)` : ''}, baseURL: ${baseURL}`,
   );
 
-  // Token 累积统计
-  let totalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+  // Token 累积统计：assistant 事件带的是「该次响应」的用量（见 test:agent:http 断言），
+  // 这里累加成「本次 Agent 运行至今」的累计快照，供 UI 的每页展示与跨页合计使用；
+  // 最终以 result 事件的 usage（harness usage ledger 的权威累计）为准覆盖。
+  let totalUsage: TokenUsage = emptyTokenUsage();
 
   // 构建钩子配置（如果有 onEvent 回调）
   const onEvent = options.onEvent;
@@ -255,7 +257,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     // Log progress
     if (isAssistantMessage(msg)) {
       if (msg.usage) {
-        totalUsage = msg.usage;
+        totalUsage = addTokenUsage(totalUsage, msg.usage);
       }
 
       for (const block of msg.message?.content || []) {
@@ -297,6 +299,8 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
           type: 'error',
           error: errors,
           durationMs: Math.round(performance.now() - startTime),
+          // 失败也要归账：带上最后一次累计用量，供 UI 合计（否则失败页记为 0）
+          usage: totalUsage,
         });
         if (msg.errors) {
           for (const err of msg.errors) {

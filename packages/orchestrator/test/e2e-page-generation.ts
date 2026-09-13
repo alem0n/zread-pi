@@ -235,12 +235,18 @@ const { generateWikiContent } = await import("../src/wiki/generate-wiki.js");
 
 const progress: string[] = [];
 const events: string[] = [];
+// 事件级用量快照：用于验证失败路径也带上「最后一次累计用量」（底部合计的依据）
+const eventUsages = new Map<string, { input_tokens: number; output_tokens: number } | undefined>();
 console.log("▶ generateWikiContent({ maxConcurrent: 3 }) …");
 const result = await generateWikiContent({
 	pages: [...pages, badPage, noWritePage, misplacedPage, budgetPage],
 	maxConcurrent: 3,
 	onEvent: (event) => {
 		events.push(`${event.type}:${event.slug}`);
+		eventUsages.set(
+			`${event.type}:${event.slug}`,
+			event.usage ? { input_tokens: event.usage.input_tokens, output_tokens: event.usage.output_tokens } : undefined,
+		);
 	},
 	onProgress: (state) => {
 		progress.push(`${state.completed}/${state.total}`);
@@ -334,6 +340,11 @@ check(
 	"预算耗尽后探索轮数有限（3 轮探索 + 1 轮熔断后收尾 + 1 轮强制交卷）",
 	budgetPageRounds === 5,
 	`budgetPageRounds=${budgetPageRounds}`,
+);
+check(
+	"page_error 带上最后一次累计用量（失败页也计入合计）",
+	(eventUsages.get(`page_error:${budgetPage.slug}`)?.input_tokens ?? 0) >= 120,
+	JSON.stringify(eventUsages.get(`page_error:${budgetPage.slug}`) ?? null),
 );
 
 process.chdir(join(repo, ".."));

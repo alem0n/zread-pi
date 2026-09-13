@@ -30,6 +30,10 @@ function check(name: string, condition: boolean, detail?: string): void {
   }
 }
 
+function checkContains(name: string, haystack: string, needle: string): void {
+  check(name, haystack.includes(needle), `未找到: ${JSON.stringify(needle)}`);
+}
+
 // ---------------------------------------------------------------------------
 // 1) mock LLM（OpenAI 兼容 SSE）
 // ---------------------------------------------------------------------------
@@ -96,7 +100,14 @@ const usageChunk = JSON.stringify({
   created: Math.floor(Date.now() / 1000),
   model: "mock-model",
   choices: [],
-  usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+  // 120 prompt = 60 非缓存输入 + 60 缓存读 → 用于验证底部合计行的缓存占比：
+  // 目录 Agent + 两个页面 Agent 各两次请求，6 次合计输入 720、输出 180、缓存占比 50.0%
+  usage: {
+    prompt_tokens: 120,
+    completion_tokens: 30,
+    total_tokens: 150,
+    prompt_tokens_details: { cached_tokens: 60 },
+  },
 });
 
 let requestCount = 0;
@@ -286,6 +297,18 @@ check("目录完成后展示文章列表", catalogDone);
 
 const allDone = await waitFor(() => screenText().includes("文章 2/2"), 30000, "全部页面生成完成");
 check("两篇文章全部完成（文章 2/2）", allDone);
+
+// 底部合计行：目录 Agent + 两个页面 Agent（各两次请求）的累计用量；
+// 单次请求 60 非缓存输入 + 60 缓存读 + 30 输出 → 合计输入 720、输出 180、缓存占比 50.0%
+const totalsText = screenText();
+checkContains("底部显示用量合计（输入 token）", totalsText, "合计 输入 720");
+checkContains("底部显示用量合计（输出 token）", totalsText, "输出 180");
+checkContains("底部显示缓存占比", totalsText, "缓存占比 50.0%");
+check(
+  "用量合计行是页面的最后一行",
+  totalsText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 720 · 输出 180 · 缓存占比 50.0%",
+  totalsText.trimEnd().split("\n").at(-1) ?? "(空)",
+);
 
 const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
 const wikiJsonExists = await stat(wikiJsonPath).then(

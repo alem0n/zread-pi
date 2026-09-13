@@ -147,7 +147,9 @@ export function catalogEventToState(
     case 'error':
       nextState = {
         status: 'failed',
-        usage: event.usage,
+        // 失败事件可能不带用量（例如扫描/解析阶段抛错）：保留最后一次已知快照，
+        // 否则目录已消耗的 token 会被合计清零。
+        usage: event.usage ?? state.usage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
       };
@@ -265,7 +267,8 @@ export function articleEventToState(
     case 'page_error':
       newPageStatus = {
         status: 'failed',
-        usage: event.usage, // 直接使用，不累加
+        // 同目录错误：失败事件不带用量时沿用该页最后一次快照（失败页也要计入合计）
+        usage: event.usage ?? currentStatus.usage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
       };
