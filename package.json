@@ -31,7 +31,7 @@
     "vendor:build": "bun run tsc -p vendor/pi/packages/telemetry/tsconfig.build.json && bun run tsc -p vendor/pi/packages/chord/tsconfig.build.json && bun run tsc -p vendor/pi/packages/ai/tsconfig.app.json && bun run tsc -p vendor/pi/packages/agent/tsconfig.build.json && bun run tsc -p vendor/pi/packages/tui/tsconfig.build.json",
     "browse:build": "cd apps/browse && bun run build",
     "browse:dev": "cd apps/browse && bun run dev",
-    "test:blueprint": "bun run packages/orchestrator/test/e2e-blueprint.ts && bun run packages/orchestrator/test/context-files.ts && bun run packages/orchestrator/test/style-discipline.ts",
+    "test:blueprint": "bun run packages/orchestrator/test/e2e-blueprint.ts && bun run packages/orchestrator/test/e2e-sync.ts && bun run packages/orchestrator/test/context-files.ts && bun run packages/orchestrator/test/style-discipline.ts",
     "test:browse": "bun run apps/cli/test/browse-server.ts",
     "test:tui": "bun run apps/cli/test/smoke-tui.ts && bun run apps/cli/test/render-all-routes.ts && bun run apps/cli/test/real-run-check.ts && bun run apps/cli/test/output-guard.ts && bun run apps/cli/test/cli-target-dir.ts && bun test apps/cli/src/views/wiki-generate/__tests__ && bun run apps/cli/test/mock-generate.ts && bun run test:browse",
     "mock:wiki": "bun run tools/mock-wiki-run.ts",
