@@ -37,18 +37,20 @@
 > （`pi-ai` + `pi-agent-core`）之上，专为「理解代码库」这件事打造。
 
 - **三层 Repo Map** —— 目录拓扑 → 高频签名 → 按需深挖。超大规模仓库也不会撑爆上下文预算。
+- **仓库自述注入** —— 目标仓库若有 `AGENTS.md` / `CLAUDE.md`（含大小写变体与全局 `~/.zread-pi`），会把里面的架构说明与约定注入页面 Agent 的系统提示，让生成的 Wiki 与仓库自述保持一致。
 - **符号级增量缓存** —— 基于 AST hash；未变更的符号跨运行直接跳过，Wiki 同步只重新生成源码确实变过的页面。
 - **并行页面 Agent** —— `p-limit` 调度扇出，并发可配置；每个 Agent 只拥有一个 Wiki 页面，只读它需要的真实代码。
+- **图片读取管线** —— `Read` 读图片时自动缩放到 2000×2000 / 4.5MB 以内（省 token、避免被 provider 拒收），BMP 等非内联格式自动转 PNG，并给出坐标换算提示。
 - **上下文自动压缩** —— 由 pi 的 AgentHarness 内建承担：接近模型上下文上限时自动生成摘要（compact boundary）继续工作；实在腾不出空间时优雅停止，而不是等 provider 报上下文溢出。
 - **token 预算 + 两段式提示** —— 预算按 harness 的 usage 事件/账本累计真实 tokens（不是数轮次）：用到约 70% 时注入软提示收敛，预算将尽时注入硬提示并给强制交卷轮，避免「探索不停、从不产出」。
 - **思考深度可选** —— 7 档 thinking level（off → max），由模型能力自动 clamp，不支持的档位清楚标注。
 - **Provider 无关** —— 统一抽象 Anthropic Messages 与 OpenAI Chat Completions 协议；在 TUI 里选 Provider、贴 API Key、
   挑模型，三步完成，可同时配置多个 Provider。
-- **流级重试** —— 429 / 5xx / 网络错误指数退避（由 harness 的 retry policy 承担），只在「未产出内容」时重试，失败尝试不污染会话记录。
+- **两层重试，尊重服务端语义** —— Agent 层指数退避（60s 封顶）只在「未产出内容」时重试，失败尝试不污染会话记录；Provider 层读取服务端 `Retry-After` 并按上限封顶，429 高峰期不会重试过早。
 - **本地 Web 阅读器** —— `zread-pi browse` 启动 React 19 + Vite 预览站：侧边导航、Mermaid 图表渲染（支持放大查看）。
 - **Wiki 同步，而不是 Wiki 覆盖** —— diff 感知的再生成：页面被标记为 `new` / `updated` / `unchanged` / `archived`，
   像审代码 diff 一样审文档变更。
-- **全局记忆** —— 生成过的项目自动记录（`zread-pi history` 一键清理失效项），老项目打开即自动补录。
+- **全局记忆** —— 生成过的项目自动记录（`zread-pi history` 一键清理失效项），老项目打开即自动补录；配置 / 凭据 / 记忆的跨进程写入都有文件锁保护。
 
 ## Quick Start
 
@@ -216,6 +218,8 @@ zread-pi 不会把代码一股脑塞给 LLM，而是模仿资深架构师读代�
 - `~/.zread-pi/config.yaml` —— 非敏感配置：UI / 文档语言、`llm.provider/model`、每个 Provider 的
   `base_url` 与自定义模型、思考深度（`llm.thinking_level`）、token 预算（`agent.token_budget`，0 = 按
   `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、外部工具开关（`tools.<id>.enabled`）。
+  重试次数（`concurrency.max_retries`，0–5，0 = 不重试，配置界面 `/config/retry`）同时下发到 Agent 层与
+  Provider 层：前者指数退避（2s 起、60s 封顶），后者在单次请求内读取服务端 `Retry-After`。
 - `~/.zread-pi/auth.json` —— pi-ai 格式凭据（API Key），可同时保存多个 Provider；**秘密不进 config.yaml**。
 - `~/.zread-pi/models-store.json` —— 动态 Provider 的模型目录缓存。
 

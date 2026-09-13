@@ -687,3 +687,133 @@ apps/cli ──► orchestrator ──► agent-runtime ──► vendor/pi（Ag
 | `bun test packages/repo-analyzer/src/repo-map` | 17/17（`estimateTokens` 断言已改为「pi 的 chars/4 + 渲染文本」） |
 | `bun run test` | 全部套件通过（test:analyzer 5/5、test:agent 11/11、test:context 45/45、test:pages 15/15 + 7/7、test:tui 187+9+25+21+28） |
 | `bun run mock:wiki` | `completed=4 failed=0`（真实跑过 buildRepoMap + 页面生成） |
+
+## 14. 对齐 pi coding-agent 的五项高价值改进（第十二步）
+
+### 14.1 目标
+
+`pi/packages/coding-agent` 里有五块已被真实用户长期打磨的能力，而 zread-pi 的等价位置是手工实现或缺失：
+
+| # | 能力 | 迁移前 | 迁移后 |
+|---|---|---|---|
+| 1 | 图片处理管线 | `Read` 只做 magic number 判型后原样回传 image 块：大图按原始尺寸烧 token，BMP 直接被拒 | 格式归一化 + 自动缩放（2000×2000 / 4.5MB base64）+ 转换/缩放提示 |
+| 2 | 目标仓库上下文注入 | 页面 / 蓝图 Agent 只看代码，仓库自己的 `AGENTS.md` / `CLAUDE.md` 里写好的架构说明与约定完全没用上 | 候选文件（`AGENTS.override.md` > `AGENTS.md` > `AGENTS.MD` > `CLAUDE.md` > `CLAUDE.MD`）+ 全局 `~/.zread-pi` 上下文注入系统提示 |
+| 3 | 重试策略 | Agent 层固定 10 秒延迟、忽略服务端 `Retry-After`；`concurrency.max_retries: 0` 还会被 harness 默认策略放大成 3 次 | Agent 层指数退避（2s→4s→…，60s 封顶）+ Provider 层 `retryProviderRequest`（读 `Retry-After`，超上限立即失败）+ 显式禁用语义 |
+| 4 | 配置写入加锁 | 配置 / 凭据 / 安装台账 / history 都是进程内串行化，多 CLI 实例并发写会互相覆盖（history 整文件写尤其危险） | `<file>.lock` 跨进程锁把「读-改-写」包成临界区，配置写入额外做临时文件 + rename 原子替换 |
+| 5 | TUI stdout 保护 | 只接管了 `console.*`；第三方库直接 `process.stdout.write` 仍会把全屏界面打花 | 接管 `process.stdout.write`：TUI 自身写入走放行窗口直达原生 stdout，杂散写入进日志文件 |
+
+采纳方式与 §13 一致：**先从 `pi/packages/coding-agent` 复制对应模块（含来源注释），再把原实现接入/替换掉**，
+不引入 `pi-coding-agent` 包（依赖面与 TUI 生态不匹配，见 §1 判定）。
+
+### 14.2 逐项落地
+
+#### 14.2.1 图片处理管线（`packages/agent-runtime/src/tools/image/`）
+
+移植自 `pi/packages/coding-agent/src/utils/{image-process,image-resize,image-resize-core,image-resize-worker,image-convert,photon,exif-orientation}.ts`，共 7 个文件：
+
+| 文件 | 职责 | 与上游的差异 |
+|---|---|---|
+| `photon.ts` | 加载 `@silvia-odwyer/photon-node`（Rust/WASM）；修补 Bun 编译产物里 wasm 的绝对路径 | 无 |
+| `exif-orientation.ts` | 解析 JPEG/WebP 的 EXIF Orientation 并真正旋转像素 | 无 |
+| `image-resize-core.ts` | 缩放策略：先 PNG 再多档 JPEG，仍超标按 0.75 逐级缩小 | 无 |
+| `image-resize-worker.ts` | Worker 线程入口（CPU 密集不阻塞 TUI） | 无 |
+| `image-resize.ts` | 优先 Worker、失败回退进程内；坐标换算提示 | 去掉上游的「Bun 下先试相对仓库源码路径」分支（zread-pi 的 cwd 是被生成文档的目标仓库，该路径无意义）；打包产物里 worker 文件缺失时自然回退进程内 |
+| `image-convert.ts` | BMP/TIFF 等转 PNG | 无 |
+| `image-process.ts` | 管线入口：归一化 → 缩放 → 提示 | 无 |
+
+接入点：`tools/read.ts` 仅在「模型支持图片」时调用 `processImage()`（不支持图片的模型不做无谓的 CPU 工作），
+失败时回退为文本说明（`[Image omitted: …]`），而不是让工具调用失败。
+
+#### 14.2.2 目标仓库上下文注入（`packages/orchestrator/src/agents/context-files.ts`）
+
+移植自 `pi/packages/coding-agent/src/core/resource-loader.ts` 的 `loadContextFileFromDir()` / `loadProjectContextFiles()`
+与 `system-prompt.ts` 的 `<project_context>` 注入格式。
+
+- 候选顺序与上游一致：`AGENTS.override.md` → `AGENTS.md` → `AGENTS.MD` → `CLAUDE.md` → `CLAUDE.MD`；
+- 注入顺序：全局（`~/.zread-pi`）在前、目标仓库（cwd）在后；
+- **差异（有意）**：不向上遍历父目录。zread-pi 的工作目录就是被生成文档的仓库根，
+  父目录（例如用户主目录）里的 `AGENTS.md` 与本次文档无关，注入只会增加噪音与 token；
+- **差异（有意）**：单文件 64 KiB 上限，超出部分截断并附 `[... context file truncated at 64 KiB ...]`
+  （页面 Agent 是 N 个并发实例，每个都会吃这份上下文）；
+- 接入点：`agents/create-agent.ts`（蓝图与页面 Agent 共用），系统提示 = 语言规则 + `<project_context>` 块。
+
+#### 14.2.3 重试策略：两层退避 + Retry-After
+
+`RetryConfig` 新增可选 `provider: { maxRetries, maxRetryDelayMs, timeoutMs }`（与 pi 的 `ProviderRetrySettings` 同形），
+`retry.ts` 新增 `toStreamOptions()` 把它翻译成 harness 的 `streamOptions`，由 `driver.ts` 传给 `AgentHarness.create`。
+
+| 层 | 迁移前 | 迁移后 |
+|---|---|---|
+| Agent 层（harness `RetryPolicy`） | `baseDelayMs = maxDelayMs = 10000`（固定 10s） | `baseDelayMs = 2000`、`maxDelayMs = 60000`（指数退避 + 封顶） |
+| Provider 层（pi-ai `retryProviderRequest`） | 未启用（`maxRetries` 默认 0） | `maxRetries = concurrency.max_retries`、`maxRetryDelayMs = 60000`，**读取服务端 `Retry-After` / `retry-after-ms`** |
+| `maxRetries = 0` | `toRetryPolicy` 返回 `undefined` → harness 落回**默认策略（3 次）**，配置失效 | 返回**显式禁用**策略（`enabled: false`），配置生效 |
+
+超上限的服务端延迟（例如 `Retry-After: 120` vs 上限 60s）会被 pi-ai 立即判定失败，
+错误文本带 `Server requested 120s retry delay (max: 60s)`（匹配 `isRetryableAssistantError` 的 `retry delay` 模式），
+由 Agent 层决定是否继续退避 —— 与 pi 的行为一致。
+
+#### 14.2.4 配置写入加锁（`packages/utils/src/lockfile.ts`）
+
+移植自 `pi/packages/coding-agent/src/core/settings-manager.ts` 的 `FileSettingsStorage.withLock`（`proper-lockfile`），
+语义保持一致（`realpath: false`、`ELOCKED` 重试 10 × 20ms、文件不存在也能先加锁）。
+
+| 目标文件 | 调用点 | 保护方式 |
+|---|---|---|
+| `config.yaml` | `saveConfig()` | 跨进程锁 + 临时文件 rename 原子替换 |
+| `auth.json` | `FileCredentialStore.modify()/delete()` | 跨进程锁包住整个「读-改-写」（进程内每 Provider 队列保留） |
+| `tools-state.json` | `recordToolInstall()/clearToolInstall()` | 跨进程同步锁包住「读-改-写」 |
+| `history` | `rememberProject/ensureProjectRecorded/forgetProject/clearHistory/readHistory/pruneHistory` | 跨进程锁包住 open + 变更 + 落盘；prune 的目录检查放在锁外并发执行，回到锁内重新 open 后应用删除 |
+
+**差异（有意）**：锁获取失败（重试耗尽）按写入失败处理并向上抛错（`saveConfig` 会提示「保存失败」），
+不做「静默退化为无锁写」——无锁写的后果是数据损坏，比明确失败更糟。
+
+#### 14.2.5 TUI stdout 保护（`apps/cli/src/tui/{output-guard,guarded-terminal}.ts`）
+
+移植自 `pi/packages/coding-agent/src/core/output-guard.ts`，保留全部原语
+（`takeOverStdout` / `restoreStdout` / `isStdoutTakenOver` / `writeRawStdout` / `flushRawStdout`、ENOBUFS/EAGAIN 重试队列）。
+
+zread-pi 侧的接入差异：
+
+| 差异 | 原因 |
+|---|---|
+| `takeOverStdout({ redirect })` 可选 `"stderr"`（默认，pi 语义）/ `"log"` / 回调 | 全屏 TUI 里 stderr 与 stdout 是同一终端，杂散输出写 stderr 一样会在备用屏幕滚动花屏；zread-pi 既有的 console-guard 约定是「TUI 期间杂散输出进日志文件」，两者统一 |
+| `runWithRawStdout(fn)` 放行窗口 + `GuardedProcessTerminal` | pi-tui 的终端组件直接调 `process.stdout.write`；放行窗口让渲染帧与控制序列直达原生 stdout，保持顺序 |
+| `passthroughTerminalSequences`（ESC 开头整块放行） | pi-tui 的 Kitty/modifyOtherKeys 协商发生在异步回调里，拿不到放行窗口；ESC 前缀既是它们共同的特征，也不会被普通日志误用 |
+| TUI 渲染默认换成 `GuardedProcessTerminal` | 与接管配套；测试注入的终端不受影响 |
+| `zread-pi history` 也接管 stdout | 该命令输出是「可被脚本消费」的路径清单；杂散写入转 stderr，清单走 `writeRawStdout` |
+
+### 14.3 依赖变更
+
+| 包 | 版本 | 位置 | 说明 |
+|---|---|---|---|
+| `@silvia-odwyer/photon-node` | 0.3.4 | `packages/agent-runtime` | Rust/WASM 图片处理；三平台均有 wasm，无原生编译 |
+| `proper-lockfile` | 4.1.2（+ `@types/proper-lockfile` 4.1.4） | `packages/utils` | 基于 mkdir 的跨进程锁，纯 JS |
+
+打包相关：`apps/cli` 的 tsup `onSuccess` 会把 `photon_rs_bg.wasm` 复制进 `dist/`（打包后按 `__dirname` 读取），
+`tools/build-binary.ts` 会把它复制到 standalone 二进制旁（photon 兜底路径按 `process.execPath` 同目录查找）。
+
+### 14.4 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:tools` | 102/102（新增 7 项：大图缩放 + 坐标提示、BMP→PNG、`autoResizeImages=false` 原样回传、无法解码降级、损坏图片回退文本） |
+| `bun run test:agent` | 17/17（新增 6 项：provider 重试配置透传为 `streamOptions`、`toRetryPolicy`/`toStreamOptions` 纯函数映射、`maxRetries=0` 显式禁用） |
+| `bun run test:agent:http` | 12/12（新增 3 项：429+`Retry-After: 0.05` 实际等待 ~60ms 完成重试、超上限 `Retry-After: 120` 立即失败且错误含 `retry delay`） |
+| `bun run test:lock` | 10/10（新增套件：互斥、异常释放、`ELOCKED` 失败、`saveConfig` 并发写、**6 个真实子进程并发写 history 一条不丢**） |
+| `bun run test:blueprint` | 9/9 + 11/11（新增：e2e 断言系统提示带 `<project_context>` 且全局在前；context-files 纯函数 11 项） |
+| `bun run test` | 全部套件通过（catalog 34、tools 102、installer 70、history 61+24+10、lock 10、http 12、provider 5、analyzer 5+17、blueprint 9+11、pages 15+7、context 45、tui 187+9+10+25+21+28） |
+| `bun run mock:wiki` | `completed=4 failed=0` |
+| `cd apps/cli && bun run build` | 成功；`dist/photon_rs_bg.wasm` 已随构建产出 |
+
+### 14.5 风险与未决
+
+- **Provider 层重试的等待对 UI 不可见**：`retryProviderRequest` 在请求内部退避（可能等待数秒），
+  TUI 的 `retry` 事件只在 Agent 层重试时发出。pi coding-agent 相同；如需可见再走 `onRetry` 扩展。
+- **两层重试的放大系数**：`concurrency.max_retries = N` 同时下发到两层，最坏情况下请求数为 `N(N+1)`。
+  配置界面上限为 5，且 token 预算/上下文窗口仍会兜底；后续可在配置里拆成两个旋钮。
+- **图片缩放的 CPU 成本**：Worker 不可用（打包产物缺 worker 文件）时回退进程内执行，大图会短暂阻塞主线程。
+- **history 锁的粒度**：锁包住整个「open → 变更 → 落盘」。多实例同时生成大量项目时会出现短暂排队；
+  prune 的目录探测已移出锁外，主要耗时不在锁内。
+- **`AutoCompact` 与锁**：`HistoryLog` 自身的 compact / 修复写仍在锁内执行（经公开入口进入），
+  直接使用 `HistoryLog` 的外部调用方需要自行持锁（当前仓库没有这种调用方）。
