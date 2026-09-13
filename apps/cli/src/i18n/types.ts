@@ -39,6 +39,7 @@ export interface TranslationKeys {
     llmProvider: string;
     thinkingLevel: string;
     maxTurns: string;
+    polish: string;
     maxConcurrency: string;
     maxRetries: string;
     default: string;
@@ -193,6 +194,25 @@ export interface TranslationKeys {
     hint: string;
     invalid: string;
     current: string;
+    footer: string;
+  };
+  polish: {
+    /** 页面标题 */
+    title: string;
+    /** 当前值 */
+    current: string;
+    /** 两层机制说明 */
+    intro: string;
+    /** 开/关与模式标签 */
+    enabled: string;
+    disabled: string;
+    modePromptOnly: string;
+    modePromptOnlyDesc: string;
+    modeFull: string;
+    modeFullDesc: string;
+    /** 保护性约束提示 */
+    layersHint: string;
+    /** Footer */
     footer: string;
   };
   tools: {

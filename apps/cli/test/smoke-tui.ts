@@ -239,12 +239,22 @@ console.log("▶ TUI 冒烟测试");
   checkContains("配置项：LLM 提供商", configText, "LLM 提供商");
   checkContains("配置项：思考深度（含默认值）", configText, "思考深度 (默认: off)");
   checkContains("配置项：最大轮次（含默认值）", configText, "最大轮次 (默认: 30)");
-  checkContains("配置项：最大并发数（含默认值）", configText, "最大并发数 (默认: 1)");
-  checkContains("配置项：最大重试次数", configText, "最大重试次数 (默认: 0)");
+  checkContains("配置项：文风润色（含默认值）", configText, "文风润色 (默认: prompt-only)");
+  checkContains("配置项值：文风润色", configText, "已启用 · 仅提示注入");
   checkContains("配置项：外部工具", configText, "外部工具");
   checkContains("配置项值：外部工具就绪比例", configText, "就绪");
   checkContains("配置项值：provider · model", configText, "openai-compatible · gpt-4o-mini");
   checkContains("配置首页 Footer", configText, "ESC 退出 | ↑↓ 选择 | Enter 确认 | s 保存");
+
+  // 配置项增多后列表会窗口化：末尾两个条目需要 End 到底后才可见（Home 返回首项）
+  terminal.send("\x1b[F");
+  await settle(40);
+  const configTailText = screenText(app);
+  checkContains("配置项：最大并发数（含默认值）", configTailText, "最大并发数 (默认: 1)");
+  checkContains("配置项：最大重试次数", configTailText, "最大重试次数 (默认: 0)");
+  terminal.send("\x1b[H");
+  await settle(40);
+  checkContains("Home 回到首项（界面语言）", screenText(app), "│ 界面语言");
 
   // Enter 进入「界面语言」
   terminal.send("\r");
@@ -423,6 +433,63 @@ console.log("▶ TUI 冒烟测试");
   checkContains("最大轮次页：s 保存后提示已保存", screenText(app), "配置已保存");
   const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
   checkContains("config.yaml 写入 agent.max_turns: 0", yaml, "max_turns: 0");
+
+  app.exit();
+}
+
+// --- 用例 4g：文风润色配置页（/config/polish：开关 + prompt-only / full）---
+{
+  const { app, terminal } = createApp(["/config/polish"]);
+  await app.start();
+  await settle();
+
+  const text = screenText(app);
+  checkContains("润色页：标题", text, "设置文风纪律与页面润色");
+  checkContains("润色页：当前值（旧配置缺省 已启用 · 仅提示注入）", text, "当前值: 已启用 · 仅提示注入");
+  checkContains("润色页：两层机制说明", text, "第 1 层预防");
+  checkContains("润色页：第 2 层兜底说明", text, "第 2 层兜底");
+  checkContains("润色页：保护性约束提示", text, "Sources: 溯源行");
+  checkContains("润色页：prompt-only 选项被选中", text, "❯ 仅提示注入");
+  checkContains("润色页：full 选项", text, "完整模式");
+  checkContains("润色页 Footer", text, "t 启用/停用");
+
+  // ↓ + Enter：切到 full（Enter 写回内存配置并返回上一级）
+  terminal.send("\x1b[B");
+  await settle(20);
+  checkContains("润色页：光标移到完整模式", screenText(app), "❯ 完整模式");
+  terminal.send("\r");
+  await settle(80);
+  check(
+    "Enter 写回配置 polish.mode=full",
+    app.config.getPolishMode() === "full",
+    String(app.config.getPolishMode()),
+  );
+  checkContains("润色页：当前值随模式更新", screenText(app), "当前值: 已启用 · 完整模式");
+
+  // t：停用（写内存配置，不落盘）
+  terminal.send("t");
+  await settle(40);
+  checkContains("润色页：t 停用", screenText(app), "当前值: 已停用 · 完整模式");
+  check("t 停用写回内存配置", app.config.isPolishEnabled() === false, String(app.config.isPolishEnabled()));
+
+  // 再按 t 恢复（确认是切换而非单向）
+  terminal.send("t");
+  await settle(40);
+  check("再按 t 恢复启用", app.config.isPolishEnabled() === true);
+
+  // s：保存到 config.yaml（新增 polish 段）
+  terminal.send("s");
+  await settle(600);
+  checkContains("润色页：s 保存后提示已保存", screenText(app), "配置已保存");
+  const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 polish 段", yaml, "polish:");
+  checkContains("config.yaml 写入 polish.enabled: true", yaml, "enabled: true");
+  checkContains("config.yaml 写入 polish.mode: full", yaml, "mode: full");
+
+  // 返回配置首页：条目值跟随落盘配置
+  app.navigate("/config");
+  await settle(60);
+  checkContains("配置首页：文风润色条目值", screenText(app), "已启用 · 完整模式");
 
   app.exit();
 }

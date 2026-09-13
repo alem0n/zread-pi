@@ -37,6 +37,7 @@ export const enUS: TranslationKeys = {
     llmProvider: 'LLM Provider',
     thinkingLevel: 'Thinking Level',
     maxTurns: 'Max Turns',
+    polish: 'Style Polishing',
     maxConcurrency: 'Max Concurrency',
     maxRetries: 'Max Retries',
     default: '(default: {default})',
@@ -192,6 +193,21 @@ export const enUS: TranslationKeys = {
     invalid: 'Please enter an integer between 0-100',
     current: 'Current',
     footer: 'ESC to go back | Enter to confirm | s to save and go back',
+  },
+  polish: {
+    title: 'Writing discipline & page polishing',
+    current: 'Current',
+    intro:
+      'Layer 1 (default): inject the writing discipline into system prompts at zero extra cost. Layer 2 (full): also run a light polish agent per page; better output, one extra LLM call per page.',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    modePromptOnly: 'Prompt only',
+    modePromptOnlyDesc: 'Layer 1: inject the writing discipline into system prompts, no extra LLM calls',
+    modeFull: 'Full',
+    modeFullDesc: 'Layer 1 + layer 2: run a polish agent after each page lands (a failure never fails the page)',
+    layersHint:
+      'In both modes, code blocks, inline code, Sources: lines, Mermaid quoted labels and YAML frontmatter stay protected.',
+    footer: 'ESC to go back | ↑↓ to select | Enter to apply and go back | t to enable/disable | s to save and go back',
   },
   tools: {
     title: 'External Tools',
