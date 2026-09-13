@@ -310,5 +310,13 @@ export const zhCN: TranslationKeys = {
     retry: '重新生成',
     exit: '退出',
     usageTotals: '合计 输入 {input} · 输出 {output} · 缓存占比 {ratio}',
+    // 三阶段蓝图：阶段切换与分类级进度
+    stageClassify: '分类中',
+    stageTopics: '主题 {current}/{total}',
+    stageTitles: '标题 {current}/{total}',
+    stageTopicsIdle: '主题规划中',
+    stageTitlesIdle: '标题精修中',
+    stageSection: ' · {section}',
+    failedSections: '{n} 个分类失败',
   },
 };

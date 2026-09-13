@@ -25,20 +25,23 @@ function buildFirstTimeSelectItems(t: Translate): SelectItem[] {
 }
 
 // 构建正常选项列表
+// 注意：三阶段流程会先落盘「只有 sections、pages 为空」的骨架；空骨架不算已有目录，
+// 否则会出现「文档已生成 (0 篇)」且没有任何继续生成入口的卡死状态。
 function buildNormalSelectItems(
   wikiCatalog: WikiOutput | null,
   progress: { total: number; generated: number } | null,
   t: Translate,
 ): SelectItem[] {
   const items: SelectItem[] = [];
+  const hasCatalog = wikiCatalog !== null && (wikiCatalog.pages?.length ?? 0) > 0;
 
-  // 1. 生成文档（wiki.json 不存在）
-  if (!wikiCatalog) {
+  // 1. 生成文档（wiki.json 不存在或只有未完成的空骨架）
+  if (!hasCatalog) {
     items.push({ label: t("wiki.generate"), value: "generate" });
   }
 
   // 2. 继续生成（wiki.json 存在 + 文档未完成）
-  if (wikiCatalog && progress && progress.generated < progress.total) {
+  if (hasCatalog && progress && progress.generated < progress.total) {
     items.push({
       label: t("wiki.continue", { generated: progress.generated, total: progress.total }),
       value: "continue",
@@ -46,22 +49,22 @@ function buildNormalSelectItems(
   }
 
   // 3. 浏览文档（wiki.json 存在 + 文档已完成）
-  if (wikiCatalog && progress && progress.generated === progress.total) {
+  if (hasCatalog && progress && progress.generated === progress.total) {
     items.push({ label: t("wiki.browse"), value: "browse" });
   }
 
   // 4. 同步文档（wiki.json 存在）
-  if (wikiCatalog) {
+  if (hasCatalog) {
     items.push({ label: t("wiki.sync"), value: "sync" });
   }
 
   // 5. 管理文档（wiki.json 存在 + 文档已完成）
-  if (wikiCatalog && progress && progress.generated === progress.total) {
+  if (hasCatalog && progress && progress.generated === progress.total) {
     items.push({ label: t("wiki.manage"), value: "manage" });
   }
 
   // 6. 强制重新生成（wiki.json 存在）
-  if (wikiCatalog) {
+  if (hasCatalog) {
     items.push({ label: t("wiki.force"), value: "force" });
   }
 
@@ -97,11 +100,13 @@ export default class WikiHomePage extends Screen {
   render(width: number): string[] {
     const { isFirstTime } = this.app.config;
     const wikiCatalog = this.app.wiki.catalog;
+    // 空骨架（只有 sections、pages 为空）视同「尚无目录」
+    const hasCatalog = wikiCatalog !== null && (wikiCatalog.pages?.length ?? 0) > 0;
 
     // 状态标题（用于 Divider）
     const statusTitle = isFirstTime
       ? this.t("wiki.dividerFirstTime")
-      : wikiCatalog
+      : hasCatalog
         ? this.progress && this.progress.generated === this.progress.total
           ? this.t("wiki.dividerComplete", { total: this.progress.total })
           : this.progress
@@ -115,7 +120,7 @@ export default class WikiHomePage extends Screen {
     // 状态颜色（首次配置用黄色警告，进行中用黄色，其他默认灰色）
     const statusColor = isFirstTime
       ? "yellow"
-      : wikiCatalog && this.progress && this.progress.generated < this.progress.total
+      : hasCatalog && this.progress && this.progress.generated < this.progress.total
         ? "yellow"
         : undefined;
 
@@ -144,7 +149,8 @@ export default class WikiHomePage extends Screen {
   private async loadCatalog(): Promise<void> {
     await this.app.wiki.load();
     const pages = this.app.wiki.catalog?.pages;
-    this.progress = pages ? await countGeneratedPages(pages) : null;
+    // 空骨架（只有 sections）视同「尚无目录」：不计算进度，首页给出生成入口
+    this.progress = pages && pages.length > 0 ? await countGeneratedPages(pages) : null;
     this.syncItems();
     this.refresh();
   }

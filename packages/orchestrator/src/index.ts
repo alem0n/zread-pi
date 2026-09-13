@@ -14,7 +14,8 @@ export { polishPageFile, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
 export type { WikiResult, ProgressState, PageResult, PolishOutcome, GenerateWikiOptions, ArticleEventPayload } from './wiki/types.js'
 
 // Phase 3: Wiki Sync
-export { syncWiki } from './wiki/sync-wiki.js'
+// 三阶段增量修补：diff → （按需）分类合并 → 按变更 section 分主题 / 标题；SyncDiff 语义与旧实现一致
+export { syncWiki, computeSyncDiff } from './wiki/sync-wiki.js'
 export type { SyncResult } from './wiki/sync-wiki.js'
 
 // 目标仓库上下文文件（AGENTS.md / CLAUDE.md …）注入

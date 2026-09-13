@@ -66,7 +66,9 @@ export class WikiGenerateController {
   // ==================== 派生状态 ====================
 
   get hasWikiCatalog(): boolean {
-    return !this.options.forceRegenerate && this.options.wiki.catalog !== null;
+    // 三阶段流程会先落盘「只有 sections、pages 为空」的骨架；
+    // 空骨架不算已有目录（否则会跳过生成、卡在 0 页）。
+    return !this.options.forceRegenerate && (this.options.wiki.catalog?.pages?.length ?? 0) > 0;
   }
 
   get catalogCompleted(): boolean {
@@ -250,6 +252,11 @@ export class WikiGenerateController {
       retryCount: rawEvent.retryCount,
       maxRetries: rawEvent.maxRetries,
       delayMs: rawEvent.delayMs,
+      // 三阶段信息：阶段 / 分类 / 分类级进度 / 失败分类
+      stage: rawEvent.stage,
+      section: rawEvent.section,
+      progress: rawEvent.progress,
+      failedSections: rawEvent.failedSections,
     };
 
     const next = catalogEventToState(this.state.catalog, event);

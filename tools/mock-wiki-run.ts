@@ -1,6 +1,6 @@
 /**
  * mock-wiki-run.ts —— 离线全链路试跑：用本地 mock LLM 对任意目标仓库跑一遍
- * 「蓝图生成 -> 并行页面生成」，不需要任何真实 API Key。
+ * 「三阶段蓝图（分类 → 分主题 → 标题） -> 并行页面生成」，不需要任何真实 API Key。
  *
  * 用途：验证流水线是否正常（扫描/AST/工具落盘/事件/并发），或在没有额度时做回归。
  * 真实模型请用 `bun run cli`（读 ~/.zread-pi/config.yaml）。
@@ -35,16 +35,42 @@ const slugify = (value: string): string =>
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-|-$/g, "") || "page";
 
-const pages = entries.slice(0, 5).map((relative, index) => ({
-	slug: `${index + 1}-${slugify(basename(relative, extname(relative)))}`,
-	title: basename(relative),
-	file: `${index + 1}-${slugify(basename(relative, extname(relative)))}.md`,
-	section: "模块",
-	level: "Beginner",
-	associatedFiles: [relative],
-}));
+/** 分类阶段交给 mock LLM 的分类清单（概览/快速开始/核心架构是强制基础分类） */
+const SECTIONS = [
+	{ title: "概览", description: "项目定位与整体速览" },
+	{ title: "快速开始", description: "安装、运行与最小示例" },
+	{ title: "核心架构", description: "核心模块与实现细节" },
+];
 
-if (pages.length === 0) {
+/** 分主题阶段：每个分类的文章主题（核心架构覆盖扫描到的源文件） */
+const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
+	概览: [
+		{
+			title: "项目概览",
+			slug: "project-overview",
+			level: "Beginner",
+			associatedFiles: entries.filter((entry) => entry.toLowerCase().includes("readme")).slice(0, 1),
+		},
+	],
+	快速开始: [
+		{
+			title: "快速开始",
+			slug: "quick-start",
+			level: "Beginner",
+			associatedFiles: entries.slice(0, 1),
+		},
+	],
+	核心架构: entries.slice(0, 5).map((relative) => ({
+		title: basename(relative, extname(relative)),
+		slug: slugify(basename(relative, extname(relative))),
+		level: "Intermediate",
+		associatedFiles: [relative],
+	})),
+};
+
+const expectedPages = Object.values(TOPICS_BY_SECTION).reduce((sum, topics) => sum + topics.length, 0);
+
+if (expectedPages === 0) {
 	console.error(`目标目录没有可扫描的源文件: ${target}`);
 	process.exit(1);
 }
@@ -52,6 +78,22 @@ if (pages.length === 0) {
 // ---------------------------------------------------------------------------
 // 1) mock LLM（OpenAI 兼容）
 // ---------------------------------------------------------------------------
+
+function contentToText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.map((block) => {
+				if (typeof block === "string") return block;
+				if (block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string") {
+					return (block as { text: string }).text;
+				}
+				return "";
+			})
+			.join("\n");
+	}
+	return "";
+}
 
 function chunk(payload: Record<string, unknown>): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -93,26 +135,53 @@ const server = Bun.serve({
 	port: 0,
 	async fetch(request) {
 		requestCount += 1;
-		const body = (await request.json()) as { messages?: Array<{ role?: string; content?: unknown }> };
+		const body = (await request.json()) as {
+			messages?: Array<{ role?: string; content?: unknown }>;
+			tools?: Array<{ function?: { name?: string } }>;
+		};
 		const messages = body.messages ?? [];
 		const prompt = JSON.stringify(messages.map((message) => message.content ?? ""));
+		const promptText = messages.map((message) => contentToText(message.content)).join("\n");
 		const hasToolResult = messages.some((message) => message.role === "tool");
 		const isPageAgent = prompt.includes("当前页面任务");
+		const toolNames = new Set(
+			(body.tools ?? [])
+				.map((tool) => tool?.function?.name)
+				.filter((name): name is string => typeof name === "string"),
+		);
+		const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
 
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
-				const write = (text: string) => controller.enqueue(encoder.encode(text));
+				const write = (text: string): void => controller.enqueue(encoder.encode(text));
+
 				if (!hasToolResult) {
-					if (isPageAgent) {
-						const slug = /\*\*Slug\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? pages[0].slug;
-						const page = pages.find((candidate) => candidate.slug === slug) ?? pages[0];
-						const title = /\*\*标题\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? page.title;
+					if (toolNames.has("submit_sections")) {
+						write(toolCall("call_sections", "submit_sections", { sections: SECTIONS }));
+					} else if (toolNames.has("submit_section_topics")) {
 						write(
-							toolCall(`call_${page.slug}`, "write_page", {
-								slug: page.slug,
-								file: page.file,
-								section: page.section,
+							toolCall(`call_topics_${section}`, "submit_section_topics", {
+								section,
+								topics: TOPICS_BY_SECTION[section] ?? [],
+							}),
+						);
+					} else if (toolNames.has("refine_section_titles")) {
+						const titles = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^\[\n（]+)/gm)].map((match) => ({
+							slug: match[1],
+							title: match[2].trim(),
+						}));
+						write(toolCall(`call_titles_${section}`, "refine_section_titles", { section, titles }));
+					} else if (isPageAgent || toolNames.has("write_page")) {
+						const slug = /\*\*Slug\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "page";
+						const file = /\*\*文件名\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? `${slug}.md`;
+						const title = /\*\*标题\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? slug;
+						const pageSection = /\*\*章节\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "";
+						write(
+							toolCall(`call_${slug}`, "write_page", {
+								slug,
+								file,
+								section: pageSection,
 								title,
 								content: [
 									`# ${title}`,
@@ -121,22 +190,17 @@ const server = Bun.serve({
 									"",
 									"```mermaid",
 									"flowchart TB",
-									`  A["${page.title}"] --> B["测试通过"]`,
+									`  A["${title}"] --> B["测试通过"]`,
 									"```",
 									"",
 								].join("\n"),
 							}),
 						);
 					} else {
-						write(
-							toolCall("call_blueprint", "generate_blueprint", {
-								pages,
-								techStackSummary: { 语言: "见目标仓库", 说明: "mock LLM 离线试跑" },
-							}),
-						);
+						write(textChunk("完成"));
 					}
 				} else {
-					write(textChunk(isPageAgent ? "页面完成" : "蓝图完成"));
+					write(textChunk(isPageAgent ? "页面完成" : "阶段完成"));
 				}
 				write(chunk(JSON.parse(usageChunk)));
 				write("data: [DONE]\n\n");
@@ -183,11 +247,14 @@ const { generateWikiContent } = await import("../packages/orchestrator/src/wiki/
 // ---------------------------------------------------------------------------
 
 console.log(`▶ 目标仓库: ${target}`);
-console.log(`▶ 扫描到源文件: ${entries.length}，规划页面: ${pages.length}`);
+console.log(`▶ 扫描到源文件: ${entries.length}，规划页面: ${expectedPages}`);
 
 const catalogEvents: string[] = [];
-const catalog = await generateWikiCatalog((event) => catalogEvents.push(event.type));
-console.log(`▶ 蓝图完成: ${catalog.durationMs}ms, usage=${JSON.stringify(catalog.tokenUsage)}`);
+const catalog = await generateWikiCatalog((event) => catalogEvents.push(event.stage ? `${event.stage}:${event.type}` : event.type));
+console.log(`▶ 蓝图完成: ${catalog.durationMs}ms, sections=${catalog.sectionsCount}, pages=${catalog.pagesCount}, usage=${JSON.stringify(catalog.tokenUsage)}`);
+if (catalog.failedSections?.length) {
+	console.log(`  failedSections: ${JSON.stringify(catalog.failedSections)}`);
+}
 console.log(`  CatalogEvent: ${catalogEvents.join(",")}`);
 
 const result = await generateWikiContent({
@@ -204,9 +271,12 @@ server.stop(true);
 // ---------------------------------------------------------------------------
 
 const wikiDir = join(target, ".zread-pi", "wiki");
-const blueprint = JSON.parse(await readFile(join(wikiDir, "wiki.json"), "utf-8")) as { pages: Array<{ file: string; section: string }> };
+const blueprint = JSON.parse(await readFile(join(wikiDir, "wiki.json"), "utf-8")) as {
+	sections?: Array<{ title: string }>;
+	pages: Array<{ file: string; section: string }>;
+};
 console.log(`\n▶ 产物: ${wikiDir}`);
-console.log(`   wiki.json（${blueprint.pages.length} 页）`);
+console.log(`   wiki.json（${blueprint.sections?.length ?? 0} 个分类 / ${blueprint.pages.length} 页）`);
 for (const page of blueprint.pages) {
 	const file = join(wikiDir, page.section, page.file);
 	const exists = await stat(file).catch(() => null);
@@ -217,4 +287,4 @@ console.log(`\n结果：completed=${result.completed} failed=${result.failed}，
 process.chdir(join(target, ".."));
 await rm(home, { recursive: true, force: true });
 
-if (result.failed > 0 || result.completed !== pages.length) process.exit(1);
+if (result.failed > 0 || result.completed !== expectedPages) process.exit(1);

@@ -1000,3 +1000,78 @@ polish:
   若服务端为失败请求计费，需要在适配层用 `harness.recordUsage()` 补一笔（同时会影响预算口径，需先定方案）。
 - **polish 用量未并入**：需要改 `ArticleEventPayload` / `PageStatus` 才能把 `polish.tokenUsage` 带进 TUI（未做）。
 - **合计不区别模型计价**：只统计 token，不折算费用（`TokenUsage` 不含 cost；pi 的 `Usage.cost` 在映射时被丢弃）。
+
+
+## 17. 蓝图生成改为三阶段多重循环（第十五步）
+
+### 17.1 目标与判定
+
+旧实现是「单 Agent 一次性吐全量蓝图」（`generate_blueprint`）：模型要在一段有限的输出预算里既要分类、又要给每篇页面起名、填 group/level/associatedFiles。
+实践上模型会提前收敛——**输出轮次过多导致文章数偏少**（一个分类塞成一两篇），且一次失败就要整段重来。
+
+第十五步把它拆成**分类 → 分主题 → 标题**三阶段多重循环：
+
+| 阶段 | 执行方式 | AI 输出工具 | 代码侧动作 |
+|---|---|---|---|
+| 1 分类 | 1 个 Agent（Repo Map 全局分析） | `submit_sections`（4~8 个 section：title + description） | 写 wiki.json 骨架（sections + 空 pages），强制包含概览/快速开始/核心架构 |
+| 2 分主题 | 遍历 sections，每 section 1 个 Agent，p-limit 并发 | `submit_section_topics`（title 草稿 + slug + group + level + associatedFiles） | 统一分配 slug 序号与 file 名、去重，加锁读-改-写合并进 wiki.json；单 section 失败记 `failedSections` 不阻断其余 |
+| 3 标题 | 遍历 sections（有页面的），每 section 1 个 Agent | `refine_section_titles`（仅 slug + title） | 写回 title；输出量极小，失败保留原 title |
+| 4 文章 | 现有 `generateWikiContent` | `write_page`（不变） | 不改 |
+
+**不变量**：每阶段落盘后 `loadWikiBlueprint` 始终可加载（`pages` 为空时只要 `sections` 非空就合法）；slug/file 编号与去重由代码管理；每阶段失败的 section 不阻断整体。
+
+### 17.2 契约变化（均为向后兼容的「新增可选」）
+
+- `WikiOutput.sections?: WikiSection[]`（旧 wiki.json 没有该字段；读取方按「从 pages 推导」回退，`sectionsFromBlueprint`）；
+- `WikiTopic`（主题阶段草稿）；`WikiSection`；
+- `BlueprintResult` 新增 `pagesCount` 语义（最终页面数）、`sectionsCount?`、`failedSections?`；
+- `CatalogEvent` 新增 `stage?: 'classify'|'topics'|'titles'`、`section?: string`、`progress`（带 stage 时为分类级进度）、`failedSections?`（complete 事件携带）；
+- utils 新增：`initWikiSkeleton` / `mergeWikiSections` / `mergeSectionTopics` / `applySectionTitles` / `writeWikiPages` / `normalizeBlueprintSections` / `mergeBlueprintSections` / `deriveSectionsFromPages` / `sectionsFromBlueprint` / `slugStem` / `nextPageIndex` / `normalizeLevel`（唯一落盘口径：文件锁 + 临时文件 rename 原子替换）；
+- `loadWikiBlueprint` 放宽：`pages` 为空但 `sections` 非空时可加载（骨架阶段）。
+
+### 17.3 为什么 slug 由代码分配
+
+模型只输出「这个分类下应该写哪些文章」与元数据；slug 由「全局序号 + 英文词干（topic.slug 提示，缺省从 title 派生，非 ASCII 回退为 `page`）」生成，
+同分类内 title 去重、全库 slug 去重。这样：
+- 编号连续、URL 稳定，不受模型命名漂移影响；
+- p-limit 并发 section 时，文件锁内的「读-改-写」保证编号不撞车（见 `mergeSectionTopics`）。
+
+### 17.4 sync-wiki 迁移到新机制（增量修补）
+
+`syncWiki` 不再让模型一次性重排整个 wiki.json：
+
+1. 文件 diff（沿用 manifest/hash）；
+2. 变更命中既有页面关联路径的 section + （未覆盖的新增文件触发的）分类合并结果 = 「变更 section」；
+3. 只对变更 section 跑主题 / 标题阶段（主题阶段 `reuseExisting: true`：按 slug/title 复用旧 slug/file，URL 漂移为 0）；
+4. 页面状态（`new` / `updated` / `archived` / `unchanged`）由代码比较新旧页面机械判定（`computeSyncDiff`），不再由模型输出 status；SyncDiff 语义不变；
+5. 新增文件不属于任何既有页面时，才额外跑一次分类阶段（merge 模式：保留既有分类与页面，只补新分类）；
+6. 归档判定按**文件系统实际存在**（README 等不入 manifest 的关联路径不会被误判为删除）。
+
+模型漏报旧页面时（新清单缺失），只要文件仍在就原样保留为 `unchanged`，避免增量修补丢页面。
+
+### 17.5 CLI 展示
+
+生成页（`/wiki/generate`）按 `stage` / `section` / 分类级 `progress` 渲染阶段切换：
+`分类中` → `主题 {current}/{total} · {section}` → `标题 {current}/{total} · {section}`；
+完成时若有失败分类，显示 `完成 · N 个分类失败`。目录状态新增 `stage/section/sectionsProgress/failedSections` 槽位（mapper 纯函数可单测）。
+
+`loadWikiBlueprint` 放宽后，只有骨架（pages 为空）的 wiki.json 在首页视同「尚无目录」，不会再出现「文档已生成 (0 篇)」的卡死状态。
+
+### 17.6 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:blueprint` | e2e-blueprint 27/27（三阶段正向 + 骨架可加载 + 聚合用量 = 所有请求之和 + 失败语义）；e2e-sync 19/19（updated/archived/new/unchanged、URL 不漂移、无变更不调 LLM、漏报兜底）；context-files 11/11；style-discipline 17/17 |
+| `bun test apps/cli/src/views/wiki-generate/__tests__` | 28/28（新增 stage/section/进度映射 + scanning 清空 + failedSections） |
+| `bun run test:tui` | smoke-tui 209、real-run 9、output-guard 10、target-dir 26、wiki-generate 单测 28、mock-generate 31（新增「生成页渲染三阶段进度文案」）、browse-server 28 |
+| `bun run test` | 全部套件通过 |
+| `bun run mock:wiki` | `completed=6 failed=0`（夹具 hello-python：3 分类 / 6 页） |
+
+### 17.7 风险与未决
+
+- **分类阶段是单点**：只有 1 个 Agent，失败即整段重试（成本可控——分类输出很小）；后续可考虑「分类失败时回退到从旧 wiki.json / 目录树机械推导基础分类」。
+- **slug 编号顺序不稳定**：section 并发完成顺序决定页面在 wiki.json 中的先后与编号（编号本身连续、无碰撞）；如需稳定顺序，可在阶段 2 结束后按 section 顺序重排并重编号。
+- **sync 的分类刷新是条件触发**：只有「新增文件不属于任何既有页面」时才跑分类阶段；纯重命名/移动目录但未新增文件时，分类不会重划（变更文件仍会落到受影响 section 的增量修补里）。
+- **标题精修会触发重生成**：sync 中标题变化按 `updated` 处理（保证 .md 的 frontmatter 与目录一致）；弱模型若反复微调标题，可能造成不必要的重生成。
+- **归档判定是「关联路径全部消失」**：associatedFiles 填得过宽（例如关联整个仓库根目录）会延迟归档；这属于主题阶段提示词质量问题，不是状态机问题。

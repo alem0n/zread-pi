@@ -142,6 +142,7 @@ export default class WikiGeneratePage extends Screen {
   private renderCatalogSection(width: number): string[] {
     const state = this.controller.state.catalog;
     const { status, phase, currentTool, durationMs, error, retryCount, maxRetries, delayMs } = state;
+    const { stage, sectionsProgress, section, failedSections } = state;
     // 展示口径 = 历史结转 + 本轮快照（重试不清零）
     const usage = slotUsageTotal(state);
 
@@ -155,6 +156,9 @@ export default class WikiGeneratePage extends Screen {
         max: maxRetries ?? 3,
         seconds,
       });
+    } else if (status === "loading" && stage) {
+      // 三阶段：分类 → 分主题 → 标题（带分类级进度）
+      statusText = this.stageStatusText(stage, sectionsProgress, section);
     } else if (status === "loading" && phase === "tool" && currentTool) {
       // 工具调用
       const toolDisplay = currentTool.replace(/_/g, " ").replace(/^get /, "");
@@ -164,6 +168,11 @@ export default class WikiGeneratePage extends Screen {
       statusText = this.t("wikiGenerate.requesting");
     } else if (status === "failed" && error) {
       statusText = error;
+    } else if (status === "completed" && failedSections && failedSections.length > 0) {
+      statusText =
+        this.t("wikiGenerate.completed") +
+        " · " +
+        this.t("wikiGenerate.failedSections", { n: failedSections.length });
     } else {
       statusText = this.t(`wikiGenerate.${status}`);
     }
@@ -205,6 +214,28 @@ export default class WikiGeneratePage extends Screen {
       ...new Divider(this.t("wikiGenerate.catalogTitle")).render(width),
       statusRow(width, left, style(rightText, { color: rightColor })),
     ];
+  }
+
+  /** 三阶段状态文字（classify / topics / titles；带分类级进度） */
+  private stageStatusText(
+    stage: "classify" | "topics" | "titles",
+    progress?: { current: number; total: number },
+    section?: string,
+  ): string {
+    if (stage === "classify") return this.t("wikiGenerate.stageClassify");
+
+    const suffix = section ? this.t("wikiGenerate.stageSection", { section }) : "";
+    const hasProgress = progress !== undefined && progress.total > 0;
+
+    if (stage === "topics") {
+      return hasProgress
+        ? this.t("wikiGenerate.stageTopics", { current: progress.current, total: progress.total }) + suffix
+        : this.t("wikiGenerate.stageTopicsIdle");
+    }
+
+    return hasProgress
+      ? this.t("wikiGenerate.stageTitles", { current: progress.current, total: progress.total }) + suffix
+      : this.t("wikiGenerate.stageTitlesIdle");
   }
 
   // ==================== 文章段 ====================

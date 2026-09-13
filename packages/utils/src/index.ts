@@ -139,7 +139,30 @@ export { WikiStore } from './storage/wiki-store.js';
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Output
-export { generateWikiJson, loadWikiBlueprint } from './output/wiki-content.js';
+// 三阶段蓝图（分类 → 分主题 → 标题）的落盘设施：骨架 / 分类归并 / 主题归并 / 标题写回
+export {
+  generateWikiJson,
+  loadWikiBlueprint,
+  MAX_BLUEPRINT_SECTIONS,
+  normalizeSectionList,
+  normalizeBlueprintSections,
+  mergeBlueprintSections,
+  deriveSectionsFromPages,
+  sectionsFromBlueprint,
+  slugStem,
+  nextPageIndex,
+  normalizeLevel,
+  initWikiSkeleton,
+  mergeWikiSections,
+  mergeSectionTopics,
+  applySectionTitles,
+  writeWikiPages,
+} from './output/wiki-content.js';
+export type {
+  MergeTopicsResult,
+  MergeTopicsOptions,
+  ApplyTitlesResult,
+} from './output/wiki-content.js';
 
 // Provider Registry
 export * from './provider-registry/types.js';

@@ -19,7 +19,7 @@ export type { FileManifest, FileInfo } from './manifest.js'
 export type { SymbolManifest, SymbolInfo } from './symbols.js'
 
 // Wiki types
-export type { WikiPage, WikiOutput, TechStackSummary, WikiLevel, SyncPageStatus, SyncDiff } from './wiki.js'
+export type { WikiPage, WikiOutput, WikiSection, WikiTopic, TechStackSummary, WikiLevel, SyncPageStatus, SyncDiff } from './wiki.js'
 
 // Config types
 export type { AppConfig, AgentConfig, LLMConfig, LlmProviderConfig, CustomModelConfig, LlmAuthType, ThinkingLevel, ToolConfig, ToolsConfig, PolishConfig, PolishMode } from './config.js'

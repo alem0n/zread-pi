@@ -9,12 +9,15 @@
  */
 
 import type { WikiPage } from '@zread-pi/types';
-import type { TokenUsage } from '@zread-pi/orchestrator';
+import type { TokenUsage, BlueprintFailedSection } from '@zread-pi/orchestrator';
 
 // ==================== 基础状态类型 ====================
 
 /** 统一状态枚举 */
 export type Status = 'waiting' | 'loading' | 'completed' | 'failed';
+
+/** 蓝图三阶段（分类 → 分主题 → 标题） */
+export type CatalogStage = 'classify' | 'topics' | 'titles';
 
 /** 目录生成阶段 */
 export type CatalogPhase = 'scanning' | 'requesting' | 'responding' | 'tool' | 'retry';
@@ -35,7 +38,7 @@ export type ArticleEventType =
 // ==================== 导出外部类型 ====================
 
 export type { WikiPage } from '@zread-pi/types';
-export type { TokenUsage, ArticleEventPayload } from '@zread-pi/orchestrator';
+export type { TokenUsage, ArticleEventPayload, BlueprintFailedSection } from '@zread-pi/orchestrator';
 
 // ==================== 目录状态 ====================
 
@@ -45,6 +48,14 @@ export interface CatalogState {
   phase?: CatalogPhase;
   /** 当前工具名（tool 阶段） */
   currentTool?: string;
+  /** 当前蓝图阶段（分类 → 分主题 → 标题） */
+  stage?: CatalogStage;
+  /** 当前处理的分类（topics / titles 阶段） */
+  section?: string;
+  /** 当前阶段的分类级进度 */
+  sectionsProgress?: { current: number; total: number };
+  /** 分主题 / 标题阶段失败的分类 */
+  failedSections?: BlueprintFailedSection[];
   /** Token 使用统计（本轮运行的累计快照） */
   usage?: TokenUsage;
   /**
@@ -138,6 +149,12 @@ export interface CatalogEventPayload {
   type: CatalogEventType;
   phase?: CatalogPhase;
   toolName?: string;
+  /** 当前蓝图阶段 */
+  stage?: CatalogStage;
+  /** 当前处理的分类 */
+  section?: string;
+  /** 分类级进度（带 stage 的事件） */
+  progress?: { current: number; total: number };
   usage?: TokenUsage;
   error?: string;
   durationMs?: number;
@@ -148,6 +165,8 @@ export interface CatalogEventPayload {
   maxRetries?: number;
   /** 重试延迟毫秒（retry 时） */
   delayMs?: number;
+  /** 失败的分类（complete 事件） */
+  failedSections?: BlueprintFailedSection[];
 }
 
 // ==================== 兼容旧类型（过渡期保留） ====================

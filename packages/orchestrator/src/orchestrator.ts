@@ -1,70 +1,94 @@
 /**
  * Blueprint Orchestrator
  *
- * Coordinates single Blueprint Agent to generate wiki.json blueprint.
+ * 蓝图生成已从「单 Agent 一次性吐全量页面」改为三阶段多重循环：
+ *   分类（1 个 Agent，sections）→ 分主题（每个 section 1 个 Agent，页面）
+ *   → 标题（每个 section 1 个 Agent，精修 title）
+ *
+ * 特点：
+ * - 每阶段增量归并进 wiki.json（文件锁 + 原子替换），任一阶段落盘后都可加载；
+ * - slug / file 编号与去重由代码统一管理，不依赖模型；
+ * - 单 section 失败记录到 failedSections，不阻断其余分类；
+ * - 文章生成阶段（generateWikiContent）零改动，继续只消费最终 wiki.json。
  */
 
-import { FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, LsTool } from '@zread-pi/agent-runtime';
-import { loadWikiBlueprint } from '@zread-pi/utils';
-import { createAgent } from './agents/create-agent';
+import { loadConfig, loadWikiBlueprint } from '@zread-pi/utils';
+import {
+  BlueprintUsageTracker,
+  runClassifyStage,
+  runTopicsStage,
+  runTitlesStage,
+} from './agents/blueprint-stages.js';
 import { rememberCurrentProject } from './wiki/memory.js';
-import GenerateCatalog from './prompts/generate-catalog';
-import { GenerateBlueprintTool, ValidateBlueprintTool } from './tools/output-tools.js';
-import { GetCoreSignaturesTool, GetDirectoryTreeTool, GetModuleDetailsTool } from './tools/repo-map-tools.js';
-import type { BlueprintResult, CatalogEvent } from './types.js';
-
-/** Blueprint Agent 工具列表 */
-const BLUEPRINT_TOOLS = [
-  // 三层 Repo Map 工具
-  GetDirectoryTreeTool,      // Layer 1: 目录树
-  GetCoreSignaturesTool,     // Layer 2: 核心签名
-  GetModuleDetailsTool,      // Layer 3: 模块详情
-  // 输出工具
-  GenerateBlueprintTool,     // 生成 wiki.json
-  ValidateBlueprintTool,     // 验证蓝图
-  // 基础工具
-  FileReadTool,
-  FileWriteTool,
-  FileEditTool,
-  GlobTool,
-  GrepTool,
-  LsTool,
-];
+import type { BlueprintFailedSection, BlueprintResult, CatalogEvent } from './types.js';
 
 /**
  * Generate Wiki Catalog
  *
- * 使用 Blueprint Agent 生成 wiki.json 目录结构。
- * 支持可选进度回调用于实时 UI 更新。
+ * 三阶段生成 wiki.json 目录结构（支持可选进度回调用于实时 UI 更新）。
  *
- * @param onEvent - 进度回调（可选）
+ * @param onEvent - 进度回调（可选；事件带 stage / section / 分类级 progress）
  * @returns BlueprintResult with output path and metadata
  */
 export async function generateWikiCatalog(
-  onEvent?: (event: CatalogEvent) => void
+  onEvent?: (event: CatalogEvent) => void,
 ): Promise<BlueprintResult> {
   // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
   await rememberCurrentProject();
 
-  const result = await createAgent({
-    tools: BLUEPRINT_TOOLS,
-    prompts: GenerateCatalog as string,
-    onEvent,
+  const startTime = performance.now();
+  const config = await loadConfig();
+  const usage = new BlueprintUsageTracker();
+  const context = { config, onEvent, usage };
+
+  // —— 阶段 1：分类（单 Agent；失败致命，直接抛出）——
+  const sections = await runClassifyStage(context);
+
+  // —— 阶段 2：分主题（按 section 并发；单 section 失败不阻断）——
+  const failedSections: BlueprintFailedSection[] = await runTopicsStage(context, sections);
+
+  // —— 阶段 3：标题（输入分主题后的页面列表；失败保留原 title）——
+  const afterTopics = await loadWikiBlueprint().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`目录生成未产出有效 wiki.json：${message}`, { cause: err });
   });
 
-  // Agent 正常结束 ≠ 蓝图已落盘/有效：模型可能只输出文字，或写出非法 JSON。
-  // 校验 wiki.json 可加载，避免生成界面显示目录完成、而首页按文件检查判定「无目录」。
-  try {
-    await loadWikiBlueprint();
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`目录生成未产出有效 wiki.json：${message}`);
+  if (afterTopics.pages.length === 0) {
+    throw new Error('目录生成未产出有效 wiki.json：所有分类都未能产出页面');
   }
 
+  failedSections.push(...(await runTitlesStage(context, sections, afterTopics.pages)));
+
+  // Agent 正常结束 ≠ 蓝图已落盘/有效：所有阶段结束后再校验一次 wiki.json 可加载，
+  // 避免生成界面显示目录完成、而首页按文件检查判定「无目录」。
+  let blueprint;
+  try {
+    blueprint = await loadWikiBlueprint();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`目录生成未产出有效 wiki.json：${message}`, { cause: err });
+  }
+
+  if (blueprint.pages.length === 0) {
+    throw new Error('目录生成未产出有效 wiki.json：所有分类都未能产出页面');
+  }
+
+  const durationMs = Math.round(performance.now() - startTime);
+  const tokenUsage = usage.total();
+
+  onEvent?.({
+    type: 'complete',
+    usage: tokenUsage,
+    durationMs,
+    ...(failedSections.length > 0 ? { failedSections } : {}),
+  });
+
   return {
-    pagesCount: 0,
-    durationMs: result.durationMs,
-    tokenUsage: result.tokenUsage,
+    pagesCount: blueprint.pages.length,
+    sectionsCount: sections.length,
+    ...(failedSections.length > 0 ? { failedSections } : {}),
+    durationMs,
+    tokenUsage,
   };
 }
 
