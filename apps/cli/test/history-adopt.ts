@@ -291,6 +291,37 @@ console.log("▶ 「添加老旧项目」：打开已有文档的目录自动登
   await rm(home, { recursive: true, force: true });
 }
 
+// --- 用例 4b：档位变体（wiki/high）完整 → 同样自动登记 ---
+{
+  const home = await mkdtemp(join(tmpdir(), "zread-pi-adopt-home-"));
+  const repo = join(workspace, "variant-project");
+  const wikiDir = join(repo, ".zread-pi", "wiki", "high");
+  for (const page of PAGES) {
+    await mkdir(join(wikiDir, page.section), { recursive: true });
+  }
+  await writeFile(
+    join(wikiDir, "wiki.json"),
+    JSON.stringify({ detail: "high", pages: PAGES }, null, 2),
+    "utf-8",
+  );
+  for (const page of PAGES) {
+    await writeFile(join(wikiDir, page.section, page.file), `# ${page.title}\n`, "utf-8");
+  }
+
+  const run = spawnCli([], repo, home);
+  const started = await waitForTui(run);
+
+  const records = await readRecords(home);
+  const target = await canonical(repo);
+  const matched = (await Promise.all(records.map((record) => canonical(record.path)))).filter(
+    (path) => path === target,
+  );
+  check("档位变体（wiki/high）完整：自动登记", started && matched.length === 1, JSON.stringify(records));
+
+  await stop(run);
+  await rm(home, { recursive: true, force: true });
+}
+
 // --- 用例 5：-d/--dir 打开其它目录 → 登记目标目录 ---
 {
   const home = await mkdtemp(join(tmpdir(), "zread-pi-adopt-home-"));

@@ -11,7 +11,6 @@ import { parseFiles, scanFiles } from "@zread-pi/repo-analyzer";
 import {
   fileExists,
   getWikiDir,
-  getWikiJsonPath,
   joinPath,
   loadConfig,
   removeDir,
@@ -68,7 +67,11 @@ export class WikiGenerateController {
   get hasWikiCatalog(): boolean {
     // 三阶段流程会先落盘「只有 sections、pages 为空」的骨架；
     // 空骨架不算已有目录（否则会跳过生成、卡在 0 页）。
-    return !this.options.forceRegenerate && (this.options.wiki.catalog?.pages?.length ?? 0) > 0;
+    // 只看**写盘目标档位**（配置档位）：遗留目录 / 其他档位不算，避免把它们的页面写进新变体。
+    return (
+      !this.options.forceRegenerate &&
+      (this.options.wiki.targetCatalog?.pages?.length ?? 0) > 0
+    );
   }
 
   get catalogCompleted(): boolean {
@@ -85,7 +88,12 @@ export class WikiGenerateController {
   }
 
   private get pages(): WikiPage[] {
-    return this.options.wiki.catalog?.pages ?? [];
+    return this.options.wiki.targetCatalog?.pages ?? [];
+  }
+
+  /** 写盘目标档位（配置档位；遗留目录不会被写入） */
+  private get targetDetail() {
+    return this.options.wiki.targetDetail;
   }
 
   // ==================== 生命周期 ====================
@@ -164,6 +172,7 @@ export class WikiGenerateController {
     try {
       await generateWikiContent({
         pages: [page],
+        detail: this.targetDetail,
         maxConcurrent: concurrent,
         onEvent: (event) => this.handleArticleEvent(event),
       });
@@ -193,11 +202,10 @@ export class WikiGenerateController {
     if (this.isGeneratingCatalog) return;
     this.isGeneratingCatalog = true;
 
-    // 强制重新生成时清理旧数据
+    // 强制重新生成时清理旧数据（只清理目标档位变体；遗留目录 / 其他档位不动）
     if (this.options.forceRegenerate) {
       try {
-        await removeDir(getWikiDir());
-        await removeDir(getWikiJsonPath());
+        await removeDir(getWikiDir(this.targetDetail));
       } catch {
         // 忽略删除错误（文件不存在等）
       }
@@ -227,8 +235,10 @@ export class WikiGenerateController {
       const symbols = await parseFiles(manifest);
       await saveCachedSymbols(symbols);
 
-      // Phase 3: 调用 Agent
-      await generateWikiCatalog((event) => this.handleCatalogEvent(event));
+      // Phase 3: 调用 Agent（写入目标档位变体目录）
+      await generateWikiCatalog((event) => this.handleCatalogEvent(event), {
+        detail: this.targetDetail,
+      });
     } catch (err) {
       // 保留已消耗的用量与结转（失败也要计入合计，重试不清空）
       this.state.catalog = {
@@ -271,7 +281,7 @@ export class WikiGenerateController {
   }
 
   private async handleCatalogComplete(): Promise<void> {
-    // 1. reload wiki.json
+    // 1. reload wiki.json（按当前配置档位重新解析变体）
     await this.options.wiki.reload();
     // 2. 标记等待 pages
     this.flowState = "waiting-pages";
@@ -326,7 +336,7 @@ export class WikiGenerateController {
     const pages = this.pages;
     if (pages.length === 0 || this.isInitialized) return [];
 
-    const wikiDir = getWikiDir();
+    const wikiDir = getWikiDir(this.targetDetail);
     const existingSlugs: string[] = [];
 
     for (const page of pages) {
@@ -367,6 +377,7 @@ export class WikiGenerateController {
     try {
       await generateWikiContent({
         pages: pendingPages,
+        detail: this.targetDetail,
         maxConcurrent: concurrent,
         onEvent: (event) => this.handleArticleEvent(event),
       });

@@ -27,44 +27,53 @@ function buildFirstTimeSelectItems(t: Translate): SelectItem[] {
 // 构建正常选项列表
 // 注意：三阶段流程会先落盘「只有 sections、pages 为空」的骨架；空骨架不算已有目录，
 // 否则会出现「文档已生成 (0 篇)」且没有任何继续生成入口的卡死状态。
+// 多档共存下菜单按「写盘目标档位（targetCatalog）」组织：生成/继续/同步/强制重新生成
+// 都作用于配置档位；浏览入口在任一档位（含遗留目录）完整时都可用（浏览页内置档位切换）。
 function buildNormalSelectItems(
-  wikiCatalog: WikiOutput | null,
-  progress: { total: number; generated: number } | null,
+  targetCatalog: WikiOutput | null,
+  targetProgress: { total: number; generated: number } | null,
+  statusProgress: { total: number; generated: number } | null,
   t: Translate,
 ): SelectItem[] {
   const items: SelectItem[] = [];
-  const hasCatalog = wikiCatalog !== null && (wikiCatalog.pages?.length ?? 0) > 0;
+  const targetHasCatalog =
+    targetCatalog !== null && (targetCatalog.pages?.length ?? 0) > 0;
+  const targetComplete =
+    targetHasCatalog &&
+    targetProgress !== null &&
+    targetProgress.generated === targetProgress.total;
+  const anyComplete = statusProgress !== null && statusProgress.generated === statusProgress.total;
 
-  // 1. 生成文档（wiki.json 不存在或只有未完成的空骨架）
-  if (!hasCatalog) {
+  // 1. 生成文档（当前配置档位还没有目录）
+  if (!targetHasCatalog) {
     items.push({ label: t("wiki.generate"), value: "generate" });
   }
 
-  // 2. 继续生成（wiki.json 存在 + 文档未完成）
-  if (hasCatalog && progress && progress.generated < progress.total) {
+  // 2. 继续生成（当前配置档位存在 + 文档未完成）
+  if (targetHasCatalog && !targetComplete && targetProgress) {
     items.push({
-      label: t("wiki.continue", { generated: progress.generated, total: progress.total }),
+      label: t("wiki.continue", { generated: targetProgress.generated, total: targetProgress.total }),
       value: "continue",
     });
   }
 
-  // 3. 浏览文档（wiki.json 存在 + 文档已完成）
-  if (hasCatalog && progress && progress.generated === progress.total) {
+  // 3. 浏览文档（当前档位已完成；或其他档位 / 遗留目录已有完整文档）
+  if (targetComplete || (!targetHasCatalog && anyComplete)) {
     items.push({ label: t("wiki.browse"), value: "browse" });
   }
 
-  // 4. 同步文档（wiki.json 存在）
-  if (hasCatalog) {
+  // 4. 同步文档（当前配置档位存在）
+  if (targetHasCatalog) {
     items.push({ label: t("wiki.sync"), value: "sync" });
   }
 
-  // 5. 管理文档（wiki.json 存在 + 文档已完成）
-  if (hasCatalog && progress && progress.generated === progress.total) {
+  // 5. 管理文档（当前档位已完成）
+  if (targetComplete) {
     items.push({ label: t("wiki.manage"), value: "manage" });
   }
 
-  // 6. 强制重新生成（wiki.json 存在）
-  if (hasCatalog) {
+  // 6. 强制重新生成（当前配置档位存在；只重建该档位变体）
+  if (targetHasCatalog) {
     items.push({ label: t("wiki.force"), value: "force" });
   }
 
@@ -79,7 +88,10 @@ function buildNormalSelectItems(
 
 export default class WikiHomePage extends Screen {
   private select!: Select<SelectItem>;
-  private progress: { total: number; generated: number } | null = null;
+  /** 活动变体（任一档位 / 遗留目录）的进度：用于状态标题 */
+  private statusProgress: { total: number; generated: number } | null = null;
+  /** 写盘目标档位（配置档位）的进度：用于菜单项判定 */
+  private targetProgress: { total: number; generated: number } | null = null;
 
   protected override init(): void {
     this.select = new Select({
@@ -97,22 +109,27 @@ export default class WikiHomePage extends Screen {
     return this.select.handleInput(data);
   }
 
+  override async onEnter(): Promise<void> {
+    // 从配置页返回时档位可能已变化：重新解析变体并刷新菜单
+    await this.loadCatalog();
+  }
+
   render(width: number): string[] {
     const { isFirstTime } = this.app.config;
     const wikiCatalog = this.app.wiki.catalog;
     // 空骨架（只有 sections、pages 为空）视同「尚无目录」
     const hasCatalog = wikiCatalog !== null && (wikiCatalog.pages?.length ?? 0) > 0;
 
-    // 状态标题（用于 Divider）
+    // 状态标题（用于 Divider）：按活动变体（任一档位 / 遗留目录）显示
     const statusTitle = isFirstTime
       ? this.t("wiki.dividerFirstTime")
       : hasCatalog
-        ? this.progress && this.progress.generated === this.progress.total
-          ? this.t("wiki.dividerComplete", { total: this.progress.total })
-          : this.progress
+        ? this.statusProgress && this.statusProgress.generated === this.statusProgress.total
+          ? this.t("wiki.dividerComplete", { total: this.statusProgress.total })
+          : this.statusProgress
             ? this.t("wiki.dividerInProgress", {
-                generated: this.progress.generated,
-                total: this.progress.total,
+                generated: this.statusProgress.generated,
+                total: this.statusProgress.total,
               })
             : this.t("wiki.dividerHasCatalog")
         : this.t("wiki.dividerNoCatalog");
@@ -120,7 +137,7 @@ export default class WikiHomePage extends Screen {
     // 状态颜色（首次配置用黄色警告，进行中用黄色，其他默认灰色）
     const statusColor = isFirstTime
       ? "yellow"
-      : hasCatalog && this.progress && this.progress.generated < this.progress.total
+      : hasCatalog && this.statusProgress && this.statusProgress.generated < this.statusProgress.total
         ? "yellow"
         : undefined;
 
@@ -140,17 +157,34 @@ export default class WikiHomePage extends Screen {
 
   private buildItems(): SelectItem[] {
     const t = this.app.t.bind(this.app);
-    const wikiCatalog = this.app.wiki.catalog;
     return this.app.config.isFirstTime
       ? buildFirstTimeSelectItems(t)
-      : buildNormalSelectItems(wikiCatalog, this.progress, t);
+      : buildNormalSelectItems(
+          this.app.wiki.targetCatalog,
+          this.targetProgress,
+          this.statusProgress,
+          t,
+        );
   }
 
   private async loadCatalog(): Promise<void> {
-    await this.app.wiki.load();
-    const pages = this.app.wiki.catalog?.pages;
-    // 空骨架（只有 sections）视同「尚无目录」：不计算进度，首页给出生成入口
-    this.progress = pages && pages.length > 0 ? await countGeneratedPages(pages) : null;
+    // 每次进入都重新解析变体（配置档位切换后立即生效）
+    await this.app.wiki.reload();
+
+    // 活动变体（任一档位 / 遗留目录）：状态标题与浏览入口
+    const activePages = this.app.wiki.catalog?.pages;
+    this.statusProgress =
+      activePages && activePages.length > 0
+        ? await countGeneratedPages(activePages, this.app.wiki.detail)
+        : null;
+
+    // 写盘目标档位：生成 / 继续 / 管理 / 同步 / 强制重新生成
+    const targetPages = this.app.wiki.targetCatalog?.pages;
+    this.targetProgress =
+      targetPages && targetPages.length > 0
+        ? await countGeneratedPages(targetPages, this.app.wiki.targetDetail)
+        : null;
+
     this.syncItems();
     this.refresh();
   }

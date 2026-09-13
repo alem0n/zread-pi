@@ -70,6 +70,10 @@ await writeFile(
   "utf-8",
 );
 
+// 服务端缺省档位解析会读配置（loadConfigSync）；先指到临时 HOME，保证断言确定
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+
 const PAGE = {
   slug: "1-overview",
   title: "概览",
@@ -148,6 +152,138 @@ const content = (await (await fetch(`${info.url}/api/wiki/content/${PAGE.slug}`)
   content: string;
 };
 check("GET /api/wiki/content 返回 markdown", content.content.includes("# 概览"));
+
+// ---------------------------------------------------------------------------
+// 1b) 多档共存：variants API + ?detail= 解析 + 遗留回退
+// ---------------------------------------------------------------------------
+
+const HIGH_PAGE = {
+  slug: "1-high-overview",
+  title: "高级档概览",
+  file: "1-high-overview.md",
+  section: "入门指南",
+  level: "Intermediate",
+  associatedFiles: ["hello.py"],
+};
+const LOW_PAGE = {
+  slug: "1-low-overview",
+  title: "精简档概览",
+  file: "1-low-overview.md",
+  section: "入门指南",
+  level: "Beginner",
+  associatedFiles: ["hello.py"],
+};
+
+async function writeVariant(detail: string, page: typeof HIGH_PAGE, generatedAt: string): Promise<void> {
+  const dir = join(repo, ".zread-pi", "wiki", detail);
+  await mkdir(join(dir, page.section), { recursive: true });
+  await writeFile(
+    join(dir, "wiki.json"),
+    JSON.stringify(
+      { id: detail, generated_at: generatedAt, language: "zh", detail, pages: [page] },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+  await writeFile(join(dir, page.section, page.file), `# ${page.title}\n\n${detail} variant page.\n`, "utf-8");
+}
+
+await writeVariant("high", HIGH_PAGE, "2026-01-02T00:00:00.000Z");
+await writeVariant("low", LOW_PAGE, "2026-02-03T00:00:00.000Z");
+await writeFile(join(repo, "hello.py"), "print('hello')\n", "utf-8");
+
+interface VariantsPayload {
+  variants: Array<{ detail: string | null; name: string; legacy: boolean; pagesCount: number }>;
+  active: string | null;
+}
+const variantsRes = await fetch(`${info.url}/api/wiki/variants`);
+const variantsPayload = (await variantsRes.json()) as VariantsPayload;
+checkEqual("GET /api/wiki/variants 状态码", variantsRes.status, 200);
+checkEqual("variants 含 high / low / 默认 三个条目", variantsPayload.variants.length, 3);
+checkEqual(
+  "variants 按档位顺序排列（遗留最后）",
+  JSON.stringify(variantsPayload.variants.map((variant) => variant.detail)),
+  JSON.stringify(["low", "high", null]),
+);
+checkEqual("variants active = 配置档位 high", variantsPayload.active, "high");
+check(
+  "variants 中遗留条目名为「默认」",
+  variantsPayload.variants.some((variant) => variant.detail === null && variant.name === "默认"),
+);
+check(
+  "variants 页数来自各自的 wiki.json",
+  variantsPayload.variants.every((variant) => variant.pagesCount === 1),
+  JSON.stringify(variantsPayload.variants.map((variant) => variant.pagesCount)),
+);
+
+const defaultCatalog = (await (await fetch(`${info.url}/api/wiki/catalog`)).json()) as {
+  pages: Array<{ slug: string }>;
+};
+checkEqual("缺省 catalog 解析到配置档位 high", defaultCatalog.pages[0]?.slug, HIGH_PAGE.slug);
+
+const lowCatalog = (await (await fetch(`${info.url}/api/wiki/catalog?detail=low`)).json()) as {
+  pages: Array<{ slug: string }>;
+};
+checkEqual("?detail=low 返回 low 变体", lowCatalog.pages[0]?.slug, LOW_PAGE.slug);
+
+const legacyCatalog = (await (await fetch(`${info.url}/api/wiki/catalog?detail=default`)).json()) as {
+  pages: Array<{ slug: string }>;
+};
+checkEqual("?detail=default 返回遗留目录（默认）", legacyCatalog.pages[0]?.slug, PAGE.slug);
+
+const highContent = (await (
+  await fetch(`${info.url}/api/wiki/content/${HIGH_PAGE.slug}?detail=high`)
+).json()) as { content: string };
+check(
+  "?detail=high 的正文从 high 变体目录解析",
+  highContent.content.includes("high variant page") && !highContent.content.includes("浏览文档用夹具页面"),
+);
+
+const legacyContent = (await (
+  await fetch(`${info.url}/api/wiki/content/${PAGE.slug}?detail=default`)
+).json()) as { content: string };
+check("?detail=default 的正文从遗留目录解析", legacyContent.content.includes("浏览文档用夹具页面"));
+
+const unknownVariant = await fetch(`${info.url}/api/wiki/catalog?detail=bogus`);
+checkEqual("无效档位返回 404", unknownVariant.status, 404);
+check(
+  "无效档位返回可读 JSON 错误",
+  ((await unknownVariant.json()) as { error?: string }).error === "Unknown wiki variant: bogus",
+);
+
+const missingVariant = await fetch(`${info.url}/api/wiki/catalog?detail=max`);
+checkEqual("合法但不存在的档位返回 404", missingVariant.status, 404);
+check(
+  "缺失档位的错误信息带档位名",
+  ((await missingVariant.json()) as { error?: string }).error === "Wiki variant not found: max",
+);
+
+const contentBadDetail = await fetch(`${info.url}/api/wiki/content/${HIGH_PAGE.slug}?detail=nope`);
+checkEqual("content 无效档位返回 404", contentBadDetail.status, 404);
+
+const sourceOk = await fetch(`${info.url}/api/wiki/source?file=hello.py`);
+checkEqual("source 不带 detail 仍可用（项目级文件）", sourceOk.status, 200);
+check("source 返回文件内容", ((await sourceOk.json()) as { code: string }).code.includes("print('hello')"));
+
+const sourceBadDetail = await fetch(`${info.url}/api/wiki/source?file=hello.py&detail=bogus`);
+checkEqual("source 无效档位返回 404", sourceBadDetail.status, 404);
+
+check("hasWikiCatalog 识别档位变体", hasWikiCatalog(repo) === true);
+
+// 仅存在档位变体（无遗留目录）的目录也算「有文档」
+const variantOnlyRepo = await mkdtemp(join(tmpdir(), "zread-browse-variant-only-"));
+await mkdir(join(variantOnlyRepo, ".zread-pi", "wiki", "high"), { recursive: true });
+await writeFile(
+  join(variantOnlyRepo, ".zread-pi", "wiki", "high", "wiki.json"),
+  JSON.stringify({ id: "variant-only", generated_at: new Date().toISOString(), language: "zh", pages: [HIGH_PAGE] }),
+  "utf-8",
+);
+check("hasWikiCatalog 识别仅有档位变体的目录", hasWikiCatalog(variantOnlyRepo) === true);
+check(
+  "hasWikiCatalog 对空目录返回 false",
+  hasWikiCatalog(await mkdtemp(join(tmpdir(), "zread-browse-empty-"))) === false,
+);
 
 const missingRes = await fetch(`${info.url}/api/not-found`);
 checkEqual("未知 /api 路径返回 404", missingRes.status, 404);
@@ -337,6 +473,7 @@ delete process.env.ZREAD_PI_BROWSE_NO_OPEN;
 process.chdir(join(home, ".."));
 await rm(repo, { recursive: true, force: true });
 await rm(dist, { recursive: true, force: true });
+await rm(variantOnlyRepo, { recursive: true, force: true });
 await rm(home, { recursive: true, force: true });
 
 console.log(`\n结果：${passed} passed, ${failed} failed`);

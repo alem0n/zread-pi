@@ -231,11 +231,11 @@ process.chdir(repo);
 
 const { generateWikiCatalog } = await import("../src/orchestrator.js");
 const { syncWiki, computeSyncDiff } = await import("../src/wiki/sync-wiki.js");
-const { loadWikiBlueprint } = await import("@zread-pi/utils");
 const { scanFiles } = await import("@zread-pi/repo-analyzer");
 const { saveCachedManifest } = await import("@zread-pi/utils");
 
-const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
+// 默认配置档位 high：产物落在变体子目录 `.zread-pi/wiki/high/`
+const wikiJsonPath = join(repo, ".zread-pi", "wiki", "high", "wiki.json");
 const readBlueprintFile = async (): Promise<{
 	sections?: Array<{ title: string }>;
 	pages: Array<{ slug: string; title: string; section: string; status?: string; associatedFiles?: string[] }>;

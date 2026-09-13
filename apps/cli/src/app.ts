@@ -15,7 +15,7 @@ import { App as TuiApp } from "./tui/app";
 import { captureConsoleToLog } from "./tui/console-guard";
 import { restoreStdout, takeOverStdout } from "./tui/output-guard";
 import { routes } from "./routes";
-import { ensureProjectRecorded, fileExists, getWikiJsonPath, readJsonFile } from "@zread-pi/utils";
+import { ensureProjectRecorded, getWikiJsonPath, listWikiVariants, readJsonFile } from "@zread-pi/utils";
 import type { WikiOutput } from "@zread-pi/types";
 import { countGeneratedPages } from "./utils/generated-docs";
 
@@ -25,25 +25,31 @@ export interface AppOptions {
 
 /**
  * 「添加老旧项目」：打开目标目录时，如果这里已经有生成好的文档
- * （wiki.json 可解析、页面非空、且全部页面已落盘 —— 即首页显示的「文档已生成 (N 篇)」），
- * 且路径不在全局记忆里，就把当前项目补录进去，方便后续直接用 `zread-pi history` 找到它。
+ * （任一档位变体 / 遗留目录的 wiki.json 可解析、页面非空、且全部页面已落盘 ——
+ * 即首页显示的「文档已生成 (N 篇)」），且路径不在全局记忆里，
+ * 就把当前项目补录进去，方便后续直接用 `zread-pi history` 找到它。
+ *
+ * 多档共存（`wiki/<detail>/`）下逐一检查每个变体，任一完整即补录；
+ * 遗留的无档位目录同样算是兼容读取的变体。
  *
  * 已存在的记录不做任何写入（不刷位置、不重复）。任何失败都只忽略：
  * 记忆是辅助数据，不能阻断 TUI 启动（与生成时写入的容错策略一致）。
  */
 async function adoptExistingProject(): Promise<void> {
   try {
-    const wikiPath = getWikiJsonPath();
-    if (!(await fileExists(wikiPath))) return;
+    for (const variant of listWikiVariants()) {
+      const catalog = await readJsonFile<WikiOutput>(getWikiJsonPath(variant.detail)).catch(
+        () => null,
+      );
+      const pages = catalog?.pages;
+      if (!Array.isArray(pages) || pages.length === 0) continue;
 
-    const catalog = await readJsonFile<WikiOutput>(wikiPath);
-    const pages = catalog?.pages;
-    if (!Array.isArray(pages) || pages.length === 0) return;
+      const { generated, total } = await countGeneratedPages(pages, variant.detail);
+      if (generated < total) continue;
 
-    const { generated, total } = await countGeneratedPages(pages);
-    if (generated < total) return;
-
-    await ensureProjectRecorded(process.cwd());
+      await ensureProjectRecorded(process.cwd());
+      return;
+    }
   } catch {
     // 忽略：文档判据读取失败 / 记忆不可写时保持原状
   }

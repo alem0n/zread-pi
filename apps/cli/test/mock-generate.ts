@@ -467,7 +467,7 @@ check(
   retryText.trimEnd().split("\n").at(-1) ?? "(空)",
 );
 
-const wikiJsonPath = join(repo, ".zread-pi", "wiki", "wiki.json");
+const wikiJsonPath = join(repo, ".zread-pi", "wiki", "high", "wiki.json");
 const wikiJsonExists = await stat(wikiJsonPath).then(
   () => true,
   () => false,
@@ -492,7 +492,7 @@ if (wikiJsonExists) {
   );
 
   for (const page of catalog.pages) {
-    const file = join(repo, ".zread-pi", "wiki", page.section, page.file);
+    const file = join(repo, ".zread-pi", "wiki", "high", page.section, page.file);
     const exists = await stat(file).then(
       () => true,
       () => false,

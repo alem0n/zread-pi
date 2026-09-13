@@ -148,9 +148,12 @@ function outOfRangeResult(
 export function createSubmitSectionsTool(options: {
   merge?: boolean
   detail?: BlueprintDetailLevel
+  /** 写盘变体（缺省 = detail；`null` = 遗留目录） */
+  variant?: BlueprintDetailLevel | null
   state?: QuantityToolState<WikiSection[]>
 } = {}): ToolDefinition {
   const merge = options.merge === true
+  const variant = options.variant !== undefined ? options.variant : (options.detail ?? 'high')
   const state: QuantityToolState<WikiSection[]> =
     options.state ?? { called: false, persisted: false, outOfRange: 0, exhausted: false }
   const spec = (): BlueprintDetailSpec => getDetailSpec(options.detail ?? 'high')
@@ -198,9 +201,9 @@ export function createSubmitSectionsTool(options: {
             minimal: true,
           })
           if (merge) {
-            await mergeWikiSections(normalized, config, { limit: 1, minimal: true })
+            await mergeWikiSections(normalized, config, { limit: 1, minimal: true, variant })
           } else {
-            await initWikiSkeleton(normalized, config, undefined, { minimal: true, limit: 1 })
+            await initWikiSkeleton(normalized, config, undefined, { minimal: true, limit: 1, variant })
           }
           state.persisted = true
           state.lastPayload = normalized
@@ -220,7 +223,7 @@ export function createSubmitSectionsTool(options: {
         }
 
         if (merge) {
-          const current = await loadWikiBlueprint()
+          const current = await loadWikiBlueprint(undefined, variant)
           const existing = current.sections ?? sectionsFromBlueprint(current)
           const mergedCount = mergeBlueprintSections(
             existing,
@@ -238,6 +241,7 @@ export function createSubmitSectionsTool(options: {
 
           const merged = await mergeWikiSections(rawSections, config, {
             limit: detailSpec.sections.max,
+            variant,
           })
           state.persisted = true
           state.lastPayload = rawSections
@@ -270,6 +274,7 @@ export function createSubmitSectionsTool(options: {
 
         const outputPath = await initWikiSkeleton(normalized, config, undefined, {
           limit: detailSpec.sections.max,
+          variant,
         })
         state.persisted = true
         state.lastPayload = normalized
@@ -305,10 +310,13 @@ export function createSubmitSectionTopicsTool(
   options: {
     reuseExisting?: boolean
     detail?: BlueprintDetailLevel
+    /** 写盘变体（缺省 = detail；`null` = 遗留目录） */
+    variant?: BlueprintDetailLevel | null
     state?: QuantityToolState<WikiTopic[]>
   } = {},
 ): ToolDefinition {
   const sync = options.reuseExisting === true
+  const variant = options.variant !== undefined ? options.variant : (options.detail ?? 'high')
   const state: QuantityToolState<WikiTopic[]> =
     options.state ?? { called: false, persisted: false, outOfRange: 0, exhausted: false }
   const spec = (): BlueprintDetailSpec => getDetailSpec(options.detail ?? 'high')
@@ -350,7 +358,7 @@ export function createSubmitSectionTopicsTool(
         // minimal：固定 1 篇，无归并空间 —— 取首个主题，直接代码收尾
         if (detailSpec.level === 'minimal') {
           const kept = topics.slice(0, 1)
-          const result = await mergeSectionTopics(section, kept, { reuseExisting: options.reuseExisting })
+          const result = await mergeSectionTopics(section, kept, { reuseExisting: options.reuseExisting, variant })
           state.persisted = true
           state.lastPayload = kept
           state.lastCount = kept.length
@@ -376,6 +384,7 @@ export function createSubmitSectionTopicsTool(
 
         const result = await mergeSectionTopics(section, topics, {
           reuseExisting: options.reuseExisting,
+          variant,
         })
         state.persisted = true
         state.lastPayload = topics
@@ -479,7 +488,13 @@ export function createSubmitCondensedTopicsTool(
  *
  * 只写回 title；slug / file / section 保持不变。
  */
-export function createRefineSectionTitlesTool(section: WikiSection): ToolDefinition {
+export function createRefineSectionTitlesTool(
+  section: WikiSection,
+  options: {
+    /** 写盘变体（缺省 = 遗留目录） */
+    variant?: BlueprintDetailLevel | null
+  } = {},
+): ToolDefinition {
   return {
     name: 'refine_section_titles',
     description: `批量写回分类「${section.title}」下所有页面的精修标题（只改 title）。`,
@@ -514,7 +529,7 @@ export function createRefineSectionTitlesTool(section: WikiSection): ToolDefinit
           ? (input.titles as unknown as Array<{ slug?: string; title?: string }>)
           : []
         const incomingSection = typeof input.section === 'string' ? input.section.trim() : ''
-        const result = await applySectionTitles(section, titles)
+        const result = await applySectionTitles(section, titles, { variant: options.variant })
 
         const mismatch =
           incomingSection && incomingSection.toLowerCase() !== section.title.trim().toLowerCase()

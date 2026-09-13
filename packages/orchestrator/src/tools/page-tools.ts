@@ -11,7 +11,8 @@
 
 import { resolve, dirname } from 'path';
 import { defineTool, getRequiredString, getString } from '@zread-pi/agent-runtime';
-import type { ToolInputParams, ToolContext } from '@zread-pi/agent-runtime';
+import type { ToolInputParams, ToolContext, ToolDefinition } from '@zread-pi/agent-runtime';
+import type { BlueprintDetailLevel } from '@zread-pi/types';
 import { ensureDir, writeTextFile } from '@zread-pi/utils';
 
 interface MermaidValidationIssue {
@@ -118,18 +119,23 @@ export function formatMermaidValidationError(issues: MermaidValidationIssue[]): 
 /**
  * 按 write_page 的路径规则解析页面输出路径（与工具内拼接规则保持一致）。
  *
- * - `file` 含路径分隔符 → 相对 `.zread-pi/wiki` 解析（忽略 `section`）
- * - `file` + `section` → `.zread-pi/wiki/<section>/<file>`
- * - 只有 `file` → `.zread-pi/wiki/<file>`
- * - 没有 `file` → `.zread-pi/wiki/<slug>.md`
+ * - 传 `variant`（档位）时基准目录为 `.zread-pi/wiki/<variant>`（多档共存）；
+ * - 不传 / null = 遗留 `.zread-pi/wiki`（只读兼容）；
+ * - `file` 含路径分隔符 → 相对基准目录解析（忽略 `section`）
+ * - `file` + `section` → `<基准>/<section>/<file>`
+ * - 只有 `file` → `<基准>/<file>`
+ * - 没有 `file` → `<基准>/<slug>.md`
  *
  * 单独导出，供 generate-wiki 的落盘兜底复用同一套解析规则。
  */
 export function resolvePageOutputPath(
   cwd: string,
   params: { file?: string; section?: string; slug: string },
+  options: { variant?: BlueprintDetailLevel | null } = {},
 ): string {
-  const wikiDir = resolve(cwd, '.zread-pi/wiki');
+  const wikiDir = options.variant
+    ? resolve(cwd, '.zread-pi/wiki', options.variant)
+    : resolve(cwd, '.zread-pi/wiki');
   const { file, section, slug } = params;
 
   if (file) {
@@ -151,90 +157,95 @@ export function resolvePageOutputPath(
  * Write Wiki page content to the specified file path.
  * Uses WikiPage.file field for path, organized by section.
  *
- * Path structure: .zread-pi/wiki/{section}/{file}
- * Example: .zread-pi/wiki/入门指南/1-project-overview.md
+ * 路径结构（`variant` = 蓝图细节档位；不传 = 遗留布局）：
+ * `.zread-pi/wiki[ /<variant>]/{section}/{file}`
  */
-export const WritePageTool = defineTool({
-  name: 'write_page',
-  description: `将 Wiki 页面内容写入指定文件路径。按照章节组织目录结构。
+export function createWritePageTool(variant?: BlueprintDetailLevel | null): ToolDefinition {
+  return defineTool({
+    name: 'write_page',
+    description: `将 Wiki 页面内容写入指定文件路径。按照章节组织目录结构。
 输出路径: .zread-pi/wiki/{file}`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      slug: {
-        type: 'string',
-        description: '页面 slug（如 "1-project-overview"）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: {
+          type: 'string',
+          description: '页面 slug（如 "1-project-overview"）',
+        },
+        file: {
+          type: 'string',
+          description: '文件名或相对路径，如 "1-project-overview.md"',
+        },
+        section: {
+          type: 'string',
+          description: '所属章节（如 "入门指南"），用于组织目录结构',
+        },
+        content: {
+          type: 'string',
+          description: 'Markdown 格式的页面内容',
+        },
+        title: {
+          type: 'string',
+          description: '页面标题（可选，用于 YAML frontmatter）',
+        },
       },
-      file: {
-        type: 'string',
-        description: '文件名或相对路径，如 "1-project-overview.md"',
-      },
-      section: {
-        type: 'string',
-        description: '所属章节（如 "入门指南"），用于组织目录结构',
-      },
-      content: {
-        type: 'string',
-        description: 'Markdown 格式的页面内容',
-      },
-      title: {
-        type: 'string',
-        description: '页面标题（可选，用于 YAML frontmatter）',
-      },
+      required: ['slug', 'content'],
     },
-    required: ['slug', 'content'],
-  },
-  isReadOnly: false,
-  isConcurrencySafe: false, // Write operation needs exclusive access
-  async call(input: ToolInputParams, context: ToolContext): Promise<PageToolResult> {
-    const slug = getRequiredString(input, 'slug');
-    const content = getRequiredString(input, 'content');
-    const title = getString(input, 'title');
-    const file = getString(input, 'file');
-    const section = getString(input, 'section');
+    isReadOnly: false,
+    isConcurrencySafe: false, // Write operation needs exclusive access
+    async call(input: ToolInputParams, context: ToolContext): Promise<PageToolResult> {
+      const slug = getRequiredString(input, 'slug');
+      const content = getRequiredString(input, 'content');
+      const title = getString(input, 'title');
+      const file = getString(input, 'file');
+      const section = getString(input, 'section');
 
-    // Build output path based on file and section
-    // Priority: file parameter (with section if needed) > slug fallback
-    const filePath = resolvePageOutputPath(context.cwd, { file, section, slug });
+      // Build output path based on file and section
+      // Priority: file parameter (with section if needed) > slug fallback
+      const filePath = resolvePageOutputPath(context.cwd, { file, section, slug }, { variant });
 
-    // Build YAML frontmatter
-    const frontmatter = title
-      ? `---\ntitle: "${title}"\nslug: "${slug}"\n---\n\n`
-      : '';
+      // Build YAML frontmatter
+      const frontmatter = title
+        ? `---\ntitle: "${title}"\nslug: "${slug}"\n---\n\n`
+        : '';
 
-    const fullContent = frontmatter + content;
-    const mermaidIssues = validateMermaidContent(fullContent);
-    if (mermaidIssues.length > 0) {
-      return {
-        data: JSON.stringify({
-          success: false,
-          error: formatMermaidValidationError(mermaidIssues),
-        }),
-        is_error: true,
-      };
-    }
+      const fullContent = frontmatter + content;
+      const mermaidIssues = validateMermaidContent(fullContent);
+      if (mermaidIssues.length > 0) {
+        return {
+          data: JSON.stringify({
+            success: false,
+            error: formatMermaidValidationError(mermaidIssues),
+          }),
+          is_error: true,
+        };
+      }
 
-    // Write file
-    try {
-      await ensureDir(dirname(filePath));
-      await writeTextFile(filePath, fullContent);
+      // Write file
+      try {
+        await ensureDir(dirname(filePath));
+        await writeTextFile(filePath, fullContent);
 
-      return JSON.stringify({
-        success: true,
-        path: filePath,
-        slug,
-        section: section || '未分类',
-        size: fullContent.length,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        data: JSON.stringify({
-          success: false,
-          error: message,
-        }),
-        is_error: true,
-      };
-    }
-  },
-});
+        return JSON.stringify({
+          success: true,
+          path: filePath,
+          slug,
+          section: section || '未分类',
+          size: fullContent.length,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          data: JSON.stringify({
+            success: false,
+            error: message,
+          }),
+          is_error: true,
+        };
+      }
+    },
+  });
+}
+
+/** 遗留布局（`wiki/<section>/<file>`）的 write_page 实例 */
+export const WritePageTool: ToolDefinition = createWritePageTool();
