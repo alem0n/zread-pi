@@ -38,6 +38,7 @@ export const enUS: TranslationKeys = {
     thinkingLevel: 'Thinking Level',
     maxTurns: 'Max Turns',
     polish: 'Style Polishing',
+    blueprintDetail: 'Blueprint Detail',
     maxConcurrency: 'Max Concurrency',
     maxRetries: 'Max Retries',
     default: '(default: {default})',
@@ -208,6 +209,23 @@ export const enUS: TranslationKeys = {
     layersHint:
       'In both modes, code blocks, inline code, Sources: lines, Mermaid quoted labels and YAML frontmatter stay protected.',
     footer: 'ESC to go back | ↑↓ to select | Enter to apply and go back | t to enable/disable | s to save and go back',
+  },
+  blueprintDetail: {
+    title: 'Set blueprint detail level',
+    current: 'Current',
+    intro:
+      'The level controls the number of sections, articles per section and whether titles are refined. Out-of-range results are first merged by the model; if still off, the system condenses or settles them deterministically.',
+    minimal: 'Minimal',
+    minimalDesc: '1 section (Overview) · 1 panorama article: must map modules and data flow with a Mermaid diagram',
+    low: 'Lite',
+    lowDesc: '3-5 sections · 1-3 articles each, title refinement skipped',
+    medium: 'Standard',
+    mediumDesc: '4-6 sections · 3-5 articles each',
+    high: 'Detailed (default)',
+    highDesc: '4-8 sections · 3-10 articles each (zero change for existing users)',
+    max: 'Exhaustive',
+    maxDesc: '4-8 sections · 5-12 articles each, emphasizing completeness and deeper linked files',
+    footer: 'ESC to go back | ↑↓ to select | Enter to apply and go back | s to save and go back',
   },
   tools: {
     title: 'External Tools',

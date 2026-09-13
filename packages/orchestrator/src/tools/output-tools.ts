@@ -4,34 +4,156 @@
  * 三阶段蓝图（分类 → 分主题 → 标题）的文件输出工具：
  * - `submit_sections`：分类阶段写骨架 / 合并分类（sync）；
  * - `submit_section_topics`：主题阶段按分类增量归并页面（slug/file 由代码分配）；
- * - `refine_section_titles`：标题阶段批量写回 title。
+ * - `refine_section_titles`：标题阶段批量写回 title；
+ * - `submit_condensed_sections` / `submit_condensed_topics`：缩编 subagent 的一次性输出工具
+ *   （只捕获结果，不落盘；落盘由阶段驱动器统一走 merge 函数）。
+ *
+ * 数量控制（blueprint.detail，见 agents/blueprint-detail.ts）：
+ * 每次提交都带「数量反馈」；越界提交**不落盘、不报错**，返回归并 / 补充策略文本请求重提；
+ * 连续两次不收敛后标记 `state.exhausted`，由阶段驱动器开缩编 subagent 或代码兜底。
  *
  * `generate_blueprint` / `generate_sync_blueprint` 是旧版一次性蓝图的工具，
  * 保留仅归档（当前流程不再使用；提示词与测试均不引用）。
  */
 
-import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@zread-pi/agent-runtime'
+import type { ToolDefinition, ToolInputParams, ToolInputSchemaProperty, ToolContext, ToolResult } from '@zread-pi/agent-runtime'
 import {
   applySectionTitles,
   generateWikiJson,
   initWikiSkeleton,
   loadConfig,
+  loadWikiBlueprint,
+  mergeBlueprintSections,
   mergeSectionTopics,
   mergeWikiSections,
   normalizeBlueprintSections,
   normalizeSectionList,
+  sectionsFromBlueprint,
 } from '@zread-pi/utils'
-import type { WikiPage, WikiSection, WikiTopic } from '@zread-pi/types'
+import type { BlueprintDetailLevel, WikiPage, WikiSection, WikiTopic } from '@zread-pi/types'
+import {
+  MAX_QUANTITY_FEEDBACK_ROUNDS,
+  QUANTITY_FALLBACK_NOTE,
+  buildSectionQuantityStrategy,
+  buildTopicsQuantityStrategy,
+  formatQuantityFeedback,
+  getDetailSpec,
+  judgeQuantity,
+  type BlueprintDetailSpec,
+  type QuantityToolState,
+  type QuantityVerdict,
+} from '../agents/blueprint-detail.js'
 import type { TechStackSummary } from '../types.js'
+
+/** 统一的 tool_result 构造 */
+function okResult(content: string): ToolResult {
+  return { type: 'tool_result', tool_use_id: '', content }
+}
+
+function failResult(content: string): ToolResult {
+  return { type: 'tool_result', tool_use_id: '', content, is_error: true }
+}
+
+/** 分类条目 schema（submit_sections 与缩编工具共用） */
+const SECTION_ITEM_SCHEMA: ToolInputSchemaProperty = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: '分类标题（简洁中文，≤10 字）' },
+    description: { type: 'string', description: '分类说明（这个分类覆盖什么、面向哪类读者）' },
+  },
+  required: ['title'],
+}
+
+/** 主题条目 schema（submit_section_topics 与缩编工具共用） */
+const TOPIC_ITEM_SCHEMA: ToolInputSchemaProperty = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: '草稿标题（≤20 字）' },
+    slug: { type: 'string', description: '英文 kebab-case 短名（用于 URL）' },
+    group: { type: 'string', description: '二级模块聚合（可选）' },
+    level: { type: 'string', description: '难度等级（Beginner/Intermediate/Advanced）' },
+    associatedFiles: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '关联的源文件或目录路径（目录以 / 结尾）',
+    },
+  },
+  required: ['title'],
+}
+
+function summarizeSections(sections: WikiSection[]): string {
+  return sections
+    .map((section) => `- ${section.title}${section.description ? `：${section.description}` : ''}`)
+    .join('\n')
+}
+
+/** 归一化主题输入（仅用于数量统计；实际归并仍由 mergeSectionTopics 处理） */
+function normalizeTopicInput(input: unknown): WikiTopic[] {
+  if (!Array.isArray(input)) return []
+  const result: WikiTopic[] = []
+  const seen = new Set<string>()
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const topic = entry as WikiTopic
+    const title = typeof topic.title === 'string' ? topic.title.trim() : ''
+    if (!title) continue
+    const key = title.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(topic)
+  }
+  return result
+}
+
+/**
+ * 越界提交的统一处理：不落盘、不报错；前 N-1 次返回策略文本，第 N 次标记 exhausted。
+ */
+function outOfRangeResult(
+  state: QuantityToolState<WikiSection[]> | QuantityToolState<WikiTopic[]>,
+  kind: 'sections' | 'topics',
+  count: number,
+  verdict: Exclude<QuantityVerdict, 'ok'>,
+  spec: BlueprintDetailSpec,
+  options: { sync?: boolean } = {},
+): ToolResult {
+  state.outOfRange += 1
+  state.lastVerdict = verdict
+
+  const feedback = formatQuantityFeedback({ kind, count, spec, upperBoundOnly: options.sync })
+  const strategy =
+    kind === 'sections'
+      ? buildSectionQuantityStrategy(verdict, spec, options)
+      : buildTopicsQuantityStrategy(verdict, spec, options)
+
+  if (state.outOfRange < MAX_QUANTITY_FEEDBACK_ROUNDS) {
+    return okResult(
+      `${feedback}\n\n${strategy}\n\n（本次提交未落盘；请按上述策略调整后重新调用工具提交完整清单。）`,
+    )
+  }
+
+  state.exhausted = true
+  return okResult(
+    `${feedback}\n\n（已连续 ${MAX_QUANTITY_FEEDBACK_ROUNDS} 次未收敛，本次提交未落盘；不再要求重提，系统将用缩编 / 代码兜底完成落盘）${QUANTITY_FALLBACK_NOTE}`,
+  )
+}
 
 /**
  * Submit Sections Tool（分类阶段）
  *
  * 写入 wiki.json 骨架：sections（强制包含概览/快速开始/核心架构）+ 空 pages。
  * sync 流程传 `merge: true`：保留既有分类与页面，只把新增分类补进 sections。
+ *
+ * `detail`（蓝图细节档位）控制数量区间；`state` 用于回传越界 / 缩编触发信息。
  */
-export function createSubmitSectionsTool(options: { merge?: boolean } = {}): ToolDefinition {
+export function createSubmitSectionsTool(options: {
+  merge?: boolean
+  detail?: BlueprintDetailLevel
+  state?: QuantityToolState<WikiSection[]>
+} = {}): ToolDefinition {
   const merge = options.merge === true
+  const state: QuantityToolState<WikiSection[]> =
+    options.state ?? { called: false, persisted: false, outOfRange: 0, exhausted: false }
+  const spec = (): BlueprintDetailSpec => getDetailSpec(options.detail ?? 'high')
 
   return {
     name: 'submit_sections',
@@ -43,15 +165,10 @@ export function createSubmitSectionsTool(options: { merge?: boolean } = {}): Too
       properties: {
         sections: {
           type: 'array',
-          description: '顶级分类清单（4~8 个；必须包含概览/快速开始/核心架构）',
-          items: {
-            type: 'object',
-            properties: {
-              title: { type: 'string', description: '分类标题（简洁中文，≤10 字）' },
-              description: { type: 'string', description: '分类说明（这个分类覆盖什么、面向哪类读者）' },
-            },
-            required: ['title'],
-          },
+          description: merge
+            ? `更新后的顶级分类清单（sync：既有分类必留，新增优先并入既有；总量含既有不超 ${spec().sections.max} 个）`
+            : `顶级分类清单（${spec().sections.min}~${spec().sections.max} 个；必须包含概览/快速开始/核心架构）`,
+          items: SECTION_ITEM_SCHEMA,
         },
       },
       required: ['sections'],
@@ -60,54 +177,118 @@ export function createSubmitSectionsTool(options: { merge?: boolean } = {}): Too
     isConcurrencySafe: () => false,
     isEnabled: () => true,
     async prompt() {
-      return merge ? 'Merge the updated section list into wiki.json.' : 'Write the wiki.json skeleton with sections.';
+      return merge
+        ? 'Merge the updated section list into wiki.json.'
+        : 'Write the wiki.json skeleton with sections.'
     },
     async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      state.called = true
       try {
-        const sections = normalizeSectionList(input.sections)
-        if (sections.length === 0) {
-          return {
-            type: 'tool_result',
-            tool_use_id: '',
-            content: '错误: sections 数组不能为空',
-            is_error: true,
-          }
+        const rawSections = normalizeSectionList(input.sections)
+        if (rawSections.length === 0) {
+          return failResult('错误: sections 数组不能为空')
         }
 
         const config = await loadConfig()
+        const detailSpec = spec()
+
+        // minimal：固定 1 个分类（概览），无归并空间 —— 直接代码收尾
+        if (detailSpec.level === 'minimal') {
+          const normalized = normalizeBlueprintSections(rawSections, config.doc_language, 1, {
+            minimal: true,
+          })
+          if (merge) {
+            await mergeWikiSections(normalized, config, { limit: 1, minimal: true })
+          } else {
+            await initWikiSkeleton(normalized, config, undefined, { minimal: true, limit: 1 })
+          }
+          state.persisted = true
+          state.lastPayload = normalized
+          state.lastCount = normalized.length
+          const lines = merge
+            ? [`分类清单已合并（${normalized.length} 个分类）:`, summarizeSections(normalized)]
+            : ['Wiki 骨架已生成（minimal）:', summarizeSections(normalized)]
+          return okResult(
+            [
+              lines.join('\n'),
+              formatQuantityFeedback({ kind: 'sections', count: normalized.length, spec: detailSpec }),
+              rawSections.length !== 1 ? `minimal 档位只保留「概览」一个分类。${QUANTITY_FALLBACK_NOTE}` : '',
+            ]
+              .filter((part) => part.length > 0)
+              .join('\n\n'),
+          )
+        }
 
         if (merge) {
-          const merged = await mergeWikiSections(sections, config)
-          return {
-            type: 'tool_result',
-            tool_use_id: '',
-            content: `分类清单已合并（${merged.length} 个分类）:\n` +
-              merged.map((section) => `- ${section.title}`).join('\n'),
+          const current = await loadWikiBlueprint()
+          const existing = current.sections ?? sectionsFromBlueprint(current)
+          const mergedCount = mergeBlueprintSections(
+            existing,
+            rawSections,
+            config.doc_language,
+            Number.MAX_SAFE_INTEGER,
+          ).length
+
+          const verdict = judgeQuantity(mergedCount, detailSpec.sections, { enforceMin: false })
+          if (verdict !== 'ok') {
+            state.lastPayload = rawSections
+            state.lastCount = mergedCount
+            return outOfRangeResult(state, 'sections', mergedCount, verdict, detailSpec, { sync: true })
           }
+
+          const merged = await mergeWikiSections(rawSections, config, {
+            limit: detailSpec.sections.max,
+          })
+          state.persisted = true
+          state.lastPayload = rawSections
+          state.lastCount = merged.length
+          return okResult(
+            [
+              `分类清单已合并（${merged.length} 个分类）:\n${summarizeSections(merged)}`,
+              formatQuantityFeedback({
+                kind: 'sections',
+                count: merged.length,
+                spec: detailSpec,
+                upperBoundOnly: true,
+              }),
+            ].join('\n\n'),
+          )
         }
 
-        const normalized = normalizeBlueprintSections(sections, config.doc_language)
-        const outputPath = await initWikiSkeleton(normalized, config)
-        return {
-          type: 'tool_result',
-          tool_use_id: '',
-          content: `Wiki 骨架已生成: ${outputPath}\n\n分类清单（${normalized.length} 个）:\n` +
-            normalized.map((section) => `- ${section.title}${section.description ? `：${section.description}` : ''}`).join('\n'),
+        const normalized = normalizeBlueprintSections(
+          rawSections,
+          config.doc_language,
+          Number.MAX_SAFE_INTEGER,
+        )
+        const count = normalized.length
+        const verdict = judgeQuantity(count, detailSpec.sections)
+        if (verdict !== 'ok') {
+          state.lastPayload = normalized
+          state.lastCount = count
+          return outOfRangeResult(state, 'sections', count, verdict, detailSpec)
         }
+
+        const outputPath = await initWikiSkeleton(normalized, config, undefined, {
+          limit: detailSpec.sections.max,
+        })
+        state.persisted = true
+        state.lastPayload = normalized
+        state.lastCount = count
+        return okResult(
+          [
+            `Wiki 骨架已生成: ${outputPath}\n\n分类清单（${count} 个）:\n${summarizeSections(normalized)}`,
+            formatQuantityFeedback({ kind: 'sections', count, spec: detailSpec }),
+          ].join('\n\n'),
+        )
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
-        return {
-          type: 'tool_result',
-          tool_use_id: '',
-          content: `写入分类清单失败: ${message}`,
-          is_error: true,
-        }
+        return failResult(`写入分类清单失败: ${message}`)
       }
     },
   }
 }
 
-/** 生成流程使用的单例（写入新骨架） */
+/** 生成流程使用的单例（写入新骨架，默认 high 档位） */
 export const SubmitSectionsTool: ToolDefinition = createSubmitSectionsTool()
 
 /**
@@ -115,11 +296,23 @@ export const SubmitSectionsTool: ToolDefinition = createSubmitSectionsTool()
  *
  * `section` 参数在 schema 中保留（模型需要确认自己在给哪个分类规划），
  * 但实际归并一律使用闭包绑定的期望分类——模型写错也不至于整段失败。
+ *
+ * `detail` 控制每分类文章数量区间；`state` 回传越界 / 缩编触发信息。
+ * sync（`reuseExisting: true`）只校验上限：旧页面必须原样带回，不强制补齐下限。
  */
 export function createSubmitSectionTopicsTool(
   section: WikiSection,
-  options: { reuseExisting?: boolean } = {},
+  options: {
+    reuseExisting?: boolean
+    detail?: BlueprintDetailLevel
+    state?: QuantityToolState<WikiTopic[]>
+  } = {},
 ): ToolDefinition {
+  const sync = options.reuseExisting === true
+  const state: QuantityToolState<WikiTopic[]> =
+    options.state ?? { called: false, persisted: false, outOfRange: 0, exhausted: false }
+  const spec = (): BlueprintDetailSpec => getDetailSpec(options.detail ?? 'high')
+
   return {
     name: 'submit_section_topics',
     description: `提交分类「${section.title}」的文章主题（topic）清单；代码统一分配 slug/file 并增量归并进 wiki.json。`,
@@ -129,22 +322,10 @@ export function createSubmitSectionTopicsTool(
         section: { type: 'string', description: `分类标题（必须为 "${section.title}"）` },
         topics: {
           type: 'array',
-          description: '该分类下的文章主题（3~10 篇）',
-          items: {
-            type: 'object',
-            properties: {
-              title: { type: 'string', description: '草稿标题（≤20 字）' },
-              slug: { type: 'string', description: '英文 kebab-case 短名（用于 URL）' },
-              group: { type: 'string', description: '二级模块聚合（可选）' },
-              level: { type: 'string', description: '难度等级（Beginner/Intermediate/Advanced）' },
-              associatedFiles: {
-                type: 'array',
-                items: { type: 'string' },
-                description: '关联的源文件或目录路径（目录以 / 结尾）',
-              },
-            },
-            required: ['title'],
-          },
+          description: sync
+            ? `该分类下的文章主题（既有页面必须逐字带回；总量不超 ${spec().topics.max} 篇）`
+            : `该分类下的文章主题（${spec().topics.min}~${spec().topics.max} 篇）`,
+          items: TOPIC_ITEM_SCHEMA,
         },
       },
       required: ['section', 'topics'],
@@ -153,37 +334,142 @@ export function createSubmitSectionTopicsTool(
     isConcurrencySafe: () => false,
     isEnabled: () => true,
     async prompt() {
-      return `Submit page topics for section "${section.title}".`;
+      return `Submit page topics for section "${section.title}".`
     },
     async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      state.called = true
       try {
-        const topics = Array.isArray(input.topics) ? (input.topics as unknown as WikiTopic[]) : []
+        const detailSpec = spec()
+        const topics = normalizeTopicInput(input.topics)
         const incomingSection = typeof input.section === 'string' ? input.section.trim() : ''
-        const result = await mergeSectionTopics(section, topics, {
-          reuseExisting: options.reuseExisting,
-        })
-
         const mismatch =
           incomingSection && incomingSection.toLowerCase() !== section.title.trim().toLowerCase()
             ? `\n（模型传入的分类 "${incomingSection}" 与预期 "${section.title}" 不一致，已按预期分类归并）`
             : ''
 
-        return {
-          type: 'tool_result',
-          tool_use_id: '',
-          content:
-            `分类「${result.section}」主题已归并：新增 ${result.added}，复用 ${result.reused}，去重 ${result.duplicated}\n` +
-            `该分类现有 ${result.sectionPages} 篇；wiki.json 总计 ${result.totalPages} 篇${mismatch}`,
+        // minimal：固定 1 篇，无归并空间 —— 取首个主题，直接代码收尾
+        if (detailSpec.level === 'minimal') {
+          const kept = topics.slice(0, 1)
+          const result = await mergeSectionTopics(section, kept, { reuseExisting: options.reuseExisting })
+          state.persisted = true
+          state.lastPayload = kept
+          state.lastCount = kept.length
+          return okResult(
+            [
+              `分类「${result.section}」主题已归并：新增 ${result.added}，复用 ${result.reused}，去重 ${result.duplicated}`,
+              `该分类现有 ${result.sectionPages} 篇；wiki.json 总计 ${result.totalPages} 篇${mismatch}`,
+              formatQuantityFeedback({ kind: 'topics', count: kept.length, spec: detailSpec }),
+              topics.length > 1 ? `minimal 档位每个分类只保留 1 篇。${QUANTITY_FALLBACK_NOTE}` : '',
+            ]
+              .filter((part) => part.length > 0)
+              .join('\n'),
+          )
         }
+
+        const count = topics.length
+        const verdict = judgeQuantity(count, detailSpec.topics, { enforceMin: !sync })
+        if (verdict !== 'ok') {
+          state.lastPayload = topics
+          state.lastCount = count
+          return outOfRangeResult(state, 'topics', count, verdict, detailSpec, { sync })
+        }
+
+        const result = await mergeSectionTopics(section, topics, {
+          reuseExisting: options.reuseExisting,
+        })
+        state.persisted = true
+        state.lastPayload = topics
+        state.lastCount = count
+        return okResult(
+          [
+            `分类「${result.section}」主题已归并：新增 ${result.added}，复用 ${result.reused}，去重 ${result.duplicated}`,
+            `该分类现有 ${result.sectionPages} 篇；wiki.json 总计 ${result.totalPages} 篇${mismatch}`,
+            formatQuantityFeedback({ kind: 'topics', count, spec: detailSpec, upperBoundOnly: sync }),
+          ].join('\n'),
+        )
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
-        return {
-          type: 'tool_result',
-          tool_use_id: '',
-          content: `归并主题失败: ${message}`,
-          is_error: true,
-        }
+        return failResult(`归并主题失败: ${message}`)
       }
+    },
+  }
+}
+
+/** 缩编 subagent 的分类捕获容器 */
+export interface CondensedSectionCapture {
+  sections?: WikiSection[]
+}
+
+/**
+ * Submit Condensed Sections Tool（缩编 subagent 用，一次性、只读）
+ *
+ * 只把缩编结果捕获到内存，不落盘：落盘统一由阶段驱动器走
+ * `mergeWikiSections` / `initWikiSkeleton`（文件锁与编号单点）。
+ */
+export function createSubmitCondensedSectionsTool(
+  captured: CondensedSectionCapture,
+): ToolDefinition {
+  return {
+    name: 'submit_condensed_sections',
+    description: '提交缩编后的 Wiki 顶级分类清单（只捕获结果，由系统侧统一落盘）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sections: { type: 'array', description: '缩编后的顶级分类清单', items: SECTION_ITEM_SCHEMA },
+      },
+      required: ['sections'],
+    },
+    isReadOnly: () => true,
+    isConcurrencySafe: () => false,
+    isEnabled: () => true,
+    async prompt() {
+      return 'Submit the condensed section list.'
+    },
+    async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      const sections = normalizeSectionList(input.sections)
+      if (sections.length === 0) {
+        return failResult('错误: sections 数组不能为空')
+      }
+      captured.sections = sections
+      return okResult(`已接收缩编后的分类清单（${sections.length} 个）：\n${summarizeSections(sections)}`)
+    },
+  }
+}
+
+/** 缩编 subagent 的主题捕获容器 */
+export interface CondensedTopicCapture {
+  topics?: WikiTopic[]
+}
+
+/** Submit Condensed Topics Tool（缩编 subagent 用，一次性、只读） */
+export function createSubmitCondensedTopicsTool(
+  section: WikiSection,
+  captured: CondensedTopicCapture,
+): ToolDefinition {
+  return {
+    name: 'submit_condensed_topics',
+    description: `提交分类「${section.title}」缩编后的主题清单（只捕获结果，由系统侧统一落盘）。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        section: { type: 'string', description: `分类标题（必须为 "${section.title}"）` },
+        topics: { type: 'array', description: '缩编后的主题清单', items: TOPIC_ITEM_SCHEMA },
+      },
+      required: ['section', 'topics'],
+    },
+    isReadOnly: () => true,
+    isConcurrencySafe: () => false,
+    isEnabled: () => true,
+    async prompt() {
+      return `Submit the condensed topics for section "${section.title}".`
+    },
+    async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      const topics = normalizeTopicInput(input.topics)
+      if (topics.length === 0) {
+        return failResult('错误: topics 数组不能为空')
+      }
+      captured.topics = topics
+      return okResult(`已接收分类「${section.title}」缩编后的主题清单（${topics.length} 篇）。`)
     },
   }
 }

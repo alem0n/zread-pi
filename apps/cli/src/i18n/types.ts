@@ -40,6 +40,7 @@ export interface TranslationKeys {
     thinkingLevel: string;
     maxTurns: string;
     polish: string;
+    blueprintDetail: string;
     maxConcurrency: string;
     maxRetries: string;
     default: string;
@@ -212,6 +213,27 @@ export interface TranslationKeys {
     modeFullDesc: string;
     /** 保护性约束提示 */
     layersHint: string;
+    /** Footer */
+    footer: string;
+  };
+  blueprintDetail: {
+    /** 页面标题 */
+    title: string;
+    /** 当前值 */
+    current: string;
+    /** 档位机制说明 */
+    intro: string;
+    /** 五档标签与说明 */
+    minimal: string;
+    minimalDesc: string;
+    low: string;
+    lowDesc: string;
+    medium: string;
+    mediumDesc: string;
+    high: string;
+    highDesc: string;
+    max: string;
+    maxDesc: string;
     /** Footer */
     footer: string;
   };

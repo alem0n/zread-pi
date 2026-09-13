@@ -241,8 +241,7 @@ console.log("▶ TUI 冒烟测试");
   checkContains("配置项：最大轮次（含默认值）", configText, "最大轮次 (默认: 30)");
   checkContains("配置项：文风润色（含默认值）", configText, "文风润色 (默认: prompt-only)");
   checkContains("配置项值：文风润色", configText, "已启用 · 仅提示注入");
-  checkContains("配置项：外部工具", configText, "外部工具");
-  checkContains("配置项值：外部工具就绪比例", configText, "就绪");
+  checkContains("配置项：蓝图细节档位（含默认值）", configText, "蓝图细节档位 (默认: high)");
   checkContains("配置项值：provider · model", configText, "openai-compatible · gpt-4o-mini");
   checkContains("配置首页 Footer", configText, "ESC 退出 | ↑↓ 选择 | Enter 确认 | s 保存");
 
@@ -250,6 +249,8 @@ console.log("▶ TUI 冒烟测试");
   terminal.send("\x1b[F");
   await settle(40);
   const configTailText = screenText(app);
+  checkContains("配置项：外部工具", configTailText, "外部工具");
+  checkContains("配置项值：外部工具就绪比例", configTailText, "就绪");
   checkContains("配置项：最大并发数（含默认值）", configTailText, "最大并发数 (默认: 1)");
   checkContains("配置项：最大重试次数", configTailText, "最大重试次数 (默认: 0)");
   terminal.send("\x1b[H");
@@ -490,6 +491,53 @@ console.log("▶ TUI 冒烟测试");
   app.navigate("/config");
   await settle(60);
   checkContains("配置首页：文风润色条目值", screenText(app), "已启用 · 完整模式");
+
+  app.exit();
+}
+
+// --- 用例 4h：蓝图细节档位页（/config/detail：五档切换 + 写回落盘）---
+{
+  const { app, terminal } = createApp(["/config/detail"]);
+  await app.start();
+  await settle();
+
+  const text = screenText(app);
+  checkContains("细节档位页：标题", text, "设置蓝图细节档位");
+  checkContains("细节档位页：当前值（旧配置缺省 详细（默认））", text, "当前值: 详细（默认）");
+  checkContains("细节档位页：机制说明", text, "分类数");
+  checkContains("细节档位页：minimal 选项", text, "极简");
+  checkContains("细节档位页：最详尽选项", text, "最详尽");
+  checkContains("细节档位页：high 被选中", text, "❯ 详细（默认）");
+  checkContains("细节档位页 Footer", text, "s 保存并返回");
+
+  // ↓ 切到 max（Select 到底后回绕，因此只按一次），Enter 写回内存配置
+  terminal.send("\x1b[B");
+  await settle(20);
+  checkContains("细节档位页：光标移到最详尽", screenText(app), "❯ 最详尽");
+  terminal.send("\r");
+  await settle(80);
+  check(
+    "Enter 写回配置 blueprint.detail=max",
+    app.config.getBlueprintDetail() === "max",
+    String(app.config.getBlueprintDetail()),
+  );
+  checkContains("细节档位页：当前值随选择更新", screenText(app), "当前值: 最详尽");
+
+  // ↑ 回到 high，再 s 保存到 config.yaml（新增 blueprint 段）
+  terminal.send("\x1b[A");
+  await settle(20);
+  checkContains("细节档位页：光标移回详细（默认）", screenText(app), "❯ 详细（默认）");
+  terminal.send("s");
+  await settle(600);
+  checkContains("细节档位页：s 保存后提示已保存", screenText(app), "配置已保存");
+  const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 blueprint 段", yaml, "blueprint:");
+  checkContains("config.yaml 写入 blueprint.detail: high", yaml, "detail: high");
+
+  // 返回配置首页：条目值跟随落盘配置
+  app.navigate("/config");
+  await settle(60);
+  checkContains("配置首页：蓝图细节档位条目值", screenText(app), "详细（默认）");
 
   app.exit();
 }

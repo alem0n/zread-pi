@@ -1075,3 +1075,98 @@ polish:
 - **sync 的分类刷新是条件触发**：只有「新增文件不属于任何既有页面」时才跑分类阶段；纯重命名/移动目录但未新增文件时，分类不会重划（变更文件仍会落到受影响 section 的增量修补里）。
 - **标题精修会触发重生成**：sync 中标题变化按 `updated` 处理（保证 .md 的 frontmatter 与目录一致）；弱模型若反复微调标题，可能造成不必要的重生成。
 - **归档判定是「关联路径全部消失」**：associatedFiles 填得过宽（例如关联整个仓库根目录）会延迟归档；这属于主题阶段提示词质量问题，不是状态机问题。
+
+---
+
+## 18. 蓝图细节档位（blueprint.detail，第十六步）
+
+### 18.1 目标与判定
+
+把「项目理解深度」交给用户：快速了解用低档，完整交付用高档；默认 `high` = 旧行为零变化。
+三阶段管线（分类 → 分主题 → 标题）对所有档位统一保留，**不回退旧单 Agent 方案**
+（§17 已废弃：提前收敛、一次失败全重来）。数量控制 = 「提示词数量目标 + 常驻数量反馈 +
+AI 归并 + 代码兜底」四层机制，代码不替 AI 做语义决策。
+
+| 档位 | 分类数 | 每分类文章数 | 标题精修 | 附加要求 |
+| --- | --- | --- | --- | --- |
+| `minimal` | 固定 1（概览） | 固定 1 | 跳过 | 页面提示词附加「全景导览」：必须用 Mermaid 架构图梳理模块关系与数据流 |
+| `low` | 3~5（基础分类已强占 3） | 1~3 | 跳过 | — |
+| `medium` | 4~6 | 3~5 | 保留 | — |
+| `high`（默认） | 4~8 | 3~10 | 保留 | — |
+| `max` | 4~8 | 5~12 | 保留 | 强调全面详尽、鼓励更深关联文件探索 |
+
+### 18.2 四层数量防线（代码落点）
+
+1. **提示词数量目标**：`renderClassifyPrompt` / `renderTopicsPrompt`
+   （`orchestrator/src/prompts/classify.ts` / `topics.ts`）按档位参数化「数量」段落；
+   minimal 的「固定 1 个」与 max 的「深挖关联路径」都在这里。
+2. **常驻数量反馈**：`submit_sections` / `submit_section_topics` 的**每次**返回都带
+   `分类数量反馈：当前 N / 要求 min~max（当前档位：X）`；区间内也发（零额外成本，模型随时自我校准）。
+   sync（merge / reuseExisting）时反馈注明「只校验上限，既有内容必留」。
+3. **AI 归并（主路径）**：越界提交**不落盘、不报错**（`is_error` 不置位），返回策略文本请求重提：
+   过多 → 归并策略（基础分类 / 高密度核心机制永不归并；sync 下既有分类必留、新增优先并入）；
+   不足 → 拆分 / 补充策略；最多 `MAX_QUANTITY_FEEDBACK_ROUNDS = 2` 轮。第 3 轮改为
+   **缩编 subagent**：`createAgent` + 覆盖 `systemPrompt`（`CONDENSE_SYSTEM_PROMPT`）+ 独立小预算
+   （`DEFAULT_CONDENSE_TOKEN_BUDGET = 60_000`）+ 一次性只读输出工具
+   （`submit_condensed_sections` / `submit_condensed_topics`，只捕获不落盘）；工具面只有输出工具、
+   只看清单本身，打破自我锚定；其结果仍由阶段驱动器走 `mergeWikiSections` / `initWikiSkeleton` /
+   `mergeSectionTopics` 落盘（文件锁与编号单点），失败静默降级。
+4. **代码确定性兜底（永不悬挂）**：分类 = 基础分类保序取前 N（`normalizeBlueprintSections` /
+   `mergeBlueprintSections`）；主题 = 每 distinct group 保 1 篇再按序填充（`condenseTopicsToMax`，
+   sync 下用 `preserveTitles` 让既有页面优先）；结果注记
+   `QUANTITY_FALLBACK_NOTE =「（已达到调整轮次上限，代码侧收尾）」`（tool_result / 日志可见）。
+
+### 18.3 与旧实现的行为差异（有意为之）
+
+- **越界不再静默截断**：旧实现 `normalizeBlueprintSections` 直接 `slice(0, 8)`；现在先请模型归并，
+  截断只作为最后兜底并写明注记。
+- **数量下限也生效**：旧提示词要求「4~8 个分类 / 3~10 篇」但代码不校验；现在低于下限同样要求补充
+  （sync 除外：旧页面必留，只校验上限）。
+- **标题阶段随档位跳过**：low / minimal 不跑 `refine_section_titles`（目录生成更快、更省）。
+- **minimal 跳基础分类强补**：`normalizeBlueprintSections(..., { minimal: true })` 只保留「概览」；
+  页面提示词附加 `MINIMAL_PANORAMA_REQUIREMENT`（Mermaid 架构图 + 数据流）。
+- **缩编输出工具进入预算提示集合**（`OUTPUT_TOOL_NAMES`），缩编 Agent 预算耗尽也会被强制交卷。
+
+### 18.4 契约与新增导出
+
+- `AppConfig.blueprint: { detail: BlueprintDetailLevel }`；旧 `config.yaml` 缺段 → `validateConfig` 补 `high`，
+  非法值回退 `high`，可直接启动。
+- utils：`normalizeBlueprintSections(input, language, limit?, { minimal? })` /
+  `initWikiSkeleton(..., { limit?, minimal? })` / `mergeWikiSections(..., { limit?, minimal? })` /
+  `mergeBlueprintSections(..., limit?)`（均为新增可选参数）。
+- orchestrator 新增导出：`BLUEPRINT_DETAIL_SPECS / getDetailSpec / judgeQuantity / formatQuantityFeedback /
+  buildSectionQuantityStrategy / buildTopicsQuantityStrategy / buildCondenseSectionTask / buildCondenseTopicsTask /
+  codeFallbackSections / condenseTopicsToMax / MINIMAL_PANORAMA_REQUIREMENT / QUANTITY_FALLBACK_NOTE /
+  MAX_QUANTITY_FEEDBACK_ROUNDS / DEFAULT_CONDENSE_TOKEN_BUDGET / CONDENSE_SYSTEM_PROMPT`；
+  `renderClassifyPrompt` / `renderTopicsPrompt`；`createSubmitSectionsTool` / `createSubmitSectionTopicsTool` /
+  `createSubmitCondensedSectionsTool` / `createSubmitCondensedTopicsTool`；`generate-wiki` 的 `buildPagePrompt`。
+- 工具语义：`submit_sections` / `submit_section_topics` 越界时返回**非 error** 的策略文本，
+  阶段驱动器以 quantity state 的 `persisted`（而非 tool error）判定落盘。
+
+### 18.5 配置界面
+
+新增 `/config/detail`（五档单选 + Enter 应用 / s 保存），配置项 `blueprint.detail`；
+文案见 `apps/cli/src/i18n/translations/{zh-CN,en-US}.ts`；渲染覆盖进 `render-all-routes`。
+
+### 18.6 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:catalog` | 37/37（新增缺省 high / 合法值保留 / 非法值回退） |
+| `bun run test:blueprint` | e2e-blueprint 29/29；blueprint-detail 83/83（纯函数 + 工具级 + 缩编成功 / 失败降级 / minimal）；e2e-sync 19/19；context-files 11/11；style-discipline 17/17 |
+| `bun run test:pages` | e2e-page-generation 19/19（新增 minimal 全景导览传递）；page-output-fallback 7/7；page-polish 16/16 |
+| `bun run test:tui` | smoke-tui 225、real-run 9、output-guard 10、target-dir 36、wiki-generate 单测 28、mock-generate 42、browse-server 28；`render-all-routes` 21 个路由 |
+| `bun run test` | 全部套件通过（EXIT=0） |
+| `bun run mock:wiki` | `completed=5 failed=0`（夹具 hello-python，low 档位 3 分类 / 5 页） |
+
+### 18.7 风险与未决
+
+- **下限可能多花一轮**：真实模型偶发少给 1 篇文章时会触发一次归并重提（第 2 轮通常即合规）；
+  若希望完全零打扰，可把档位降到 `low`（下限 1 篇）。
+- **缩编 subagent 需要额外一次 LLM 调用**：只在「原对话两次不收敛」时触发；缩编本身也可能失败，
+  此时代码兜底保证必定落盘（可能比目标数量少，但不会悬挂）。
+- **sync 不校验下限**：既有页面必留，只对总量上限做归并；新增分类不足下限不会要求补足
+  （同步的目标是增量修补）。
+- **合计用量口径**：缩编 subagent 的用量进入 `CatalogEvent.usage` 聚合（与阶段 Agent 同池），
+  但底部合计的「页维度」口径不变；polish 用量仍只记在 `PageResult.polish`（见 §16.6）。

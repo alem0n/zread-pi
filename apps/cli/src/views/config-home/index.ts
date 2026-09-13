@@ -73,6 +73,14 @@ const configItems: ConfigItem[] = [
     route: "/config/max-turns",
   },
   {
+    // 蓝图细节档位（blueprint.detail）：分类/文章数量与标题精修的深度
+    key: "blueprint.detail",
+    labelKey: "config.blueprintDetail",
+    getValue: (config, t) => t(`blueprintDetail.${config.blueprint?.detail ?? "high"}`),
+    default: "high",
+    route: "/config/detail",
+  },
+  {
     // 文风纪律 / 页面润色（humanizer）：开关 + prompt-only / full 两档
     key: "polish",
     labelKey: "config.polish",

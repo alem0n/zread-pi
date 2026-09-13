@@ -57,12 +57,23 @@ const SYNC_SECTIONS = [...GENERATE_SECTIONS, { title: "新增模块", descriptio
 const GENERATE_TOPICS: Record<string, Array<Record<string, unknown>>> = {
 	概览: [
 		{ title: "项目概览", slug: "project-overview", level: "Beginner", associatedFiles: ["README.md"] },
+		{ title: "核心特性", slug: "feature-tour", level: "Beginner", associatedFiles: ["README.md"] },
+		{ title: "设计目标", slug: "design-goals", level: "Intermediate", associatedFiles: ["README.md"] },
 	],
-	快速开始: [],
-	核心架构: [],
+	快速开始: [
+		{ title: "安装与运行", slug: "install-run", level: "Beginner", associatedFiles: ["README.md"] },
+		{ title: "最小示例", slug: "minimal-example", level: "Beginner", associatedFiles: ["README.md"] },
+		{ title: "常见问题", slug: "faq", level: "Beginner", associatedFiles: ["README.md"] },
+	],
+	核心架构: [
+		{ title: "整体架构", slug: "architecture", level: "Intermediate", associatedFiles: ["README.md"] },
+		{ title: "模块职责", slug: "module-responsibilities", level: "Intermediate", associatedFiles: ["README.md"] },
+		{ title: "数据流", slug: "data-flow", level: "Advanced", associatedFiles: ["README.md"] },
+	],
 	模块: [
 		{ title: "模块 A", slug: "module-a", level: "Intermediate", associatedFiles: ["src/a.ts"] },
 		{ title: "模块 B", slug: "module-b", level: "Intermediate", associatedFiles: ["src/b.ts"] },
+		{ title: "模块核心约定", slug: "module-core", level: "Intermediate", associatedFiles: ["README.md"] },
 	],
 };
 
@@ -236,7 +247,7 @@ const readBlueprintFile = async (): Promise<{
 
 console.log("▶ 基线：generateWikiCatalog()（三阶段）…");
 const baselineResult = await generateWikiCatalog();
-check("基线生成 3 个页面", baselineResult.pagesCount === 3, String(baselineResult.pagesCount));
+check("基线生成 12 个页面", baselineResult.pagesCount === 12, String(baselineResult.pagesCount));
 
 // 模拟 CLI 控制器：生成后保存 manifest 缓存（同步依赖它做 diff）
 await saveCachedManifest(await scanFiles());
@@ -245,7 +256,11 @@ const baseline = await readBlueprintFile();
 const overviewPage = baseline.pages.find((page) => page.section === "概览");
 const modulePages = baseline.pages.filter((page) => page.section === "模块");
 check("基线含「概览」页", overviewPage !== undefined, JSON.stringify(baseline.pages.map((p) => p.slug)));
-check("基线含两个「模块」页", modulePages.length === 2, JSON.stringify(modulePages.map((p) => p.slug)));
+check(
+	"基线含三个「模块」页（含待归档的模块 B）",
+	modulePages.length === 3 && modulePages.some((page) => page.slug.endsWith("module-b")),
+	JSON.stringify(modulePages.map((p) => p.slug)),
+);
 
 // ---------------------------------------------------------------------------
 // 4) 变更文件 → 增量同步

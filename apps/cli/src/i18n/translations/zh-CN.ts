@@ -38,6 +38,7 @@ export const zhCN: TranslationKeys = {
     thinkingLevel: '思考深度',
     maxTurns: '最大轮次',
     polish: '文风润色',
+    blueprintDetail: '蓝图细节档位',
     maxConcurrency: '最大并发数',
     maxRetries: '最大重试次数',
     default: '(默认: {default})',
@@ -208,6 +209,23 @@ export const zhCN: TranslationKeys = {
     layersHint:
       '两种模式下，代码块、行内代码、Sources: 溯源行、Mermaid 引号标签与 YAML frontmatter 都受保护。',
     footer: 'ESC 返回 | ↑↓ 选择 | Enter 确认并返回 | t 启用/停用 | s 保存并返回',
+  },
+  blueprintDetail: {
+    title: '设置蓝图细节档位',
+    current: '当前值',
+    intro:
+      '档位决定 Wiki 的分类数、每分类文章数与是否精修标题；数量越界时模型先按策略归并重提，仍不收敛则由系统侧缩编/代码收尾。',
+    minimal: '极简',
+    minimalDesc: '1 个分类（概览）· 1 篇全景导览：必须用 Mermaid 架构图梳理模块关系与数据流',
+    low: '精简',
+    lowDesc: '3~5 个分类 · 每分类 1~3 篇，跳过标题精修',
+    medium: '标准',
+    mediumDesc: '4~6 个分类 · 每分类 3~5 篇',
+    high: '详细（默认）',
+    highDesc: '4~8 个分类 · 每分类 3~10 篇（老用户零变化）',
+    max: '最详尽',
+    maxDesc: '4~8 个分类 · 每分类 5~12 篇，强调全面详尽并鼓励深挖关联文件',
+    footer: 'ESC 返回 | ↑↓ 选择 | Enter 确认并返回 | s 保存并返回',
   },
   tools: {
     title: '外部工具',

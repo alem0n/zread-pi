@@ -65,11 +65,13 @@ const BUDGET_NOTICES: Record<'zh' | 'en', { soft: (tool: string) => string; hard
   },
 };
 
-/** 输出工具名（蓝图三阶段 / 页面 Agent 的最终产物；预算提示要点名当前阶段的工具） */
+/** 输出工具名（蓝图三阶段 / 页面 / 缩编 Agent 的最终产物；预算提示要点名当前阶段的工具） */
 const OUTPUT_TOOL_NAMES = new Set([
   'submit_sections',
   'submit_section_topics',
   'refine_section_titles',
+  'submit_condensed_sections',
+  'submit_condensed_topics',
   'generate_blueprint',
   'write_page',
 ]);
