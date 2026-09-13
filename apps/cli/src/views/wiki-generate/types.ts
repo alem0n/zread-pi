@@ -45,8 +45,13 @@ export interface CatalogState {
   phase?: CatalogPhase;
   /** 当前工具名（tool 阶段） */
   currentTool?: string;
-  /** Token 使用统计 */
+  /** Token 使用统计（本轮运行的累计快照） */
   usage?: TokenUsage;
+  /**
+   * 历史轮次已消耗的累计用量（重新生成时把上一轮的 `usage` 结转到此处）。
+   * 展示口径 = `carryUsage + usage`，因此重试/重新生成**不会**把已消耗的 token 清零。
+   */
+  carryUsage?: TokenUsage;
   /** 耗时（毫秒） */
   durationMs?: number;
   /** 错误信息 */
@@ -67,8 +72,13 @@ export interface PageStatus {
   phase?: ArticlePhase;
   /** 当前工具名（tool 阶段） */
   currentTool?: string;
-  /** Token 使用统计 */
+  /** Token 使用统计（本轮运行的累计快照） */
   usage?: TokenUsage;
+  /**
+   * 历史轮次已消耗的累计用量（重新生成时把上一轮的 `usage` 结转到此处）。
+   * 展示口径 = `carryUsage + usage`：成功 + 失败 + 重试的消耗都留在槽位里。
+   */
+  carryUsage?: TokenUsage;
   /** 耗时（毫秒） */
   durationMs?: number;
   /** 错误信息 */

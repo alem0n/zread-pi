@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai";
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createAgent, FileReadTool, FileWriteTool, toRetryPolicy, toStreamOptions, type SDKMessage } from "../src/index.js";
+import { createAgent, FileReadTool, FileWriteTool, toRetryPolicy, toStreamOptions, addTokenUsage, emptyTokenUsage, sumTokenUsage, type SDKMessage } from "../src/index.js";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -173,6 +173,26 @@ check(
 		retryableStatusCodes: [],
 		provider: { maxRetries: 2 },
 	})) === JSON.stringify({ maxRetries: 2, maxRetryDelayMs: 60_000 }),
+);
+
+// 纯函数：TokenUsage 归并（每页累计 / 跨 Agent 合计共用，缺失缓存字段按 0）
+const merged = addTokenUsage(
+	{ input_tokens: 10, output_tokens: 2 },
+	{ input_tokens: 20, output_tokens: 3, cache_read_input_tokens: 5 },
+);
+check(
+	"addTokenUsage：逐字段相加，缓存字段缺失按 0",
+	JSON.stringify(merged) ===
+		JSON.stringify({ input_tokens: 30, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 5 }),
+	JSON.stringify(merged),
+);
+const summed = sumTokenUsage([undefined, { input_tokens: 1, output_tokens: 1 }, undefined]);
+check(
+	"sumTokenUsage：跳过未上报的 undefined，空集合归零",
+	JSON.stringify(sumTokenUsage([])) === JSON.stringify(emptyTokenUsage()) &&
+		JSON.stringify(summed) ===
+			JSON.stringify({ input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }),
+	`empty=${JSON.stringify(sumTokenUsage([]))} summed=${JSON.stringify(summed)}`,
 );
 
 let fileContent = "";

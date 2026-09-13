@@ -315,6 +315,8 @@ export interface TranslationKeys {
     navigate: string;
     retry: string;
     exit: string;
+    /** 底部合计行：输入 / 输出 token 与缓存占比 */
+    usageTotals: string;
   };
   browse: {
     title: string;

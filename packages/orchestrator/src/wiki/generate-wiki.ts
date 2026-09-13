@@ -22,6 +22,7 @@ import {
   GrepTool,
   LsTool,
   getString,
+  type TokenUsage,
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { WritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
@@ -301,6 +302,9 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
       // 并记录每次调用的输入/实际落盘路径，供写错路径时的兜底移动使用。
       let wrotePage = false;
       let lastWriteError: string | undefined;
+      // 页面 Agent 的最后一次累计用量快照：失败路径（Agent 抛错）拿不到
+      // `result.tokenUsage`，用它在 page_error 上归账，避免失败页在合计里记为 0。
+      let lastUsage: TokenUsage | undefined;
       const writeAttempts: PageWriteAttempt[] = [];
       const writePageTool: ToolDefinition = {
         ...WritePageTool,
@@ -342,6 +346,9 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           maxTurns: options?.maxTurns,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
+            // 任何带用量的中间事件都刷新累计快照（usage 已是该 Agent 的累计值）
+            if (catalogEvent.usage) lastUsage = catalogEvent.usage;
+
             // 将 CatalogEvent 转换为 ArticleEventPayload
             let articleEventType: ArticleEventPayload['type'];
             let toolName: string | undefined;
@@ -476,6 +483,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           slug: page.slug,
           error: message,
           durationMs: pageResult.durationMs,
+          usage: lastUsage,
         });
 
         logger.error(`[${page.slug}] 失败: ${message}`);

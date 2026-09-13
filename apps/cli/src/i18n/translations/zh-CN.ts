@@ -309,5 +309,6 @@ export const zhCN: TranslationKeys = {
     navigate: '导航',
     retry: '重新生成',
     exit: '退出',
+    usageTotals: '合计 输入 {input} · 输出 {output} · 缓存占比 {ratio}',
   },
 };

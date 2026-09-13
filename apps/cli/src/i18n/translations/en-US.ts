@@ -309,5 +309,6 @@ export const enUS: TranslationKeys = {
     navigate: 'Navigate',
     retry: 'Regenerate',
     exit: 'Exit',
+    usageTotals: 'Total input {input} · output {output} · cache hit {ratio}',
   },
 };
