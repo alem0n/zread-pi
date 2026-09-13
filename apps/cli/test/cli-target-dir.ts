@@ -372,7 +372,7 @@ const canonicalTarget = await canonical(targetRepo);
   check("进入备用屏幕缓冲", run.raw().includes("\x1b[?1049h"));
   check(
     "头部显示 --dir 指定的目标目录",
-    run.text().toLowerCase().includes(`目录: ${canonicalTarget}`),
+    run.text().toLowerCase().includes(` ─ ${canonicalTarget}`),
     run.text().slice(-800),
   );
   check("--dir 目录无 wiki 时状态为「尚无文档目录」", homeRendered);

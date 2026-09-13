@@ -25,12 +25,14 @@ export interface TranslationKeys {
     failed: string;
   };
   layout: {
-    provider: string;
     model: string;
-    baseUrl: string;
-    thinking: string;
-    directory: string;
     intro: string;
+    docs: string;
+    docsNone: string;
+    docsGenerated: string;
+    docsUnit: string;
+    docsLegacy: string;
+    docsTarget: string;
   };
   config: {
     title: string;
