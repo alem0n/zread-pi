@@ -36,6 +36,18 @@ await writeFile(
 	"export function greet(name: string): string {\n  return `hi ${name}`;\n}\n",
 	"utf-8",
 );
+// 目标仓库自述：应被注入系统提示（AGENTS.md 优先于无）
+await writeFile(
+	join(repo, "AGENTS.md"),
+	"# repo-agents-context\n本项目约定：所有模块使用 TypeScript。\n",
+	"utf-8",
+);
+// 全局上下文（~/.zread-pi/AGENTS.md）：对所有项目生效，排在项目上下文之前
+await writeFile(
+	join(home, ".zread-pi", "AGENTS.md"),
+	"# global-agents-context\n全局约定：文档用中文标题。\n",
+	"utf-8",
+);
 
 // ---------------------------------------------------------------------------
 // 2) 启动 mock OpenAI 兼容服务
@@ -72,10 +84,14 @@ function baseChunk(delta: Record<string, unknown>, finishReason: string | null):
 let toolCallServed = false;
 /** 第二轮场景：模型不调用 generate_blueprint，只输出文字 */
 let mode: "ok" | "no-blueprint" = "ok";
+/** 记录每次请求的 system 消息（验证上下文文件注入） */
+const seenSystemPrompts: string[] = [];
 const server = Bun.serve({
 	port: 0,
 	async fetch(request) {
-		const body = (await request.json()) as { messages?: Array<{ role?: string }> };
+		const body = (await request.json()) as { messages?: Array<{ role?: string; content?: unknown }> };
+		const systemMessage = (body.messages ?? []).find((message) => message.role === "system");
+		if (typeof systemMessage?.content === "string") seenSystemPrompts.push(systemMessage.content);
 		const hasToolResult = (body.messages ?? []).some((message) => message.role === "tool");
 		const encoder = new TextEncoder();
 
@@ -192,6 +208,25 @@ check(
 );
 check("tokenUsage 已回传", result.tokenUsage !== undefined, JSON.stringify(result.tokenUsage));
 check("durationMs 已回传", typeof result.durationMs === "number" && result.durationMs >= 0, String(result.durationMs));
+check(
+	"目标仓库 AGENTS.md 被注入系统提示（<project_context> 块）",
+	seenSystemPrompts.some(
+		(prompt) =>
+			prompt.includes("<project_context>") &&
+			prompt.includes("repo-agents-context") &&
+			prompt.includes(`<project_instructions path="${join(repo, "AGENTS.md")}">`),
+	),
+	`prompts=${seenSystemPrompts.length}`,
+);
+check(
+	"全局 ~/.zread-pi/AGENTS.md 也注入，且排在项目上下文之前",
+	seenSystemPrompts.some((prompt) => {
+		const globalIndex = prompt.indexOf("global-agents-context");
+		const projectIndex = prompt.indexOf("repo-agents-context");
+		return globalIndex >= 0 && projectIndex >= 0 && globalIndex < projectIndex;
+	}),
+	`prompts=${seenSystemPrompts.length}`,
+);
 
 // ---------------------------------------------------------------------------
 // 5) 反向场景：模型不产出 wiki.json 时必须报错（不能假装目录完成）

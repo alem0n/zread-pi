@@ -70,6 +70,8 @@ export default defineConfig(() => {
       await Promise.all([
         copyWasm('tree-sitter.wasm'),
         copyWasm('mappings.wasm'),
+        // 图片处理管线（photon / Rust WASM）：打包后按 __dirname 读取，必须与 dist 同目录
+        copyWasm('photon_rs_bg.wasm'),
       ])
     },
   }

@@ -13,6 +13,9 @@
  *  5b. git 仓库内的 .gitignore 分支：两种搜索路径都要与 fd/rg 的 git-aware 默认行为一致
  *  6. Read  ：offset 1-based、limit 续读提示、截断提示、目录报错点名 Ls、
  *             magic number 图片识别（支持/不支持图片的模型）、二进制与空文件
+ *  6b. 图片处理管线：超大图自动缩放到 2000×2000 内 + 坐标换算提示、
+ *             BMP 等非内联格式自动转 PNG、autoResizeImages=false 原样回传、
+ *             无法解码时降级为文本说明而不是抛错
  *  7. Write ：建目录、created 标记、同文件并发写不丢更新
  *  8. Edit  ：CRLF/BOM 归一化、多段 edits、replace_all、错误文案、diff details、
  *             同文件并发编辑不丢更新
@@ -50,6 +53,7 @@ import {
   expandBraces,
   findSearchBinary,
   matchGlobPath,
+  processImage,
   resetSearchBinaryCache,
   toTruncationDetails,
   truncateHead,
@@ -119,6 +123,54 @@ const PNG_BYTES = Buffer.from(
     '0d0a2db40000000049454e44ae426082',
   'hex',
 )
+
+/** 手搓一张 24 位 BMP（光子库只有解码器，没有 BMP 编码器，测试需要真实字节） */
+function buildBmp24(width: number, height: number): Buffer {
+  const rowBytes = width * 3
+  const rowPadded = rowBytes % 4 === 0 ? rowBytes : rowBytes + (4 - (rowBytes % 4))
+  const pixelBytes = rowPadded * height
+  const fileSize = 54 + pixelBytes
+  const buffer = Buffer.alloc(fileSize)
+
+  buffer.write('BM', 0, 'ascii')
+  buffer.writeUInt32LE(fileSize, 2)
+  buffer.writeUInt32LE(54, 10) // pixel data offset
+  buffer.writeUInt32LE(40, 14) // DIB header size
+  buffer.writeInt32LE(width, 18)
+  buffer.writeInt32LE(height, 22)
+  buffer.writeUInt16LE(1, 26) // color planes
+  buffer.writeUInt16LE(24, 28) // bits per pixel
+  buffer.writeUInt32LE(pixelBytes, 34)
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = 54 + y * rowPadded + x * 3
+      buffer[offset] = 40 + x * 20 // B
+      buffer[offset + 1] = 90 + y * 30 // G
+      buffer[offset + 2] = 200 // R
+    }
+  }
+
+  return buffer
+}
+
+/** 用 photon 现造一张指定尺寸的 PNG（测试超大图缩放路径） */
+async function createLargePng(width: number, height: number): Promise<Buffer> {
+  const photon = await import('@silvia-odwyer/photon-node')
+  const raw = new Uint8Array(width * height * 4)
+  for (let i = 0; i < raw.length; i += 4) {
+    raw[i] = 30
+    raw[i + 1] = 120
+    raw[i + 2] = 220
+    raw[i + 3] = 255
+  }
+  const image = new photon.PhotonImage(raw, width, height)
+  try {
+    return Buffer.from(image.get_bytes())
+  } finally {
+    image.free()
+  }
+}
 
 async function createFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'zread-pi-tools-'))
@@ -440,6 +492,86 @@ try {
   check('Read 读取 CRLF 文件', readCrlf.startsWith('line one') && readCrlf.includes('line three'))
 
   check('Read 空文件提示', textOf(await callTool(FileReadTool, { file_path: 'empty.txt' }, ctx)) === '(empty file)')
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ 6b. 图片处理管线（缩放 / 格式转换 / 降级）')
+  // -------------------------------------------------------------------------
+
+  // 超大 PNG（3000×100）：应缩到 2000×67 并带坐标换算提示
+  const bigPngBytes = await createLargePng(3000, 100)
+  const bigProcessed = await processImage(bigPngBytes, 'image/png')
+  check(
+    '图片管线：超大 PNG 自动缩放到 2000 宽内',
+    bigProcessed.ok === true && bigProcessed.mimeType === 'image/png' && bigProcessed.data.length < bigPngBytes.length * 2,
+    bigProcessed.ok ? undefined : bigProcessed.message,
+  )
+  check(
+    '图片管线：缩放后给出坐标换算提示',
+    bigProcessed.ok === true &&
+      bigProcessed.hints.some(
+        (hint) => hint.includes('original 3000x100') && hint.includes('displayed at 2000x67') && hint.includes('1.50'),
+      ),
+    bigProcessed.ok ? bigProcessed.hints.join(' | ') : bigProcessed.message,
+  )
+  if (bigProcessed.ok) {
+    await writeFile(join(fixture, 'huge.png'), bigPngBytes)
+    const readHuge = await callTool(FileReadTool, { file_path: 'huge.png' }, context(fixture, { supportsImages: true }))
+    const hugeBlocks = Array.isArray(readHuge.content) ? readHuge.content : []
+    const hugeText = hugeBlocks.find((block) => block.type === 'text') as { text?: string } | undefined
+    check(
+      'Read 大图：image 块 + 文本里带缩放说明',
+      hugeBlocks.some((block) => block.type === 'image') &&
+        typeof hugeText?.text === 'string' &&
+        hugeText.text.includes('Multiply coordinates by 1.50'),
+      String(hugeText?.text ?? ''),
+    )
+  }
+
+  // BMP：magic number 认得出来，但不是 provider 内联格式 → 自动转 PNG
+  await writeFile(join(fixture, 'logo.bmp'), buildBmp24(8, 6))
+  const readBmp = await callTool(FileReadTool, { file_path: 'logo.bmp' }, context(fixture, { supportsImages: true }))
+  const bmpBlocks = Array.isArray(readBmp.content) ? readBmp.content : []
+  const bmpText = bmpBlocks.find((block) => block.type === 'text') as { text?: string } | undefined
+  const bmpImage = bmpBlocks.find((block) => block.type === 'image') as { source?: { media_type?: string } } | undefined
+  check(
+    '图片管线：BMP 自动转 PNG（image 块 media_type 为 image/png）',
+    bmpImage?.source?.media_type === 'image/png' &&
+      typeof bmpText?.text === 'string' &&
+      bmpText.text.includes('converted from image/bmp to image/png'),
+    `${bmpImage?.source?.media_type ?? 'none'} · ${String(bmpText?.text ?? '')}`,
+  )
+
+  // autoResizeImages=false：不缩放，原样 base64（也不产生坐标提示）
+  const noResize = await processImage(bigPngBytes, 'image/png', { autoResizeImages: false })
+  check(
+    '图片管线：autoResizeImages=false 时原样回传',
+    noResize.ok === true &&
+      noResize.data === Buffer.from(bigPngBytes).toString('base64') &&
+      noResize.hints.length === 0,
+    noResize.ok ? `hints=${noResize.hints.length}` : noResize.message,
+  )
+
+  // 无法解码：降级为文本说明而不是抛错
+  const broken = await processImage(Buffer.from('not an image at all'), 'image/tiff')
+  check(
+    '图片管线：无法解码时返回降级说明',
+    broken.ok === false && broken.message.includes('could not be converted'),
+    broken.ok ? '意外成功' : broken.message,
+  )
+
+  // 截断的 BMP：magic number 仍判定为 BMP，但像素数据不完整 → 转换失败 → 降级说明
+  const truncatedBmp = buildBmp24(8, 6).subarray(0, 34)
+  await writeFile(join(fixture, 'broken.bmp'), truncatedBmp)
+  const readBrokenBmp = await callTool(
+    FileReadTool,
+    { file_path: 'broken.bmp' },
+    context(fixture, { supportsImages: true }),
+  )
+  check(
+    'Read：损坏图片回退为文本说明，不报 tool error',
+    readBrokenBmp.is_error !== true && textOf(readBrokenBmp).includes('Image omitted'),
+    textOf(readBrokenBmp),
+  )
 
   // -------------------------------------------------------------------------
   console.log('\n▶ 7. Write（替换实现 + 写队列）')

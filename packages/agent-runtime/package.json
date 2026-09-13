@@ -15,6 +15,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
+    "@silvia-odwyer/photon-node": "0.3.4",
     "@zread-pi/types": "workspace:*",
     "@zread-pi/utils": "workspace:*",
     "diff": "8.0.4",

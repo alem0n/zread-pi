@@ -6,6 +6,7 @@
  *   ├── zread-pi(.exe)
  *   ├── tree-sitter.wasm
  *   ├── mappings.wasm
+ *   ├── photon_rs_bg.wasm  # 图片自动缩放/格式转换（photon）；缺失时仅图片能力降级
  *   └── browse/            # 「浏览文档」前端静态资源（可选，缺失时 browse 功能不可用）
  *
  * 前置条件（由 CI 或手动执行，本脚本只做「编译 + 组装 + 打 zip」）：
@@ -144,6 +145,14 @@ function main(): void {
 
   for (const wasm of ['tree-sitter.wasm', 'mappings.wasm']) {
     cpSync(join(CLI_DIST, wasm), join(stageDir, wasm));
+  }
+  // 图片处理管线（photon）的 WASM：bun compile 后 __dirname 不可用，
+  // 运行时按「可执行文件同目录」寻找（见 agent-runtime/src/tools/image/photon.ts 的兜底路径）。
+  const photonWasm = join(CLI_DIST, 'photon_rs_bg.wasm');
+  if (existsSync(photonWasm)) {
+    cpSync(photonWasm, join(stageDir, 'photon_rs_bg.wasm'));
+  } else {
+    console.warn('[build-binary] 未找到 dist/photon_rs_bg.wasm（图片自动缩放/格式转换将不可用）');
   }
 
   const browseSrc = join(CLI_DIST, 'browse');

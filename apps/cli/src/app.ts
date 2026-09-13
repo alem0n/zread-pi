@@ -4,12 +4,16 @@
  * 迁移前使用 fullscreen-ink 的 withFullScreen(<AppContent/>).start()；
  * 现在直接创建 pi-tui 应用（备用屏幕缓冲，全屏渲染）。
  *
- * 启动前会接管 console：TUI 期间任何 stdout/stderr 输出都会破坏备用屏幕
+ * 启动前会接管 console：TUI 期间任何 console 输出都会破坏备用屏幕
  * （例如 provider-registry 同步失败时的 console.error），统一转存到日志文件。
+ * 同时在真实的 ProcessTerminal 路径上接管 stdout（output-guard）：绕过 console 的
+ * 直写（第三方库）也不再进渲染流，而是同样落在日志文件里；TUI 自身的渲染帧/控制序列
+ * 走放行窗口直达原生 stdout（见 tui/output-guard.ts 与 tui/guarded-terminal.ts）。
  */
 
 import { App as TuiApp } from "./tui/app";
 import { captureConsoleToLog } from "./tui/console-guard";
+import { restoreStdout, takeOverStdout } from "./tui/output-guard";
 import { routes } from "./routes";
 import { ensureProjectRecorded, fileExists, getWikiJsonPath, readJsonFile } from "@zread-pi/utils";
 import type { WikiOutput } from "@zread-pi/types";
@@ -50,18 +54,25 @@ export async function runApp({ initialEntries }: AppOptions): Promise<void> {
   await adoptExistingProject();
 
   const restoreConsole = captureConsoleToLog();
+  // 接管 stdout：杂散直写转日志（TUI 放行窗口外的写入），退出时还原。
+  // 只在真实终端路径启用；测试注入的终端走原样写入，不受影响。
+  takeOverStdout({ redirect: "log", passthroughTerminalSequences: true });
+  const restoreAll = (): void => {
+    restoreStdout();
+    restoreConsole();
+  };
 
   const app = new TuiApp({
     routes,
     initialEntries,
     onExit: () => {
-      restoreConsole();
+      restoreAll();
       process.exit(0);
     },
   });
 
   app.start().catch((err: unknown) => {
-    restoreConsole();
+    restoreAll();
     process.stderr.write(`${err instanceof Error ? err.stack : String(err)}\n`);
     process.exit(1);
   });

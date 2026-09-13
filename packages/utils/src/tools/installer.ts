@@ -28,6 +28,7 @@ import { pipeline } from 'node:stream/promises'
 import { archiveKindOf, getToolSpec, listTools, type ToolId, type ToolSpec } from './registry.js'
 import { extractArchive } from './archive.js'
 import { loadConfigSync } from '../config/index.js'
+import { withFileLockSync } from '../lockfile.js'
 import { projectHomePath } from '../project-home.js'
 
 export const DEFAULT_NETWORK_TIMEOUT_MS = 15_000
@@ -114,17 +115,30 @@ function writeToolLedger(ledger: ToolLedger): void {
 
 /** 记录一次托管安装（安装成功后调用）。 */
 export function recordToolInstall(id: ToolId, entry: ToolLedgerEntry): void {
-  const ledger = readToolLedger()
-  ledger.installed[id] = entry
-  writeToolLedger(ledger)
+  // 跨进程锁：`tools:install` 与 TUI 安装可能同时在改台账（读-改-写整体保护）
+  try {
+    withFileLockSync(getToolLedgerPath(), () => {
+      const ledger = readToolLedger()
+      ledger.installed[id] = entry
+      writeToolLedger(ledger)
+    })
+  } catch {
+    // 台账写失败不能影响安装本身（下次安装会重试），与 writeToolLedger 的容错一致
+  }
 }
 
 /** 清除某个工具的托管安装记录（卸载后调用）。 */
 export function clearToolInstall(id: ToolId): void {
-  const ledger = readToolLedger()
-  if (!(id in ledger.installed)) return
-  delete ledger.installed[id]
-  writeToolLedger(ledger)
+  try {
+    withFileLockSync(getToolLedgerPath(), () => {
+      const ledger = readToolLedger()
+      if (!(id in ledger.installed)) return
+      delete ledger.installed[id]
+      writeToolLedger(ledger)
+    })
+  } catch {
+    // 同上：台账失败不影响卸载结果
+  }
 }
 
 export type ToolSource = 'system' | 'managed'

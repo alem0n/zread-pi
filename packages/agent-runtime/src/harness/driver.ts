@@ -36,6 +36,7 @@ import { AsyncQueue } from "./queue.js";
 import { toHarnessTools, unwrapBridgedDetails, type BridgedToolDetails, type ToolBridgeContext } from "./tools.js";
 import { blockedByHookResult, runToolHooks, type HookConfig } from "../hooks.js";
 import type { ApiType } from "../providers/types.js";
+import type { HarnessStreamRetryOptions } from "../retry.js";
 import type { PermissionMode, SDKMessage, TokenUsage, ToolDefinition } from "../types.js";
 
 /** 结果归类：这是 SDK 层唯一对外可见的终局分类 */
@@ -63,6 +64,12 @@ export interface HarnessQueryRequest {
 	systemPrompt: string;
 	thinkingLevel: ThinkingLevel;
 	retry?: RetryPolicy;
+	/**
+	 * Provider 层重试设置（透传给 pi-ai `StreamOptions`）：
+	 * `maxRetries` / `maxRetryDelayMs` / `timeoutMs`，由 pi 的
+	 * `retryProviderRequest` 承担（会读取服务端 Retry-After）。
+	 */
+	streamOptions?: HarnessStreamRetryOptions;
 	compaction: CompactionSettings;
 	budget: BudgetController;
 	/** 旧 PreToolUse / PostToolUse 钩子（编排层 UI 进度） */
@@ -152,6 +159,7 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 				toolContext: toolBridge,
 				systemPrompt: request.systemPrompt,
 				retry: request.retry,
+				...(request.streamOptions ? { streamOptions: request.streamOptions } : {}),
 				compaction: request.compaction,
 				toolExecution: "parallel",
 			},

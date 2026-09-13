@@ -120,8 +120,23 @@ export {
 	resetSearchBinaryCache,
 	detectSupportedImageMimeType,
 	encodeBase64,
+	processImage,
+	resizeImage,
+	formatDimensionNote,
+	convertImageBytesToPng,
+	convertToPng,
+	loadPhoton,
 } from "./tools/index.js";
-export type { TruncationResult, TruncationOptions, WalkEntry, WalkOptions } from "./tools/index.js";
+export type {
+	TruncationResult,
+	TruncationOptions,
+	WalkEntry,
+	WalkOptions,
+	ImageResizeOptions,
+	ProcessImageOptions,
+	ProcessImageResult,
+	ResizedImage,
+} from "./tools/index.js";
 
 // ---------------------------------------------------------------------------
 // 重试（判定/退避/重试循环均为 pi 的实现，见 MIGRATION.md §13）
@@ -129,13 +144,15 @@ export type { TruncationResult, TruncationOptions, WalkEntry, WalkOptions } from
 
 export {
 	DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
+	DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS,
 	DEFAULT_RETRY_CONFIG,
 	isRetryableAssistantError,
 	retryAssistantCall,
 	retryDelayMs,
 	toRetryPolicy,
+	toStreamOptions,
 } from "./retry.js";
-export type { RetryConfig } from "./retry.js";
+export type { HarnessStreamRetryOptions, ProviderRetryConfig, RetryConfig } from "./retry.js";
 
 // ---------------------------------------------------------------------------
 // 类型

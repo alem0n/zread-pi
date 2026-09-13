@@ -39,6 +39,9 @@ export { findSearchBinary, resetSearchBinaryCache } from "./search-binaries.js";
 export { normalizeEditInput } from "./edit.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
 export { detectSupportedImageMimeType, encodeBase64 } from "@earendil-works/pi-agent-core/harness/tools/image";
+// 图片处理管线（格式归一化 + 缩放），移植自 pi coding-agent 的 utils/image-*.ts
+export { processImage, resizeImage, formatDimensionNote, convertImageBytesToPng, convertToPng, loadPhoton } from "./image/index.js";
+export type { ImageResizeOptions, ProcessImageOptions, ProcessImageResult, ResizedImage } from "./image/index.js";
 export { resolveReadPathAsync, resolveToCwd } from "./path-utils.js";
 
 export {

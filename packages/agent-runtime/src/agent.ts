@@ -22,7 +22,7 @@ import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-agent-core";
 import { createRuntimeModel, inferProviderId, type RuntimeModel } from "./pi/runtime-model.js";
 import { hasZreadProvider } from "./pi/provider-catalog.js";
 import type { RetryConfig } from "./retry.js";
-import { toRetryPolicy } from "./retry.js";
+import { toRetryPolicy, toStreamOptions } from "./retry.js";
 import type { ThinkingLevel } from "@zread-pi/types";
 import type { SDKMessage, PermissionMode, ToolDefinition } from "./types.js";
 import type { ApiType } from "./providers/types.js";
@@ -313,6 +313,7 @@ class AgentRuntimeImpl implements AgentInstance {
 		);
 		const retryConfig = options.retryConfig;
 		const retryPolicy = toRetryPolicy(retryConfig);
+		const streamRetryOptions = toStreamOptions(retryConfig);
 
 		const request: HarnessQueryRequest = {
 			prompt,
@@ -330,6 +331,7 @@ class AgentRuntimeImpl implements AgentInstance {
 			systemPrompt: [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n"),
 			thinkingLevel: options.thinkingLevel ?? "off",
 			retry: retryPolicy,
+			...(streamRetryOptions ? { streamOptions: streamRetryOptions } : {}),
 			compaction: {
 				enabled: options.compaction?.enabled ?? true,
 				reserveTokens: options.compaction?.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,

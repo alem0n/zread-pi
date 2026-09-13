@@ -6,6 +6,9 @@
  *  1. 旧实现「图片」只按扩展名识别，且只回一句 `[Image file: ... (N bytes)]`，
  *     模型拿不到任何内容；现在按 **magic number** 判型（无扩展名的截图也能认出来），
  *     并在模型支持图片输入时以 image 内容块回传（否则回退为文本说明，避免请求被拒）。
+ *     第六步接入图片处理管线（`tools/image/`，移植自 pi coding-agent）：
+ *     自动缩放到 2000×2000 / 4.5MB base64 以内（省 token、避免 provider 拒收），
+ *     BMP 等非内联格式自动转 PNG，并在文本里说明「已转换 / 已缩放及坐标换算比例」。
  *  2. 旧实现硬编码 `limit = 2000` 行，且没有字节上限 —— 一个 500KB 的单行 minified
  *     文件会直接灌满上下文；现在用共享的截断设施（2000 行 / 50KB，先到先触发），
  *     并给出可执行的续读提示（`Use offset=N to continue.`）。
@@ -21,8 +24,10 @@ import { readFile, stat } from 'node:fs/promises'
 import { defineTool, getNumber, getRequiredString, getString } from './types.js'
 import type { ToolCallReturn } from './types.js'
 import type { ToolInputParams } from '../types.js'
-// 图片判型 / base64 直接用 pi 内核实现（不再本地维护副本，见 MIGRATION.md §13）
-import { detectSupportedImageMimeType, encodeBase64 } from '@earendil-works/pi-agent-core/harness/tools/image'
+// 图片判型直接用 pi 内核实现（不再本地维护副本，见 MIGRATION.md §13）
+import { detectSupportedImageMimeType } from '@earendil-works/pi-agent-core/harness/tools/image'
+// 图片处理管线（格式归一化 + 缩放 + 提示），移植自 pi coding-agent
+import { processImage } from './image/image-process.js'
 import { resolveReadPathAsync } from './path-utils.js'
 import { toTruncationDetails, truncateHead, formatSize, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from './truncate.js'
 
@@ -89,12 +94,25 @@ export const FileReadTool = defineTool({
     const mimeType = detectSupportedImageMimeType(buffer)
     if (mimeType) {
       if (context.supportsImages === true) {
+        // 处理管线：非内联格式转 PNG、超过 2000×2000 / 4.5MB 时缩放
+        const processed = await processImage(buffer, mimeType)
+        if (!processed.ok) {
+          // 处理失败（photon 不可用 / 压不到限制内）：退回文本说明，不把原始大图灌给 provider
+          return {
+            data: `[Image file: ${absolutePath} (${formatSize(buffer.length)}, ${mimeType}). ${processed.message}]`,
+            details: { path: absolutePath, mimeType, bytes: buffer.length, imageOmitted: true },
+          }
+        }
+        const text = [`Read image file [${processed.mimeType}]`, ...processed.hints].join('\n')
         return {
           content: [
-            { type: 'text', text: `Read image file [${mimeType}]` },
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: encodeBase64(buffer) } },
+            { type: 'text', text },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: processed.mimeType, data: processed.data },
+            },
           ],
-          details: { path: absolutePath, mimeType, bytes: buffer.length },
+          details: { path: absolutePath, mimeType: processed.mimeType, bytes: buffer.length },
         }
       }
       const reason =

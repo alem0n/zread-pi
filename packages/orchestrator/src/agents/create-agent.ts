@@ -9,10 +9,11 @@
  * - LLM 重试与 token 预算由适配层（harness）处理
  */
 
-import { createAgent as CreateAgentSdk, hasZreadProvider, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
-import { loadConfig, logger } from '@zread-pi/utils';
+import { createAgent as CreateAgentSdk, hasZreadProvider, DEFAULT_MAX_AGENT_RETRY_DELAY_MS, DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
+import { getProjectHome, loadConfig, logger } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
+import { loadProjectContextFiles, withProjectContext } from './context-files.js';
 
 /**
  * 创建 Blueprint Agent 的选项
@@ -159,12 +160,20 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     }],
   } : undefined;
 
-  // 构建 retryConfig（重试由 agent-sdk 处理）
+  // 构建 retryConfig（两层重试，见适配层 retry.ts）：
+  //  · Agent 层：指数退避（2s → 4s → 8s …，60s 封顶），失败尝试不写进会话；
+  //  · Provider 层：由 pi-ai 的 retryProviderRequest 承担，**会读服务端 Retry-After**
+  //    并按 60s 封顶（超过上限立即失败并交回 Agent 层退避）。
+  // 旧实现是固定 10 秒延迟且忽略 Retry-After，429 高峰期会重试过早。
   const retryConfig: RetryConfig | undefined = maxRetries > 0 ? {
     maxRetries,
-    baseDelayMs: 10000,  // 固定 10 秒延迟
-    maxDelayMs: 10000,   // 保持兼容性
+    baseDelayMs: 2000,
+    maxDelayMs: DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
     retryableStatusCodes: [401, 403, 429, 500, 502, 503, 529],
+    provider: {
+      maxRetries,
+      maxRetryDelayMs: DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS,
+    },
     onRetry: (info) => {
       // 发射 retry 事件通知 UI
       if (onEvent) {
@@ -183,6 +192,12 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
 
   // 创建 Agent
   logger.info(`System prompt doc_language: ${docLanguage} => "${SYSTEM_PROMPTS[docLanguage]}"`);
+  // 目标仓库自述（AGENTS.md / CLAUDE.md …）注入系统提示：仓库若有架构说明/约定术语，
+  // 让生成的 wiki 与仓库自述一致，减少纯靠读代码的猜测（见 context-files.ts）。
+  const contextFiles = loadProjectContextFiles({ cwd: process.cwd(), agentDir: getProjectHome() });
+  if (contextFiles.length > 0) {
+    logger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
+  }
   const agent = CreateAgentSdk({
     model,
     apiKey,
@@ -190,7 +205,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     providerId,
     cwd: process.cwd(),
     tools: options.tools,
-    systemPrompt: SYSTEM_PROMPTS[docLanguage],
+    systemPrompt: withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
     maxTurns,
     budget: {
       // 显式 token 预算（不传则由 maxTurns 折算，见 resolveBudgetOptions）

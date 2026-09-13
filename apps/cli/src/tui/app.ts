@@ -12,13 +12,13 @@ import {
   isKeyRelease,
   KeybindingsManager,
   matchesKey,
-  ProcessTerminal,
   setKeybindings,
   TuiAltScreen,
   TUI_KEYBINDINGS,
   type Terminal,
   type TuiInputListenerResult,
 } from "@earendil-works/pi-tui";
+import { GuardedProcessTerminal } from "./guarded-terminal";
 import { I18nStore } from "../state/i18n-store";
 import { ConfigStore } from "../state/config-store";
 import { WikiStore } from "../state/wiki-store";
@@ -86,7 +86,9 @@ export class App {
   constructor(private options: AppOptions) {
     installKeybindings();
     this.router = new Router(options.routes);
-    this.tui = new TuiAltScreen(options.terminal ?? new ProcessTerminal());
+    // 默认用 GuardedProcessTerminal：与 output-guard 的接管配套，
+    // 保证 TUI 自己的写入走放行窗口；测试注入的终端不经这里。
+    this.tui = new TuiAltScreen(options.terminal ?? new GuardedProcessTerminal());
     this.layout = new Layout(this);
     this.tui.addInputListener((data) => this.handleInput(data));
   }
