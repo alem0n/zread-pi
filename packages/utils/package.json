@@ -19,10 +19,12 @@
   },
   "dependencies": {
     "@zread-pi/types": "workspace:*",
+    "proper-lockfile": "4.1.2",
     "yaml": "^2.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/proper-lockfile": "4.1.4",
     "tsup": "^8.5.1",
     "typescript": "^5.0.0"
   }
