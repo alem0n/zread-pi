@@ -1,23 +1,37 @@
 /**
- * context-compaction.ts —— 上下文压缩与优雅停止冒烟测试（离线、不调用外部 API）
+ * context-compaction.ts —— 上下文压缩 + 首尾机制（token 预算 / 两段式提示 / before_run_end）冒烟测试
+ *（离线、不调用外部 API）
  *
- * 验证点：
- *  1. 上下文逼近模型窗口时，适配层在 pi 的 transformContext 里调用
- *     prepareCompaction / compact 生成摘要，并发出 system/compact_boundary；
- *  2. 压缩后的下一次请求使用「摘要 + 保留的近期消息」，运行继续并最终 success；
- *  3. 压缩无法腾出空间（单个巨大 turn / 没有可总结内容）时，
- *     shouldStopAfterTurn 优雅停止，结果为 error_context_full（不让 provider 报溢出）；
- *  4. maxTurns 计数仍然生效（配置界面 agent.max_turns 的最终落点）：
- *     倒数第 1 轮注入收尾提示，超限后允许 1 轮宽限；仍不收敛才 error_max_turns；
- *     `finalization.graceTurns: 0` 可回到「到达上限立即停止」的旧行为；
- *  5. `maxTurns: 0` = 不限制轮次：不发收尾提示、不因轮次停止（仍受上下文/取消约束）。
+ * 迁移后的验证点（对应 MIGRATION.md §12 的四项升级）：
+ *  1. 上下文压缩由 harness 内建承担：run 边界处按 `contextWindow - reserveTokens` 触发摘要，
+ *     发出 `system/compact_boundary`，压缩后继续运行并最终 success；
+ *  2. 上下文溢出（provider 报错）→ harness 归类 overflow → 适配层映射回 `error_context_full`
+ *     与「Context window nearly full」文案；
+ *  3. token 预算：判据是 usage 事件/ledger 的**累计 tokens**（不是轮数）。
+ *     本文件用「固定 usage 的 streamFn」把每一次响应的用量钉死，从而断言预算在
+ *     精确的累计 token 数上生效：10 个 turn 的小用量不触发任何提示，
+ *     2 个 turn 的大用量就会触发提示/终止；
+ *  4. 两段式提示：软提示（默认 70% 预算）+ 硬提示（预算将尽），经 `before_run` 注入；
+ *  5. `before_run_end`：不返回 followUp 即终止；预算耗尽时返回硬提示 followUp（强制交卷）；
+ *     强制交卷后仍没有目标产物 → 内核 `error_budget_exhausted`，
+ *     编排层照旧按「页面文件不存在」判页失败（见 packages/orchestrator/test/*）；
+ *  6. `maxTurns` 兼容字段折算成 token 预算（`maxTurns * TOKENS_PER_TURN`，0 = 不限制）。
  *
  * 运行：bun run test:context
  */
 
+import type { AssistantMessage, AssistantMessageEvent, Usage } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createAgent, defineTool, type SDKMessage, type ToolDefinition } from "../src/index.js";
+import {
+	createAgent,
+	defineTool,
+	resolveBudgetOptions,
+	TOKENS_PER_TURN,
+	type SDKMessage,
+	type ToolDefinition,
+} from "../src/index.js";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -35,6 +49,52 @@ const bigTool: ToolDefinition = defineTool({
 	call: async () => "x".repeat(BIG_PAYLOAD_CHARS),
 });
 
+/** 目标输出工具（交卷判定的锚点；业务侧对应 write_page / generate_blueprint） */
+const deliverCalls: string[] = [];
+const deliverTool: ToolDefinition = defineTool({
+	name: "Deliver",
+	description: "产出最终结果（交卷）",
+	inputSchema: { type: "object", properties: { text: { type: "string" } } },
+	call: async (input) => {
+		deliverCalls.push(String(input.text ?? ""));
+		return "delivered";
+	},
+});
+
+// ---------------------------------------------------------------------------
+// 固定 usage 的流包装：把 faux 的估算用量换成测试指定值
+//
+// 预算判定必须以 usage 事件为准，所以测试必须能精确控制每次响应的用量：
+// 直接在终止事件上改写 usage 即可（harness 以 stream.result() 的消息为准）。
+// ---------------------------------------------------------------------------
+
+function fixedUsageStream(inner: AssistantMessageEventStream, usage: Usage): AssistantMessageEventStream {
+	const outer = new AssistantMessageEventStream();
+	void (async () => {
+		for await (const event of inner) {
+			if (event.type === "done") {
+				outer.push({ ...event, message: { ...event.message, usage } });
+			} else if (event.type === "error") {
+				outer.push({ ...event, error: { ...event.error, usage } });
+			} else {
+				outer.push(event as AssistantMessageEvent);
+			}
+		}
+	})();
+	return outer;
+}
+
+function makeUsage(input: number, output: number): Usage {
+	return {
+		input,
+		output,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: input + output,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
 /** 单个测试场景的公共返回值 */
 interface ScenarioResult {
 	subtype: string | undefined;
@@ -43,26 +103,39 @@ interface ScenarioResult {
 	systemEvents: string[];
 	capturedRequestMessages: number[];
 	capturedFirstUserTexts: string[];
-	/** 每次请求里所有 user 消息的文本（用于断言收尾提示注入） */
+	/** 每次请求里所有 user 消息的文本（用于断言提示注入） */
 	capturedUserTexts: string[][];
+	/** tool_result 事件的输出文本（断言熔断/错误结果） */
+	toolOutputs: string[];
+	toolNames: string[];
+	/** 本场景里 Deliver 工具收到的参数（交卷断言） */
+	deliverCalls: string[];
 	callCount: number;
 }
 
-/**
- * 用 faux provider 跑一次 createAgent（注入 models 以便压缩也走 faux）。
- */
 async function runScenario(options: {
 	contextWindow: number;
 	maxTurns?: number;
+	budget?: {
+		maxTokens?: number;
+		softRatio?: number;
+		forcedTurns?: number;
+		notices?: { soft?: string; hard?: string };
+		outputTools?: string[];
+		continuePrompt?: string;
+	};
 	compaction: { enabled?: boolean; reserveTokens: number; keepRecentTokens: number };
-	finalization?: { graceTurns?: number; notice?: string };
 	responses: Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0];
+	/** 每次响应的固定 usage（累计值 = 响应次数 × 该值） */
+	usage?: Usage;
 	prompt: string;
+	tools?: ToolDefinition[];
 }): Promise<ScenarioResult> {
 	const faux = fauxProvider({
 		tokensPerSecond: 0,
 		models: [{ id: "faux-model", contextWindow: options.contextWindow, maxTokens: 512 }],
 	});
+	deliverCalls.length = 0;
 	const models = createModels();
 	models.setProvider(faux.provider);
 	const model = faux.getModel("faux-model") ?? faux.models[0];
@@ -72,6 +145,8 @@ async function runScenario(options: {
 	const capturedFirstUserTexts: string[] = [];
 	const capturedUserTexts: string[][] = [];
 	const systemEvents: string[] = [];
+	const toolOutputs: string[] = [];
+	const toolNames: string[] = [];
 	let subtype: string | undefined;
 	let numTurns: number | undefined;
 	let errors: string[] | undefined;
@@ -88,9 +163,9 @@ async function runScenario(options: {
 		model: String(model.id),
 		systemPrompt: "sys",
 		maxTurns: options.maxTurns,
+		budget: options.budget,
 		compaction: options.compaction,
-		finalization: options.finalization,
-		tools: [bigTool],
+		tools: options.tools ?? [bigTool],
 		includePartialMessages: false,
 		runtimeOverride: {
 			model,
@@ -106,13 +181,18 @@ async function runScenario(options: {
 				if (first && first.role === "user") {
 					capturedFirstUserTexts.push(messageText(first as { content?: unknown }));
 				}
-				return models.streamSimple(streamModel, context, streamOptions);
+				const stream = models.streamSimple(streamModel, context, streamOptions);
+				return options.usage ? fixedUsageStream(stream, options.usage) : stream;
 			},
 		},
 	});
 
 	for await (const event of agent.query(options.prompt) as AsyncIterable<SDKMessage>) {
 		if (event.type === "system") systemEvents.push(event.subtype);
+		if (event.type === "tool_result") {
+			toolOutputs.push(event.result.output);
+			toolNames.push(event.result.tool_name);
+		}
 		if (event.type === "result") {
 			subtype = event.subtype;
 			numTurns = event.num_turns;
@@ -129,18 +209,26 @@ async function runScenario(options: {
 		capturedRequestMessages,
 		capturedFirstUserTexts,
 		capturedUserTexts,
+		toolOutputs,
+		toolNames,
+		deliverCalls: [...deliverCalls],
 		callCount: faux.state.callCount,
 	};
 }
 
+/** 某个字符串是否出现在第 index 次请求的上下文里 */
+function injectedAt(result: ScenarioResult, index: number, needle: string): boolean {
+	return result.capturedUserTexts[index]?.some((text) => text.includes(needle)) === true;
+}
+
 // ---------------------------------------------------------------------------
-// 场景 1：压缩成功，运行继续
+// 场景 1：harness 内建压缩（上下文将满 → 摘要 → 继续）
 // ---------------------------------------------------------------------------
-console.log("▶ 场景 1：上下文将满 → pi compaction 摘要 → 继续运行");
+console.log("▶ 场景 1：上下文将满 → harness 内建 compaction 摘要 → 继续运行");
 {
 	const result = await runScenario({
 		contextWindow: 4000,
-		maxTurns: 8,
+		budget: { maxTokens: 0 },
 		compaction: { enabled: true, reserveTokens: 200, keepRecentTokens: 1600 },
 		prompt: "开始",
 		responses: [
@@ -152,7 +240,11 @@ console.log("▶ 场景 1：上下文将满 → pi compaction 摘要 → 继续�
 		],
 	});
 
-	check("发出 system/compact_boundary 事件", result.systemEvents.includes("compact_boundary"), result.systemEvents.join(","));
+	check(
+		"发出 system/compact_boundary 事件",
+		result.systemEvents.includes("compact_boundary"),
+		result.systemEvents.join(","),
+	);
 	check("压缩后的运行以 success 结束", result.subtype === "success", String(result.subtype));
 	check("压缩占用了额外的摘要请求（5 次模型调用）", result.callCount === 5, `callCount=${result.callCount}`);
 	check(
@@ -167,225 +259,288 @@ console.log("▶ 场景 1：上下文将满 → pi compaction 摘要 → 继续�
 	);
 	check(
 		"压缩后的首条消息是摘要",
-		result.capturedFirstUserTexts[3]?.includes("【压缩摘要】") === true,
+		result.capturedFirstUserTexts[3]?.includes("compacted") === true,
 		result.capturedFirstUserTexts[3]?.slice(0, 60) ?? "(无)",
 	);
-
 	check("压缩后继续完成第 4 个 turn", result.numTurns === 4, String(result.numTurns));
 }
 
 // ---------------------------------------------------------------------------
-// 场景 2：单个巨大 turn，压缩无法腾出空间 → 优雅停止
+// 场景 2：上下文溢出（provider 报错）→ error_context_full
 // ---------------------------------------------------------------------------
-console.log("\n▶ 场景 2：压缩无法腾出空间 → shouldStopAfterTurn 优雅停止");
+console.log("\n▶ 场景 2：provider 报上下文溢出 → error_context_full（文案保持）");
 {
 	const result = await runScenario({
 		contextWindow: 1200,
-		maxTurns: 8,
+		budget: { maxTokens: 0 },
 		compaction: { enabled: true, reserveTokens: 200, keepRecentTokens: 1600 },
 		prompt: "开始",
 		responses: [
+			// 第 1 轮：一个极大的工具结果（不可压缩的单轮）
 			fauxAssistantMessage([fauxToolCall("Big", { size: BIG_PAYLOAD_CHARS }, { id: "call_1" })]),
-			// 不应该再被消费
-			fauxAssistantMessage("不应该到达这里"),
+			// 第 2 轮：provider 直接报上下文溢出；无可压缩内容 → harness 归类 failure
+			fauxAssistantMessage("", {
+				stopReason: "error",
+				errorMessage: "prompt is too long: 999999 tokens > 1200 maximum",
+			}),
 		],
 	});
 
 	check("结果为 error_context_full", result.subtype === "error_context_full", String(result.subtype));
 	check(
-		"错误信息包含上下文用量",
+		"错误信息保持「Context window nearly full」前缀",
 		result.errors?.[0]?.includes("Context window nearly full") === true,
 		result.errors?.join(" | ") ?? "(无)",
 	);
-	check("没有发生压缩（只有 1 次模型调用）", result.callCount === 1, `callCount=${result.callCount}`);
-	check("没有 compact_boundary 事件", !result.systemEvents.includes("compact_boundary"), result.systemEvents.join(","));
-	check("只执行了 1 个 turn", result.numTurns === 1, String(result.numTurns));
+	check("溢出的错误原文被保留", result.errors?.[0]?.includes("prompt is too long") === true, result.errors?.[0] ?? "(无)");
 }
 
 // ---------------------------------------------------------------------------
-// 场景 3：显式关闭压缩 → 上下文将满时同样优雅停止
+// 场景 3：关闭压缩（compaction.enabled=false）→ 不发起任何摘要请求
 // ---------------------------------------------------------------------------
-console.log("\n▶ 场景 3：compaction.enabled=false → 上下文将满时优雅停止");
+console.log("\n▶ 场景 3：compaction.enabled=false → 溢出也不摘要，直接优雅停止");
 {
 	const result = await runScenario({
 		contextWindow: 1200,
-		maxTurns: 8,
+		budget: { maxTokens: 0 },
 		compaction: { enabled: false, reserveTokens: 200, keepRecentTokens: 1600 },
 		prompt: "开始",
-		responses: [fauxAssistantMessage([fauxToolCall("Big", { size: BIG_PAYLOAD_CHARS }, { id: "call_1" })])],
+		responses: [
+			fauxAssistantMessage([fauxToolCall("Big", { size: BIG_PAYLOAD_CHARS }, { id: "call_1" })]),
+			fauxAssistantMessage("", {
+				stopReason: "error",
+				errorMessage: "prompt is too long: 999999 tokens > 1200 maximum",
+			}),
+		],
 	});
 
 	check("关闭压缩后仍为 error_context_full", result.subtype === "error_context_full", String(result.subtype));
-	check("关闭压缩时没有摘要请求", result.callCount === 1, `callCount=${result.callCount}`);
-}
-
-// ---------------------------------------------------------------------------
-// 场景 4：maxTurns 计数（agent.max_turns 的运行时落点）
-// ---------------------------------------------------------------------------
-console.log("\n▶ 场景 4：maxTurns 到达上限 → error_max_turns");
-{
-	const result = await runScenario({
-		contextWindow: 200000,
-		maxTurns: 2,
-		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-		prompt: "开始",
-		responses: [
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
-			// 宽限轮仍然调用工具（不收敛）
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_3" })]),
-		],
-	});
-
-	check("结果为 error_max_turns", result.subtype === "error_max_turns", String(result.subtype));
 	check(
-		"错误信息为可读文案（含 max turns）",
-		result.errors?.[0]?.includes("Reached max turns") === true,
+		"关闭压缩时没有任何摘要请求（before_compaction decline）",
+		result.callCount === 2,
+		`callCount=${result.callCount}`,
+	);
+	check(
+		"关闭压缩的溢出同样归类为 error_context_full",
+		result.errors?.[0]?.includes("Context window nearly full") === true,
 		result.errors?.join(" | ") ?? "(无)",
 	);
-	check("错误信息标注了宽限轮", result.errors?.[0]?.includes("+ 1 grace turn") === true, result.errors?.[0] ?? "(无)");
-	check("maxTurns=2 + 1 轮宽限，共 3 个 turn", result.numTurns === 3, String(result.numTurns));
-	check("发出 3 次模型请求（含宽限轮）", result.callCount === 3, `callCount=${result.callCount}`);
+	check("没有 compact_boundary 事件", !result.systemEvents.includes("compact_boundary"), result.systemEvents.join(","));
 }
 
 // ---------------------------------------------------------------------------
-// 场景 5：收尾提示生效，模型在宽限轮直接输出 → success
+// 场景 4：判据是 tokens 而不是轮次（10 个小 turn 不触发提示）
 // ---------------------------------------------------------------------------
-console.log("\n▶ 场景 5：倒数第 1 轮 + 宽限轮提示 → 模型直接输出，success");
+console.log("\n▶ 场景 4：10 个 turn 的小用量 → 预算不紧张，不注入任何提示");
 {
-	const notice = "【收尾提示】立即输出最终结果";
+	const soft = "【预算软提示】";
 	const result = await runScenario({
 		contextWindow: 200000,
-		maxTurns: 2,
+		// 预算 100k tokens；每次响应只花 10 tokens → 10 个 turn 共 100 tokens，远未到 70%
+		budget: { maxTokens: 100_000, notices: { soft, hard: "【预算硬提示】" }, outputTools: ["Deliver"] },
 		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-		finalization: { notice },
+		usage: makeUsage(6, 4),
 		prompt: "开始",
 		responses: [
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
-			fauxAssistantMessage("已立即输出"),
-		],
-	});
-
-	check("模型在宽限轮输出后结果为 success", result.subtype === "success", String(result.subtype));
-	check("共 3 个 turn（2 个工作轮 + 1 收尾轮）", result.numTurns === 3, String(result.numTurns));
-	check("第 1 次请求没有收尾提示", result.capturedUserTexts[0]?.every((text) => !text.includes(notice)) === true, JSON.stringify(result.capturedUserTexts[0]));
-	check(
-		"最后一轮请求注入了软提示",
-		result.capturedUserTexts[1]?.some((text) => text.includes(notice)) === true,
-		JSON.stringify(result.capturedUserTexts[1]),
-	);
-	check(
-		"宽限轮请求再次注入提示（共 2 次）",
-		result.capturedUserTexts[2]?.filter((text) => text.includes(notice)).length === 2,
-		JSON.stringify(result.capturedUserTexts[2]),
-	);
-}
-
-// ---------------------------------------------------------------------------
-// 场景 6：graceTurns=0 → 保持旧行为（到达上限立即停止，仅软提示）
-// ---------------------------------------------------------------------------
-console.log("\n▶ 场景 6：graceTurns=0 → 到达上限立即停止（旧行为）");
-{
-	const notice = "【收尾提示】立即输出最终结果";
-	const result = await runScenario({
-		contextWindow: 200000,
-		maxTurns: 2,
-		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-		finalization: { graceTurns: 0, notice },
-		prompt: "开始",
-		responses: [
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
-			fauxAssistantMessage("不应该到达这里"),
-		],
-	});
-
-	check("graceTurns=0 仍为 error_max_turns", result.subtype === "error_max_turns", String(result.subtype));
-	check("错误信息不标注宽限轮", result.errors?.[0]?.includes("grace turn") === false, result.errors?.[0] ?? "(无)");
-	check("恰好 2 个 turn", result.numTurns === 2, String(result.numTurns));
-	check("没有第 3 次请求", result.callCount === 2, `callCount=${result.callCount}`);
-	check(
-		"最后一轮仍注入软提示",
-		result.capturedUserTexts[1]?.some((text) => text.includes(notice)) === true,
-		JSON.stringify(result.capturedUserTexts[1]),
-	);
-}
-
-// ---------------------------------------------------------------------------
-// 场景 7：模型恰好在最后一轮给出最终答复 → success（不因到达上限被记失败）
-// ---------------------------------------------------------------------------
-console.log("\n▶ 场景 7：最后一轮直接输出 → success");
-{
-	const notice = "【收尾提示】立即输出最终结果";
-	const result = await runScenario({
-		contextWindow: 200000,
-		maxTurns: 2,
-		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-		finalization: { notice },
-		prompt: "开始",
-		responses: [
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
-			fauxAssistantMessage("在最后一轮输出完成"),
-		],
-	});
-
-	check("最后一轮输出后结果为 success", result.subtype === "success", String(result.subtype));
-	check("恰好 2 个 turn（不触发宽限）", result.numTurns === 2, String(result.numTurns));
-	check("只发出 2 次模型请求", result.callCount === 2, `callCount=${result.callCount}`);
-	check(
-		"软提示已在第 2 轮注入",
-		result.capturedUserTexts[1]?.some((text) => text.includes(notice)) === true,
-		JSON.stringify(result.capturedUserTexts[1]),
-	);
-}
-
-// ---------------------------------------------------------------------------
-// 场景 8：maxTurns=1 且一次到位 → success
-// ---------------------------------------------------------------------------
-console.log("\n▶ 场景 8：maxTurns=1 一次到位 → success");
-{
-	const result = await runScenario({
-		contextWindow: 200000,
-		maxTurns: 1,
-		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-		prompt: "开始",
-		responses: [fauxAssistantMessage("一次输出完成")],
-	});
-
-	check("maxTurns=1 且无工具调用 → success", result.subtype === "success", String(result.subtype));
-	check("恰好 1 个 turn", result.numTurns === 1, String(result.numTurns));
-}
-
-// ---------------------------------------------------------------------------
-// 场景 9：maxTurns=0 → 不限制轮次（不发收尾提示、不因轮次停止）
-// ---------------------------------------------------------------------------
-console.log("\n▶ 场景 9：maxTurns=0 → 不限制轮次");
-{
-	const notice = "【收尾提示】立即输出最终结果";
-	const result = await runScenario({
-		contextWindow: 200000,
-		maxTurns: 0,
-		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-		finalization: { notice },
-		prompt: "开始",
-		responses: [
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_3" })]),
-			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_4" })]),
+			...Array.from({ length: 9 }, (_value, index) =>
+				fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: `call_${index + 1}` })]),
+			),
 			fauxAssistantMessage("全部完成"),
 		],
 	});
 
-	check("0 轮 = 不限制：4 个工作轮后仍继续（共 5 次模型请求）", result.callCount === 5, `callCount=${result.callCount}`);
-	check("不限制轮次时不被 error_max_turns 打断", result.subtype === "success", String(result.subtype));
-	check("numTurns = 5（4 工作轮 + 1 输出轮）", result.numTurns === 5, String(result.numTurns));
+	check("10 个 turn 后仍 success（没有轮数硬顶）", result.subtype === "success", String(result.subtype));
+	check("共 10 次模型请求", result.callCount === 10, `callCount=${result.callCount}`);
+	check("numTurns = 10", result.numTurns === 10, String(result.numTurns));
 	check(
-		"不限制轮次时不注入收尾提示",
+		"小用量下不注入软提示（判据是 token，不是轮数）",
+		result.capturedUserTexts.every((texts) => texts.every((text) => !text.includes(soft))),
+		JSON.stringify(result.capturedUserTexts),
+	);
+}
+
+// ---------------------------------------------------------------------------
+// 场景 4：2 个大用量 turn 就触发软提示（before_run 注入）+ 目标工具交卷 → success
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 5：2 个大用量 turn 越过 70% → before_run 注入软提示 → 交卷成功");
+{
+	const soft = "【预算软提示】请开始收敛";
+	const hard = "【预算硬提示】预算即将耗尽";
+	const result = await runScenario({
+		contextWindow: 200000,
+		// 预算 500：软阈值 350；每次响应 200 tokens
+		budget: { maxTokens: 500, notices: { soft, hard }, outputTools: ["Deliver"] },
+		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+		usage: makeUsage(150, 50),
+		prompt: "开始",
+		tools: [bigTool, deliverTool],
+		responses: [
+			// 1) 200
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
+			// 2) 400：越过软阈值 350，模型此时收尾 → run 结束 → driver 起新 run，
+			//    由 before_run 注入软提示
+			fauxAssistantMessage("我先停一下"),
+			// 3) 600：模型接受提示后交卷
+			fauxAssistantMessage([fauxToolCall("Deliver", { text: "页面正文" }, { id: "call_2" })]),
+			// 4) 800：收尾
+			fauxAssistantMessage("完成"),
+		],
+	});
+
+	check("软提示注入前没有任何提示", !injectedAt(result, 0, soft) && !injectedAt(result, 1, soft), JSON.stringify(result.capturedUserTexts[1]));
+	check("越过 70% 后由 before_run 注入软提示", injectedAt(result, 2, soft), JSON.stringify(result.capturedUserTexts[2]));
+	check(
+		"软提示以 user 消息进入上下文（随 checkpoint 落库）",
+		result.capturedUserTexts[2]?.some((text) => text === soft) === true,
+		JSON.stringify(result.capturedUserTexts[2]),
+	);
+	check("没有注入硬提示（预算尚未耗尽）", !injectedAt(result, 2, hard) && !injectedAt(result, 3, hard), "hard 未出现");
+	check("目标工具已交卷 → success", result.subtype === "success", String(result.subtype));
+	check("Deliver 工具真实执行", result.deliverCalls.includes("页面正文"), JSON.stringify(result.deliverCalls));
+	check("共 4 次模型请求（2 工作 + 1 交卷 + 1 收尾）", result.callCount === 4, `callCount=${result.callCount}`);
+}
+
+// ---------------------------------------------------------------------------
+// 场景 6：预算耗尽 + 模型仍不交卷 → before_tool 熔断 + 强制交卷 + error_budget_exhausted
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 6：预算耗尽 → before_tool 熔断 + before_run_end 强制交卷 → error_budget_exhausted");
+{
+	const hard = "【预算硬提示】立即交卷";
+	const result = await runScenario({
+		contextWindow: 200000,
+		// 预算 300：第 2 次响应（400）即耗尽
+		budget: { maxTokens: 300, forcedTurns: 1, notices: { soft: "【预算软提示】", hard }, outputTools: ["Deliver"] },
+		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+		usage: makeUsage(150, 50),
+		prompt: "开始",
+		tools: [bigTool, deliverTool],
+		responses: [
+			// 1) 200
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
+			// 2) 400 → 耗尽；该次 tool call 会被 before_tool 熔断
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
+			// 3) 模型看到熔断原因后仍在 try to explore → may_finish 边界
+			//     before_run_end 返回硬提示 followUp（强制交卷）
+			fauxAssistantMessage("我还没写完"),
+			// 4) 强制交卷轮：仍然不调用 Deliver → 终止
+			fauxAssistantMessage("还是没有产物"),
+		],
+	});
+
+	check("结果为 error_budget_exhausted", result.subtype === "error_budget_exhausted", String(result.subtype));
+	check(
+		"错误信息为可读文案（含累计 tokens / 预算）",
+		result.errors?.[0]?.includes("Token budget exhausted") === true &&
+			/\d+ \/ 300 tokens/.test(result.errors?.[0] ?? "") === true,
+		result.errors?.join(" | ") ?? "(无)",
+	);
+	check("预算耗尽后的工具调用被熔断", result.toolNames.filter((name) => name === "Big").length === 2, JSON.stringify(result.toolNames));
+	check(
+		"熔断结果携带硬提示文案（模型可见）",
+		result.toolOutputs.some((output) => output.includes(hard)) === true,
+		JSON.stringify(result.toolOutputs.map((output) => output.slice(0, 40))),
+	);
+	check(
+		"before_run_end 的强制交卷 followUp 进入第 4 次请求上下文",
+		injectedAt(result, 3, hard),
+		JSON.stringify(result.capturedUserTexts[3]),
+	);
+	check("目标工具从未执行（没有产物 → 编排层照旧判页失败）", result.deliverCalls.length === 0, JSON.stringify(result.deliverCalls));
+	check("共 4 次模型请求（2 工作 + 1 被熔断 + 1 强制交卷）", result.callCount === 4, `callCount=${result.callCount}`);
+	check("强制交卷轮用尽后不再请求", result.capturedUserTexts.length === 4, `${result.capturedUserTexts.length}`);
+}
+
+// ---------------------------------------------------------------------------
+// 场景 6：预算耗尽前模型自行交卷 → success（不因预算被记失败）
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 7：预算将尽但模型已交卷 → success");
+{
+	const result = await runScenario({
+		contextWindow: 200000,
+		budget: { maxTokens: 300, forcedTurns: 1, notices: { hard: "【预算硬提示】" }, outputTools: ["Deliver"] },
+		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+		usage: makeUsage(150, 50),
+		prompt: "开始",
+		tools: [deliverTool],
+		responses: [fauxAssistantMessage([fauxToolCall("Deliver", { text: "正文" }, { id: "call_1" })]), fauxAssistantMessage("完成")],
+	});
+
+	check("已交卷时预算耗尽不记失败", result.subtype === "success", String(result.subtype));
+	check("Deliver 工具执行过", result.deliverCalls.includes("正文"), JSON.stringify(result.deliverCalls));
+}
+
+// ---------------------------------------------------------------------------
+// 场景 8：不限制预算（maxTokens=0）→ 不注入提示、不因预算终止
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 8：未配置 token 预算（0）→ 不注入提示、不因预算终止");
+{
+	const notice = "【预算提示】";
+	const result = await runScenario({
+		contextWindow: 200000,
+		budget: { maxTokens: 0, notices: { soft: notice, hard: notice } },
+		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+		usage: makeUsage(100_000, 100_000),
+		prompt: "开始",
+		responses: [
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_3" })]),
+			fauxAssistantMessage("全部完成"),
+		],
+	});
+
+	check("不限制预算时不被预算打断", result.subtype === "success", String(result.subtype));
+	check(
+		"不限制预算时不注入任何提示",
 		result.capturedUserTexts.every((texts) => texts.every((text) => !text.includes(notice))),
 		JSON.stringify(result.capturedUserTexts),
 	);
+	check("3 个工作轮 + 输出轮 = 4 次请求", result.callCount === 4, `callCount=${result.callCount}`);
+}
+
+// ---------------------------------------------------------------------------
+// 场景 9：usage 事件是权威来源（累计口径 = input+output+cache）
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 9：usage 事件/ledger 提供权威累计用量");
+{
+	// 每次响应 200 input + 50 output + 50 cacheRead = 300 → 第 3 次即累计 900
+	const result = await runScenario({
+		contextWindow: 200000,
+		budget: { maxTokens: 500, forcedTurns: 0, notices: { hard: "【预算硬提示】" }, outputTools: ["Deliver"] },
+		compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+		usage: { ...makeUsage(200, 50), cacheRead: 50 },
+		prompt: "开始",
+		tools: [bigTool, deliverTool],
+		responses: [
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_1" })]),
+			fauxAssistantMessage([fauxToolCall("Big", { size: 10 }, { id: "call_2" })]),
+			fauxAssistantMessage("没有产物"),
+		],
+	});
+
+	check("cacheRead 计入累计用量（900 > 500 → 耗尽）", result.subtype === "error_budget_exhausted", String(result.subtype));
+	check(
+		"错误信息里的累计 tokens 与 usage ledger 一致",
+		result.errors?.[0]?.includes("900 / 500") === true,
+		result.errors?.[0] ?? "(无)",
+	);
+	check("forcedTurns=0 时不再强制交卷/加段", result.callCount === 3, `callCount=${result.callCount}`);
+}
+
+// ---------------------------------------------------------------------------
+// 场景 10：maxTurns 兼容折算（旧配置字段 → token 预算）
+// ---------------------------------------------------------------------------
+console.log("\n▶ 场景 10：maxTurns 折算成 token 预算");
+{
+	const derived = resolveBudgetOptions({ maxTurns: 30 });
+	const unlimited = resolveBudgetOptions({ maxTurns: 0 });
+	const explicit = resolveBudgetOptions({ maxTurns: 30, budget: { maxTokens: 1234 } });
+	const fallback = resolveBudgetOptions({});
+
+	check(`maxTurns=30 → ${30 * TOKENS_PER_TURN} tokens`, derived.maxTokens === 30 * TOKENS_PER_TURN, String(derived.maxTokens));
+	check("maxTurns=0 → 不限制（0）", unlimited.maxTokens === 0, String(unlimited.maxTokens));
+	check("显式 budget.maxTokens 优先", explicit.maxTokens === 1234, String(explicit.maxTokens));
+	check(`未配置时按缺省 30 轮折算`, fallback.maxTokens === 30 * TOKENS_PER_TURN, String(fallback.maxTokens));
 }
 
 const failed = checks.filter((entry) => !entry.ok);
