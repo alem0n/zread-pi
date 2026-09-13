@@ -16,6 +16,38 @@ export type WikiLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 export type SyncPageStatus = 'unchanged' | 'new' | 'updated' | 'archived';
 
 /**
+ * WikiSection - 顶级分类（分类阶段的产物）
+ *
+ * 蓝图生成改为三阶段后，section 是稳定的一级结构：
+ * 分类阶段只产出 section，主题阶段再把页面增量归并到各 section 下。
+ */
+export interface WikiSection {
+  /** 分类标题（如 "核心架构"） */
+  title: string;
+  /** 分类说明（供分主题 / 标题 Agent 参考） */
+  description?: string;
+}
+
+/**
+ * WikiTopic - 主题阶段的页面草稿（slug/file 由代码统一分配）
+ *
+ * 模型只负责「这个分类下应该写哪些文章」，命名与去重由代码负责；
+ * 标题在标题阶段统一精修，因此这里的 title 是草稿。
+ */
+export interface WikiTopic {
+  /** 草稿标题（文档语言） */
+  title: string;
+  /** 英文短名（kebab-case，用于 slug）；缺省时由代码从 title 派生 */
+  slug?: string;
+  /** 二级模块聚合（可选） */
+  group?: string;
+  /** 难度等级（缺省 Intermediate） */
+  level?: WikiLevel;
+  /** 关联的源文件或目录路径（目录以 / 结尾） */
+  associatedFiles?: string[];
+}
+
+/**
  * WikiPage - Wiki page definition
  */
 export interface WikiPage {
@@ -48,6 +80,13 @@ export interface WikiOutput {
   generated_at: string;
   language: string;
   pages: WikiPage[];
+  /**
+   * 分类阶段落盘的一级结构清单（可选）。
+   *
+   * 三阶段流程中骨架先写 sections、pages 为空，主题/标题阶段再增量补齐；
+   * 旧版 wiki.json 没有该字段，读取方需按「无 sections = 从 pages 推导」处理。
+   */
+  sections?: WikiSection[];
   techStackSummary?: TechStackSummary;
 }
 
