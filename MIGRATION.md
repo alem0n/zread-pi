@@ -1067,3 +1067,11 @@ polish:
 | `bun run test:tui` | smoke-tui 209、real-run 9、output-guard 10、target-dir 26、wiki-generate 单测 28、mock-generate 31（新增「生成页渲染三阶段进度文案」）、browse-server 28 |
 | `bun run test` | 全部套件通过 |
 | `bun run mock:wiki` | `completed=6 failed=0`（夹具 hello-python：3 分类 / 6 页） |
+
+### 17.7 风险与未决
+
+- **分类阶段是单点**：只有 1 个 Agent，失败即整段重试（成本可控——分类输出很小）；后续可考虑「分类失败时回退到从旧 wiki.json / 目录树机械推导基础分类」。
+- **slug 编号顺序不稳定**：section 并发完成顺序决定页面在 wiki.json 中的先后与编号（编号本身连续、无碰撞）；如需稳定顺序，可在阶段 2 结束后按 section 顺序重排并重编号。
+- **sync 的分类刷新是条件触发**：只有「新增文件不属于任何既有页面」时才跑分类阶段；纯重命名/移动目录但未新增文件时，分类不会重划（变更文件仍会落到受影响 section 的增量修补里）。
+- **标题精修会触发重生成**：sync 中标题变化按 `updated` 处理（保证 .md 的 frontmatter 与目录一致）；弱模型若反复微调标题，可能造成不必要的重生成。
+- **归档判定是「关联路径全部消失」**：associatedFiles 填得过宽（例如关联整个仓库根目录）会延迟归档；这属于主题阶段提示词质量问题，不是状态机问题。
