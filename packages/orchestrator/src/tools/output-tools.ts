@@ -1,16 +1,264 @@
 /**
  * Output Tools - Generate and save wiki.json blueprint
+ *
+ * 三阶段蓝图（分类 → 分主题 → 标题）的文件输出工具：
+ * - `submit_sections`：分类阶段写骨架 / 合并分类（sync）；
+ * - `submit_section_topics`：主题阶段按分类增量归并页面（slug/file 由代码分配）；
+ * - `refine_section_titles`：标题阶段批量写回 title。
+ *
+ * `generate_blueprint` / `generate_sync_blueprint` 是旧版一次性蓝图的工具，
+ * 保留仅归档（当前流程不再使用；提示词与测试均不引用）。
  */
 
 import type { ToolDefinition, ToolInputParams, ToolContext, ToolResult } from '@zread-pi/agent-runtime'
-import { generateWikiJson, loadConfig } from '@zread-pi/utils'
-import type { WikiPage } from '@zread-pi/types'
+import {
+  applySectionTitles,
+  generateWikiJson,
+  initWikiSkeleton,
+  loadConfig,
+  mergeSectionTopics,
+  mergeWikiSections,
+  normalizeBlueprintSections,
+  normalizeSectionList,
+} from '@zread-pi/utils'
+import type { WikiPage, WikiSection, WikiTopic } from '@zread-pi/types'
 import type { TechStackSummary } from '../types.js'
 
 /**
- * Generate Blueprint Tool
+ * Submit Sections Tool（分类阶段）
+ *
+ * 写入 wiki.json 骨架：sections（强制包含概览/快速开始/核心架构）+ 空 pages。
+ * sync 流程传 `merge: true`：保留既有分类与页面，只把新增分类补进 sections。
+ */
+export function createSubmitSectionsTool(options: { merge?: boolean } = {}): ToolDefinition {
+  const merge = options.merge === true
+
+  return {
+    name: 'submit_sections',
+    description: merge
+      ? '把更新后的 Wiki 顶级分类（section）清单合并进 wiki.json（既有分类与页面保持不变）。'
+      : '提交 Wiki 顶级分类（section）清单，写入 wiki.json 骨架（sections + 空 pages）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sections: {
+          type: 'array',
+          description: '顶级分类清单（4~8 个；必须包含概览/快速开始/核心架构）',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: '分类标题（简洁中文，≤10 字）' },
+              description: { type: 'string', description: '分类说明（这个分类覆盖什么、面向哪类读者）' },
+            },
+            required: ['title'],
+          },
+        },
+      },
+      required: ['sections'],
+    },
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    isEnabled: () => true,
+    async prompt() {
+      return merge ? 'Merge the updated section list into wiki.json.' : 'Write the wiki.json skeleton with sections.';
+    },
+    async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      try {
+        const sections = normalizeSectionList(input.sections)
+        if (sections.length === 0) {
+          return {
+            type: 'tool_result',
+            tool_use_id: '',
+            content: '错误: sections 数组不能为空',
+            is_error: true,
+          }
+        }
+
+        const config = await loadConfig()
+
+        if (merge) {
+          const merged = await mergeWikiSections(sections, config)
+          return {
+            type: 'tool_result',
+            tool_use_id: '',
+            content: `分类清单已合并（${merged.length} 个分类）:\n` +
+              merged.map((section) => `- ${section.title}`).join('\n'),
+          }
+        }
+
+        const normalized = normalizeBlueprintSections(sections, config.doc_language)
+        const outputPath = await initWikiSkeleton(normalized, config)
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: `Wiki 骨架已生成: ${outputPath}\n\n分类清单（${normalized.length} 个）:\n` +
+            normalized.map((section) => `- ${section.title}${section.description ? `：${section.description}` : ''}`).join('\n'),
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: `写入分类清单失败: ${message}`,
+          is_error: true,
+        }
+      }
+    },
+  }
+}
+
+/** 生成流程使用的单例（写入新骨架） */
+export const SubmitSectionsTool: ToolDefinition = createSubmitSectionsTool()
+
+/**
+ * Submit Section Topics Tool（主题阶段，按分类绑定）
+ *
+ * `section` 参数在 schema 中保留（模型需要确认自己在给哪个分类规划），
+ * 但实际归并一律使用闭包绑定的期望分类——模型写错也不至于整段失败。
+ */
+export function createSubmitSectionTopicsTool(
+  section: WikiSection,
+  options: { reuseExisting?: boolean } = {},
+): ToolDefinition {
+  return {
+    name: 'submit_section_topics',
+    description: `提交分类「${section.title}」的文章主题（topic）清单；代码统一分配 slug/file 并增量归并进 wiki.json。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        section: { type: 'string', description: `分类标题（必须为 "${section.title}"）` },
+        topics: {
+          type: 'array',
+          description: '该分类下的文章主题（3~10 篇）',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: '草稿标题（≤20 字）' },
+              slug: { type: 'string', description: '英文 kebab-case 短名（用于 URL）' },
+              group: { type: 'string', description: '二级模块聚合（可选）' },
+              level: { type: 'string', description: '难度等级（Beginner/Intermediate/Advanced）' },
+              associatedFiles: {
+                type: 'array',
+                items: { type: 'string' },
+                description: '关联的源文件或目录路径（目录以 / 结尾）',
+              },
+            },
+            required: ['title'],
+          },
+        },
+      },
+      required: ['section', 'topics'],
+    },
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    isEnabled: () => true,
+    async prompt() {
+      return `Submit page topics for section "${section.title}".`;
+    },
+    async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      try {
+        const topics = Array.isArray(input.topics) ? (input.topics as unknown as WikiTopic[]) : []
+        const incomingSection = typeof input.section === 'string' ? input.section.trim() : ''
+        const result = await mergeSectionTopics(section, topics, {
+          reuseExisting: options.reuseExisting,
+        })
+
+        const mismatch =
+          incomingSection && incomingSection.toLowerCase() !== section.title.trim().toLowerCase()
+            ? `\n（模型传入的分类 "${incomingSection}" 与预期 "${section.title}" 不一致，已按预期分类归并）`
+            : ''
+
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content:
+            `分类「${result.section}」主题已归并：新增 ${result.added}，复用 ${result.reused}，去重 ${result.duplicated}\n` +
+            `该分类现有 ${result.sectionPages} 篇；wiki.json 总计 ${result.totalPages} 篇${mismatch}`,
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: `归并主题失败: ${message}`,
+          is_error: true,
+        }
+      }
+    },
+  }
+}
+
+/**
+ * Refine Section Titles Tool（标题阶段，按分类绑定）
+ *
+ * 只写回 title；slug / file / section 保持不变。
+ */
+export function createRefineSectionTitlesTool(section: WikiSection): ToolDefinition {
+  return {
+    name: 'refine_section_titles',
+    description: `批量写回分类「${section.title}」下所有页面的精修标题（只改 title）。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        section: { type: 'string', description: `分类标题（必须为 "${section.title}"）` },
+        titles: {
+          type: 'array',
+          description: '该分类下所有页面的 slug + 精修标题',
+          items: {
+            type: 'object',
+            properties: {
+              slug: { type: 'string', description: '页面 slug（逐字保留，不得改动）' },
+              title: { type: 'string', description: '精修后的标题（≤20 字）' },
+            },
+            required: ['slug', 'title'],
+          },
+        },
+      },
+      required: ['section', 'titles'],
+    },
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    isEnabled: () => true,
+    async prompt() {
+      return `Refine page titles for section "${section.title}".`;
+    },
+    async call(input: ToolInputParams, _context: ToolContext): Promise<ToolResult> {
+      try {
+        const titles = Array.isArray(input.titles)
+          ? (input.titles as unknown as Array<{ slug?: string; title?: string }>)
+          : []
+        const incomingSection = typeof input.section === 'string' ? input.section.trim() : ''
+        const result = await applySectionTitles(section, titles)
+
+        const mismatch =
+          incomingSection && incomingSection.toLowerCase() !== section.title.trim().toLowerCase()
+            ? `\n（模型传入的分类 "${incomingSection}" 与预期 "${section.title}" 不一致，已按预期分类写回）`
+            : ''
+
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content:
+            `分类「${section.title}」标题已写回：更新 ${result.updated}，跳过 ${result.skipped}，未知 slug ${result.unknown}${mismatch}`,
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          type: 'tool_result',
+          tool_use_id: '',
+          content: `写回标题失败: ${message}`,
+          is_error: true,
+        }
+      }
+    },
+  }
+}
+
+/**
+ * Generate Blueprint Tool（旧版，仅归档）
  *
  * Generates wiki.json blueprint and saves to wiki directory.
+ * 三阶段流程改用 `submit_sections` / `submit_section_topics` / `refine_section_titles`。
  */
 export const GenerateBlueprintTool: ToolDefinition = {
   name: 'generate_blueprint',
@@ -247,11 +495,10 @@ export const ValidateBlueprintTool: ToolDefinition = {
 }
 
 /**
- * Generate Sync Blueprint Tool
+ * Generate Sync Blueprint Tool（旧版，仅归档）
  *
  * Generates wiki.json with sync status flags on each page.
- * Unlike GenerateBlueprintTool, this is used during sync flow and
- * expects each page to include a `status` field.
+ * 三阶段同步改用 `submit_sections`（merge）+ 主题/标题阶段 + 代码侧 SyncDiff 计算。
  */
 export const GenerateSyncBlueprintTool: ToolDefinition = {
   name: 'generate_sync_blueprint',
