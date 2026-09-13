@@ -39,6 +39,7 @@
 - **三层 Repo Map** —— 目录拓扑 → 高频签名 → 按需深挖。超大规模仓库也不会撑爆上下文预算。
 - **三阶段蓝图** —— 分类 → 分主题 → 标题，每个章节由独立 Agent 并行规划，slug 与编号由代码统一分配；不再让一个 Agent 一次性吐全量目录，文章数更充足，单个章节失败也不影响其余。
 - **五档蓝图细节（`blueprint.detail`）** —— 从 `minimal`（1 个分类 · 1 篇全景导览，必须 Mermaid 架构图，适合快速了解）到 `max`（每分类 5~12 篇、深挖关联文件），默认 `high` 与旧行为一致；数量越界先由模型按归并 / 补充策略重提，仍不收敛则由缩编 Agent 或代码确定性兜底，生成永不悬挂。
+- **多档共存 + 浏览切换** —— 每个档位的完整产物独立存放（`wiki/<档位>/`，互不覆盖）；浏览站侧边栏底部提供上拉档位选择器（显示各档位篇数，当前高亮），切换时同 slug 页面保留、否则落到新档位首页。旧的无档位产物以「默认」条目只读兼容。
 - **仓库自述注入** —— 目标仓库若有 `AGENTS.md` / `CLAUDE.md`（含大小写变体与全局 `~/.zread-pi`），会把里面的架构说明与约定注入页面 Agent 的系统提示，让生成的 Wiki 与仓库自述保持一致。
 - **文风纪律（humanizer）** —— 按文档语言注入两套精炼的「反 AI 腔」写作纪律（基于 Wikipedia "Signs of AI Writing"）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，代码块 / `Sources:` 溯源行 / Mermaid 引号标签 / frontmatter 全程受保护，润色失败不会让页面失败。
 - **符号级增量缓存** —— 基于 AST hash；未变更的符号跨运行直接跳过，Wiki 同步只重新生成源码确实变过的页面。
@@ -98,7 +99,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `zread-pi`               | 默认命令 —— 打开 Wiki TUI；检测已有文档时提供 生成 / 同步 / 浏览 选项      |
 | `zread-pi wiki`          | 显式 Wiki 生成入口（与默认命令同一 TUI）                                   |
 | `zread-pi config`        | 交互式配置编辑器 —— Provider、API Key、模型、思考深度、最大轮次（折算 token 预算）、蓝图细节档位、文风润色、外部工具  |
-| `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）                    |
+| `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
 
@@ -257,11 +258,15 @@ slug、文件编号与去重全部由代码统一分配（不依赖模型命名�
 your-project/
 └── .zread-pi/
     ├── wiki/
-    │   ├── wiki.json                    # 蓝图：页面、分区、技术栈摘要
-    │   ├── current/
-    │   │   └── {section}/{page}.md      # 生成的 Markdown 页面（当前版本）
-    │   └── archived/<快照名>/
-    │       └── {section}/{page}.md      # 同步时归档的旧页面快照
+    │   ├── minimal/                    # 每个档位一套独立完整产物（互不覆盖）
+    │   ├── low/
+    │   ├── medium/
+    │   ├── high/                       # 默认档位
+    │   │   ├── wiki.json               # 蓝图：页面、分区、技术栈摘要、档位
+    │   │   ├── {section}/{page}.md      # 生成的 Markdown 页面（当前版本）
+    │   │   └── archived/<快照名>/        # 同步时归档的旧页面快照
+    │   ├── max/
+    │   └── wiki.json                   # 旧版遗留目录（只读兼容，浏览站显示为「默认」）
     └── cache/
         ├── last_manifest.json           # 文件扫描结果
         └── last_symbols.json            # AST-hash 符号缓存

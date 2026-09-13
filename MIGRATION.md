@@ -1170,3 +1170,80 @@ AI 归并 + 代码兜底」四层机制，代码不替 AI 做语义决策。
   （同步的目标是增量修补）。
 - **合计用量口径**：缩编 subagent 的用量进入 `CatalogEvent.usage` 聚合（与阶段 Agent 同池），
   但底部合计的「页维度」口径不变；polish 用量仍只记在 `PageResult.polish`（见 §16.6）。
+
+---
+
+## 19. 多档共存 + 浏览切换（第十七步）
+
+### 19.1 目标与存储布局
+
+让同一仓库可以同时保留多个档位的完整产物，并在浏览站里一键切换；遗留的无档位产物保持只读可用。
+
+```
+.zread-pi/wiki/
+  minimal/   wiki.json + <section>/<file>.md + archived/<快照>/
+  low/       …
+  medium/    …
+  high/      …
+  max/       …
+  wiki.json  ← 旧版遗留（只读兼容，browse 中显示为「默认」）
+```
+
+- 每个档位子目录是一套独立完整产物（目录 + 全部页面文件），互不覆盖、可共存；
+- 新生成一律写档位子目录；遗留的无档位 `wiki/wiki.json` 不再写入；
+- `WikiOutput.detail?` 记录生成档位（旧文件无该字段，读取以目录名 / 请求参数为准）。
+
+### 19.2 路径口径与解析规则
+
+`packages/utils/src/file-io.ts` 是唯一路径口径：
+
+- `getWikiDir(detail?)` / `getWikiJsonPath(detail?)`：传档位 = `wiki/<detail>`；不传 / null = 遗留 `wiki/`；
+- `listWikiVariants(wikiRoot?)`：枚举「wiki.json 可解析且 pages 为数组」的档位子目录 + 遗留目录，
+  返回 `WikiVariantInfo { detail, legacy, generatedAt, pagesCount, sectionsCount }`（档位顺序 + 遗留最后）；
+- `resolveWikiVariant(preferred?, wikiRoot?)`：配置档位对应的变体存在 → 用它；否则遗留；否则第一个档位；
+  都没有 → `undefined`（`wikiRoot` 供 browse 服务器传入目标项目路径，不依赖进程 cwd）。
+
+### 19.3 各层落点
+
+| 层 | 改动 |
+|---|---|
+| utils wiki-content | 全部落盘/加载函数新增可选 `variant`（`initWikiSkeleton` / `mergeWikiSections` / `mergeSectionTopics` / `applySectionTitles` / `writeWikiPages` / `loadWikiBlueprint(path?, variant?)` / `generateWikiJson(..., variant?)`）；骨架写入 `WikiOutput.detail` |
+| utils storage/wiki-store | `new WikiStore(detail?)`：页面源目录 = 变体目录（顺带修正归档源为 `<section>/<file>`），归档到 `<变体>/archived/<快照>/<section>/` |
+| orchestrator | `generateWikiCatalog(onEvent?, { detail? })`（缺省 = 配置档位）写入目标档位；`syncWiki(onEvent?, { detail? })`（缺省解析活动变体）只读写一个变体；阶段上下文新增 `variant` / `detail`，输出工具经 `variant` 注入目录 |
+| 页面生成 | `generateWikiContent({ detail? })`：catalog / 页面文件 / 落盘兜底 / `createWritePageTool(variant)` / 提示词输出路径全部随变体；`buildPagePrompt(page, spec, variant?)` |
+| CLI 生成/同步控制器 | 首页 store 区分「活动变体」（任一档位，状态标题 + 浏览入口）与「写盘目标」（配置档位）：生成 / 继续 / 管理 / 同步 / 强制重新生成均作用于配置档位；遗留目录不会被写入（强制重新生成只清理目标档位子目录）；归档 `new WikiStore(detail)` |
+| CLI 完整文档判定 | 首页与 `adoptExistingProject` 改为「任一档位（含遗留）完整即算已有文档」，逐一检查每个变体 |
+| browse 服务端 | 新增 `GET /api/wiki/variants`（含 `active`）；`catalog` / `content/:slug` / `source` 接受 `?detail=`：缺省 = 配置档位 → 遗留 → 第一个存在；`default` = 遗留；非法值 / 档位不存在 → 404；页面文件按变体目录解析 |
+| browse 前端 | `types` 新增 `WikiVariant` / `WikiVariantsResponse`；`wikiApi` 三个方法加 `detail` 参数 + `getVariants()`；`WikiContext` 新增 `variants` / `detail` / `setDetail`（重拉 catalog、同 slug 保留否则落首页、重展开目录树）；`WikiSidebar` 底部上拉选择器（名称 + 篇数，当前高亮） |
+
+### 19.4 契约与兼容
+
+- 均为新增可选参数 / 字段：`getWikiDir(detail?)`、`getWikiJsonPath(detail?)`、`listWikiVariants()`、`resolveWikiVariant()`、
+  各落盘函数的 `variant`、`WikiOutput.detail?`、API `?detail=`；旧调用点零改动（不传 variant = 遗留目录）。
+- 遗留目录只读兼容：browse 无任何档位目录时行为与现状完全一致（默认解析到遗留目录）；
+  CLI 对遗留目录仅提供浏览 / 补录，写操作统一落到配置档位。
+- 兼容边界：`listWikiVariants` 接受 `wikiRoot` 参数，供 browse 服务器对目标项目（而非进程 cwd）枚举变体。
+
+### 19.5 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:blueprint` | e2e-blueprint 29/29（产物落在 `wiki/high/`）；blueprint-detail 95/95（工具级用例按变体目录落盘 / 读取；新增变体枚举与遗留兼容）；e2e-sync 19/19（sync 只作用于 high 变体）；context-files 11/11；style-discipline 17/17 |
+| `bun run test:pages` | e2e-page-generation 19/19（页面落在 `wiki/high/`）；page-output-fallback 7/7（遗留路径救援链不变）；page-polish 16/16 |
+| `bun run test:browse` | 50/50（新增 variants API / `?detail=` / 非法值 404 / 缺失档位 404 / 遗留回退 / 多档并存 / 变体目录正文解析 / 仅有变体的目录识别；无 `apps/browse/dist` 时含 4 项 Vite 兜底） |
+| `bun run test:tui` | smoke-tui 225、real-run 9、output-guard 10、target-dir 36、wiki-generate 单测 28、mock-generate 42、browse-server 50；`render-all-routes` 21 个路由 |
+| `bun run test:history` | 61 + 24 + 11（adopt 新增「档位变体（wiki/high）完整自动登记」） |
+| `bun run test` | 全部套件通过（EXIT=0） |
+| `bun run browse:build` | 前端 tsc -b + vite build 通过（删除 dist 以保留 test:browse 的 Vite 兜底覆盖） |
+| `bun run mock:wiki` | `completed=5 failed=0`（产物在 `fixtures/hello-python/.zread-pi/wiki/low/`） |
+
+### 19.6 风险与未决
+
+- **多档产物无自动清理**：每个档位目录独立保留，磁盘占用随档位数线性增长；后续可在配置界面加「删除某档位产物」（未实现）。
+- **编辑配置档位后旧变体不变为「活动」**：`resolveWikiVariant` 优先配置档位，切回旧档位需把配置改回去；
+  浏览站的档位选择器不修改配置（仅当次浏览）。
+- **遗留目录无写入路径**：遗留项目需通过「生成文档 / 强制重新生成」产出配置档位产物后才能同步 / 管理；
+  浏览页的「默认」条目仅用于阅读。
+- **browse 缺省档位依赖服务端配置**：`loadConfigSync()` 读的是 CLI 进程的用户配置；多用户共享同一项目目录时以启动服务器的用户配置为准。
+
