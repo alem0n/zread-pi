@@ -1,9 +1,10 @@
-import { readFile, writeFile } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
 import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
-import { ensureDir } from '../file-io';
+import { ensureDir, writeTextFileAtomic } from '../file-io';
+import { withFileLock } from '../lockfile.js';
 import { getProjectHome, projectHomePath } from '../project-home.js';
 import { toolIds } from '../tools/registry';
 
@@ -319,8 +320,13 @@ export function validateConfig(raw: unknown): AppConfig {
 export async function saveConfig(config: AppConfig): Promise<void> {
   validateConfig(config);
   const yamlContent = stringify(config);
-  await ensureDir(dirname(getConfigPath()));
-  await writeFile(getConfigPath(), yamlContent, 'utf-8');
+  const configPath = getConfigPath();
+  // 跨进程锁 + 原子替换：并行的 CLI 实例 / TUI 配置界面不会写出半截 YAML；
+  // 锁获取失败会抛错，由 ConfigStore.save() 捕获并提示「保存失败」。
+  await withFileLock(configPath, async () => {
+    await ensureDir(dirname(configPath));
+    await writeTextFileAtomic(configPath, yamlContent);
+  });
 }
 
 export function getDefaultLanguage(config: AppConfig): string {

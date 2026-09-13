@@ -9,7 +9,8 @@
  * - 多个 Provider 的凭据互不覆盖，天然支持「同时配置多个提供商」；
  * - 凭据（可能含 OAuth refresh token）不进 config.yaml。
  *
- * 写入策略：先写临时文件再 rename（原子替换），并按 Provider 串行化 read-modify-write。
+ * 写入策略：先写临时文件再 rename（原子替换），并按 Provider 串行化 read-modify-write；
+ * 跨进程用 `<auth.json>.lock` 文件锁保护整个「读-改-写」（见 @zread-pi/utils 的 lockfile.ts）。
  */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -21,7 +22,7 @@ import type {
   CredentialInfo,
   CredentialStore,
 } from '@earendil-works/pi-ai';
-import { getZreadAuthPath } from '@zread-pi/utils';
+import { getZreadAuthPath, withFileLock } from '@zread-pi/utils';
 
 type AuthFileData = Record<string, Credential>;
 
@@ -118,17 +119,18 @@ export class FileCredentialStore implements CredentialStore {
   ): Promise<Credential | undefined> {
     return this.enqueue(
       providerId,
-      async () => {
-        const data = await this.readAll();
-        const current = data[providerId];
-        const next = await fn(current);
-        options?.signal?.throwIfAborted();
-        if (next !== undefined) {
-          data[providerId] = next;
-          await this.writeAll(data);
-        }
-        return next ?? current;
-      },
+      () =>
+        withFileLock(this.filePath, async () => {
+          const data = await this.readAll();
+          const current = data[providerId];
+          const next = await fn(current);
+          options?.signal?.throwIfAborted();
+          if (next !== undefined) {
+            data[providerId] = next;
+            await this.writeAll(data);
+          }
+          return next ?? current;
+        }),
       options,
     );
   }
@@ -136,13 +138,14 @@ export class FileCredentialStore implements CredentialStore {
   delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
     return this.enqueue(
       providerId,
-      async () => {
-        const data = await this.readAll();
-        if (providerId in data) {
-          delete data[providerId];
-          await this.writeAll(data);
-        }
-      },
+      () =>
+        withFileLock(this.filePath, async () => {
+          const data = await this.readAll();
+          if (providerId in data) {
+            delete data[providerId];
+            await this.writeAll(data);
+          }
+        }),
       options,
     );
   }

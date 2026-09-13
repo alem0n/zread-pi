@@ -16,6 +16,7 @@ import { rename, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { HistoryFormatError, HistoryLog, type HistoryLogEntry } from './binary-log.js';
 import { mapWithConcurrency } from './concurrency.js';
+import { withFileLock } from '../lockfile.js';
 import { projectHomePath, ZREAD_PI_DIR_NAME } from '../project-home.js';
 
 /** 记忆中二进制文件的文件名 */
@@ -85,21 +86,36 @@ function toRecord(entry: HistoryLogEntry): ProjectRecord {
 }
 
 /**
+ * 在跨进程文件锁下执行一次「读 → 改 → 写」。
+ *
+ * HistoryLog 在内存里持有整份文件缓冲，多个 CLI 实例同时 open + 写会互相覆盖
+ * （最坏情况是后写的进程把前一个进程刚追加的记录整段丢掉）。锁必须是
+ * 「open 之前获取、写完之后释放」，因此所有公开读写入口都走这里。
+ */
+async function withHistoryLock<T>(task: () => Promise<T>): Promise<T> {
+  return withFileLock(getHistoryPath(), task);
+}
+
+/**
  * 写入一条全局记忆（开始生成文档时调用）。
  *
  * @param projectPath 项目目录，缺省为当前工作目录；内部会归一化为绝对路径
  * @returns 写入的记录（含偏移）
  */
 export async function rememberProject(projectPath: string = process.cwd()): Promise<ProjectRecord> {
-  const log = await openHistory();
-  const entry = await log.append(normalizeProjectPath(projectPath));
-  return toRecord(entry);
+  return withHistoryLock(async () => {
+    const log = await openHistory();
+    const entry = await log.append(normalizeProjectPath(projectPath));
+    return toRecord(entry);
+  });
 }
 
 /** 顺序读出全部记忆（最旧的在前；不检查目录是否存在） */
 export async function readHistory(): Promise<ProjectRecord[]> {
-  const log = await openHistory();
-  return log.entries().map(toRecord);
+  return withHistoryLock(async () => {
+    const log = await openHistory();
+    return log.entries().map(toRecord);
+  });
 }
 
 /**
@@ -112,23 +128,29 @@ export async function readHistory(): Promise<ProjectRecord[]> {
  * @returns 是否新增（false = 已在名单中，未改动）
  */
 export async function ensureProjectRecorded(projectPath: string = process.cwd()): Promise<boolean> {
-  const log = await openHistory();
-  const normalized = normalizeProjectPath(projectPath);
-  if (log.entries().some((entry) => entry.path === normalized)) return false;
-  await log.append(normalized);
-  return true;
+  return withHistoryLock(async () => {
+    const log = await openHistory();
+    const normalized = normalizeProjectPath(projectPath);
+    if (log.entries().some((entry) => entry.path === normalized)) return false;
+    await log.append(normalized);
+    return true;
+  });
 }
 
 /** 删除某个项目的记录；返回是否删掉了 */
 export async function forgetProject(projectPath: string): Promise<boolean> {
-  const log = await openHistory();
-  return log.remove(normalizeProjectPath(projectPath));
+  return withHistoryLock(async () => {
+    const log = await openHistory();
+    return log.remove(normalizeProjectPath(projectPath));
+  });
 }
 
 /** 清空全局记忆 */
 export async function clearHistory(): Promise<void> {
-  const log = await openHistory();
-  await log.clear();
+  return withHistoryLock(async () => {
+    const log = await openHistory();
+    await log.clear();
+  });
 }
 
 /**
@@ -139,28 +161,32 @@ export async function clearHistory(): Promise<void> {
  *  3. 返回剩余记录。
  */
 export async function pruneHistory(options: HistoryPruneOptions = {}): Promise<HistoryPruneResult> {
-  const log = await openHistory();
-  const entries = log.entries();
   const concurrency = Number.isFinite(options.concurrency)
     ? Math.max(1, Math.floor(options.concurrency as number))
     : DEFAULT_PRUNE_CONCURRENCY;
 
+  // 1) 锁内取快照（避免读到别的进程写一半的文件），锁外并发检查目录是否存在。
+  const entries = await withHistoryLock(async () => (await openHistory()).entries());
   const checks = await mapWithConcurrency(entries, concurrency, async (entry) => ({
     entry,
     alive: await hasLocalOutput(entry.path),
   }));
 
-  const removed: string[] = [];
-  for (const { entry, alive } of checks) {
-    if (alive) continue;
-    if (await log.remove(entry)) removed.push(entry.path);
-  }
+  // 2) 回到锁内应用删除：重新 open 拿最新状态，避免覆盖期间其它进程的追加。
+  return withHistoryLock(async () => {
+    const log = await openHistory();
+    const removed: string[] = [];
+    for (const { entry, alive } of checks) {
+      if (alive) continue;
+      if (await log.remove(entry)) removed.push(entry.path);
+    }
 
-  return {
-    scanned: entries.length,
-    removed,
-    remaining: log.entries().map(toRecord),
-  };
+    return {
+      scanned: entries.length,
+      removed,
+      remaining: log.entries().map(toRecord),
+    };
+  });
 }
 
 /** 项目目录下是否还有本地产物目录（`<project>/.zread-pi`，且必须是目录） */
