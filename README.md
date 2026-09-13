@@ -44,7 +44,7 @@
 - **图片读取管线** —— `Read` 读图片时自动缩放到 2000×2000 / 4.5MB 以内（省 token、避免被 provider 拒收），BMP 等非内联格式自动转 PNG，并给出坐标换算提示。
 - **上下文自动压缩** —— 由 pi 的 AgentHarness 内建承担：接近模型上下文上限时自动生成摘要（compact boundary）继续工作；实在腾不出空间时优雅停止，而不是等 provider 报上下文溢出。
 - **token 预算 + 两段式提示** —— 预算按 harness 的 usage 事件/账本累计真实 tokens（不是数轮次）：用到约 70% 时注入软提示收敛，预算将尽时注入硬提示并给强制交卷轮，避免「探索不停、从不产出」。
-- **生成过程可见的用量账本** —— 生成页底部实时合计全部 Agent（目录 + 每个页面，含失败页）的输入 token、输出 token 与缓存读占比；口径来自 pi 的 usage 账本（输入侧含缓存读写），多页并发生成时合计也不会重复计数。
+- **生成过程可见的用量账本** —— 生成页底部实时合计全部 Agent（目录 + 每个页面，含失败页与重试轮次）的输入 token、输出 token 与缓存读占比；口径来自 pi 的 usage 账本（输入侧含缓存读写），按 `r` 重新生成不会清空已消耗的用量，多页并发生成时合计也不会重复计数。
 - **思考深度可选** —— 7 档 thinking level（off → max），由模型能力自动 clamp，不支持的档位清楚标注。
 - **Provider 无关** —— 统一抽象 Anthropic Messages 与 OpenAI Chat Completions 协议；在 TUI 里选 Provider、贴 API Key、
   挑模型，三步完成，可同时配置多个 Provider。
