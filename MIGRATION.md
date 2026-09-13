@@ -904,4 +904,85 @@ polish:
   极端情况下 polish Agent 可能反复小改。后续可把它并入配置界面（模型/预算）。
 - **Mermaid 是唯一的结构性复检**：polish 若删掉 `Sources:` 行或改坏 frontmatter 不会被自动发现
   （纪律里明确禁止，但无程序化校验）；后续可加「frontmatter 字段与溯源行数量不减」的校验。
-- **成本不透明**：`PageResult.polish.tokenUsage` 目前只进日志与结果对象，生成界面尚未展示 polish 用量。
+- **成本不透明**：`PageResult.polish.tokenUsage` 目前只进日志与结果对象，生成界面尚未展示 polish 用量（第十四步的底部合计同样不含它，见 §16.6）。
+
+## 16. 生成页底部展示用量合计（第十四步）
+
+### 16.1 目标
+
+生成文档界面（`/wiki/generate`）最下方实时展示**全部 Agent 的合计用量**：输入 token、输出 token、缓存读占比。
+长任务里不用再逐行拼每个页面的瞬时数字——失败页的消耗也不再消失在视野里。
+
+### 16.2 pi 提供了什么（先分析、优先复用）
+
+| pi 能力 | 内容 | 本次怎么用 |
+|---|---|---|
+| `pi-ai` 的 `Usage` | `input` / `output` / `cacheRead` / `cacheWrite` / `totalTokens` / `cost`；缓存读写单独记账 | 适配层 `harness/events.ts` 已映射为 `TokenUsage`（字段名冻结），直接沿用 |
+| harness 的 `usage` 事件 | `{ row: UsageRow, totals: Usage }`，`totals` = 该会话 usage ledger 的累计值 | `harness/driver.ts` 已在消费（预算判定 + `result.usage`），本次不新开销 |
+| `pi-agent-core` 的 `emptyUsage` / `addUsage` | 归并 pi `Usage` 的纯函数 | **不可直接用**：未从包根导出（只服务 compaction），且作用在 pi 内部形状上 |
+| 跨 Agent / 跨会话聚合器 | —— | **pi 未提供**：每个页面 Agent 是独立 session + 独立 ledger，合计属于业务层 |
+
+结论：**每个 Agent 的累计值继续取 pi 的 usage ledger（已有链路），跨 Agent 合计由业务层做纯函数 reduce。**
+在 `packages/agent-runtime/src/usage.ts` 提供了 `emptyTokenUsage` / `addTokenUsage` / `sumTokenUsage`
+作为唯一归并口径（与 pi `addUsage` 同一加法语义，但作用于业务契约的 `TokenUsage`）。
+
+### 16.3 口径
+
+- `input_tokens` 是**非缓存输入**（pi 口径：Anthropic `input_tokens`、OpenAI `prompt_tokens - cached_tokens`）；
+- **输入侧总量** = `input + cache_read + cache_creation`（展示的「输入」就是这个值）；
+- **缓存占比** = `cache_read / 输入侧总量`（没有输入时为 0，不出现 NaN / Infinity）；
+- 失败页 / 失败目录带**最后一次累计快照**：原先失败事件不带 usage，会让已消耗的 token 记成 0。
+
+### 16.4 并发正确性（多页 p-limit 同时生成）
+
+合计**不是**共享计数器上的增量累加，而是渲染时对「每页自己的累计快照」做一次**幂等 reduce**
+（`apps/cli/src/views/wiki-generate/usage.ts` 的 `collectUsageTotals`）：
+
+| 并发问题 | 派生 reduce 的答案 |
+|---|---|
+| 多页事件交错到达 | 每页的用量只写自己的 state 槽位；单线程事件循环内顺序应用，互不覆盖 |
+| 同一份快照重复上报（`requesting` / `responding` / `tool_*` 携带同一快照） | reduce 重算不变；增量累加会重复计数 |
+| 事件到达顺序 | 与顺序无关（加法可交换） |
+| 页面重新生成（`r`） | 该页槽位被重置，旧用量自然不再计入 |
+| 失败页 / 失败目录 | 事件带最后一次快照 + mapper `event.usage ?? 旧值` 兜底 |
+| 运行中快照不是累计值 | `create-agent.ts` 把 assistant 事件的**单次响应用量**累加成累计快照（最终由 result 的 ledger 值覆盖） |
+
+### 16.5 改动清单
+
+| 位置 | 改动 |
+|---|---|
+| `packages/agent-runtime/src/usage.ts`（新增） | `emptyTokenUsage` / `addTokenUsage` / `sumTokenUsage` |
+| `packages/agent-runtime/src/index.ts` | 导出上述三个纯函数 |
+| `packages/orchestrator/src/agents/create-agent.ts` | assistant 的 usage 从「覆盖为最后一次响应」改为**累加**；`error` 事件带上累计用量 |
+| `packages/orchestrator/src/wiki/generate-wiki.ts` | 页面 `onEvent` 记录 `lastUsage`；`page_error` 带上它 |
+| `apps/cli/src/views/wiki-generate/usage.ts`（新增） | `toUsageTotals` / `collectUsageTotals` / `cacheHitRatio` / `formatPercent` |
+| `apps/cli/src/views/wiki-generate/index.ts` | 底部导航下方渲染合计行（用量为 0 时不渲染、不占行）；i18n `wikiGenerate.usageTotals` |
+| `apps/cli/src/views/wiki-generate/mapper.ts` | 失败事件缺用量时保留最后一次快照 |
+| `package.json` | `test:tui` 增加 `bun test apps/cli/src/views/wiki-generate/__tests__` |
+
+### 16.6 行为差异 / 边界
+
+- 中间事件的 `usage` 从「最后一次响应的用量」变为「该 Agent 运行至今的累计快照」：单行显示随生成推进单调增长，
+  与底部合计同一口径（契约字段没变，语义更贴合 mapper 里既有的「usage 已是累积总量」注释）。
+- **polish 用量不在合计里**：`polish.mode=full` 的 polish Agent 用量记在 `PageResult.polish.tokenUsage`，
+  没有进入 TUI 事件（见 §15.7），合计只覆盖目录 Agent + 页面 Agent。
+- `mode=manage` 打开的文档全部已存在时没有任何用量，合计行不渲染（不占屏幕行）。
+
+### 16.7 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:agent` | 19/19（新增 `addTokenUsage` / `sumTokenUsage` 纯函数断言） |
+| `bun run test:pages` | 16/16 + 7/7 + 16/16（新增：预算耗尽页的 `page_error` 带累计用量 `{"input_tokens":150,"output_tokens":50}`） |
+| `bun test apps/cli/src/views/wiki-generate/__tests__` | 15/15（事件映射 + 用量合计：幂等 / 页重置 / 失败快照 / 0 分母边界） |
+| `bun run test:tui` | smoke-tui 209、real-run 9、output-guard 10、target-dir 25、**wiki-generate 单测 15**、mock-generate 25（新增 4 项：底部合计的输入 / 输出 / 缓存占比 + 「合计行是最后一行」）、browse-server 28 |
+| `bun run test` | 全部套件通过（catalog 34、agent 19、tools 102、installer 70、history 61+24+10、lock 10、http 12、provider 5、analyzer 5+17、blueprint 10+11+17、pages 16+7+16、context 45、tui 209+9+10+25+15+25+28） |
+| `bun run mock:wiki` | `completed=4 failed=0` |
+
+### 16.8 风险与未决
+
+- **缺失末轮用量**：Agent 抛错（非 result 事件路径）时 `page_error` 带的是最后一次事件快照，
+  不是 ledger 终值；对合计是可接受的近似（失败页仍会计入），后续可让适配层在异常路径也回报 ledger。
+- **polish 用量未并入**：需要改 `ArticleEventPayload` / `PageStatus` 才能把 `polish.tokenUsage` 带进 TUI（未做）。
+- **合计不区别模型计价**：只统计 token，不折算费用（`TokenUsage` 不含 cost；pi 的 `Usage.cost` 在映射时被丢弃）。
