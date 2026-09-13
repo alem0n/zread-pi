@@ -9,7 +9,7 @@
  * 新增：per-provider 配置与自定义模型（同时配置多个 Provider）。
  */
 
-import type { AppConfig, CustomModelConfig, LlmProviderConfig } from "@zread-pi/types";
+import type { AppConfig, CustomModelConfig, LlmProviderConfig, PolishMode } from "@zread-pi/types";
 import { DEFAULT_CONFIG, isFirstTimeConfig, loadConfig, saveConfig } from "@zread-pi/utils";
 
 export class ConfigStore {
@@ -101,6 +101,23 @@ export class ConfigStore {
     this.config.llm.provider = providerId;
     this.config.llm.model = modelId;
     this.setProviderConfig(providerId, { model: modelId });
+  }
+
+  // ==================== 文风润色（/config/polish） ====================
+
+  /** 风格纪律开关（缺省启用；关闭后既不注入提示也不跑 polish Agent） */
+  isPolishEnabled(): boolean {
+    return this.config.polish?.enabled ?? true;
+  }
+
+  /** 当前润色模式（缺省 prompt-only） */
+  getPolishMode(): PolishMode {
+    return this.config.polish?.mode ?? "prompt-only";
+  }
+
+  /** 由 /config/polish 维护：开关与模式整体写回 */
+  setPolish(enabled: boolean, mode: PolishMode): void {
+    this.config.polish = { enabled, mode };
   }
 
   // ==================== 外部工具（rg / fd …） ====================

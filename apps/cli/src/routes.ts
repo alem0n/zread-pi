@@ -13,6 +13,7 @@ import ConfigDocLanguagePage from "./views/config-doc-language";
 import ConfigHomePage from "./views/config-home";
 import ConfigLanguagePage from "./views/config-language";
 import ConfigMaxTurnsPage from "./views/config-max-turns";
+import ConfigPolishPage from "./views/config-polish";
 import ConfigProviderDetailPage from "./views/config-provider-detail";
 import ConfigProviderPage from "./views/config-provider";
 import ConfigRetryPage from "./views/config-retry";
@@ -39,6 +40,7 @@ export const routes: RouteDefinition[] = [
   { pattern: "/config/retry", create: () => new ConfigRetryPage() },
   { pattern: "/config/thinking", create: () => new ConfigThinkingPage() },
   { pattern: "/config/max-turns", create: () => new ConfigMaxTurnsPage() },
+  { pattern: "/config/polish", create: () => new ConfigPolishPage() },
   // 外部工具（rg / fd）：列表 → 详情（安装/卸载/启用开关 + 安装进度条）
   { pattern: "/config/tools", create: () => new ConfigToolsPage() },
   { pattern: "/config/tools/:toolId", create: () => new ConfigToolDetailPage() },

@@ -37,6 +37,7 @@ export const zhCN: TranslationKeys = {
     llmProvider: 'LLM 提供商',
     thinkingLevel: '思考深度',
     maxTurns: '最大轮次',
+    polish: '文风润色',
     maxConcurrency: '最大并发数',
     maxRetries: '最大重试次数',
     default: '(默认: {default})',
@@ -192,6 +193,21 @@ export const zhCN: TranslationKeys = {
     invalid: '请输入 0-100 之间的整数',
     current: '当前值',
     footer: 'ESC 返回 | Enter 确认 | s 保存并返回',
+  },
+  polish: {
+    title: '设置文风纪律与页面润色',
+    current: '当前值',
+    intro:
+      '第 1 层预防（默认）：把文风纪律注入系统提示，零额外成本；第 2 层兜底（full）：每页落盘后额外跑一次润色 Agent，效果更好但每页多一次 LLM 调用。',
+    enabled: '已启用',
+    disabled: '已停用',
+    modePromptOnly: '仅提示注入',
+    modePromptOnlyDesc: '第 1 层预防：只把文风纪律拼进系统提示，不增加任何 LLM 调用',
+    modeFull: '完整模式',
+    modeFullDesc: '预防 + 第 2 层兜底：每页落盘后额外跑一次润色 Agent（失败不判页失败）',
+    layersHint:
+      '两种模式下，代码块、行内代码、Sources: 溯源行、Mermaid 引号标签与 YAML frontmatter 都受保护。',
+    footer: 'ESC 返回 | ↑↓ 选择 | Enter 确认并返回 | t 启用/停用 | s 保存并返回',
   },
   tools: {
     title: '外部工具',

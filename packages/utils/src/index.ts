@@ -67,6 +67,11 @@ export {
   MAX_MAX_TURNS,
   normalizeMaxTurns,
   normalizeToolsConfig,
+  DEFAULT_POLISH_ENABLED,
+  DEFAULT_POLISH_MODE,
+  POLISH_MODES,
+  isPolishMode,
+  normalizePolishConfig,
 } from './config/index.js';
 
 // 外部工具（注册表 / 安装器 / 归档解包），配置界面 /config/tools 与 agent-runtime 共用

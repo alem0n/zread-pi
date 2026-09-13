@@ -14,6 +14,7 @@ import { getProjectHome, loadConfig, logger } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
 import { loadProjectContextFiles, withProjectContext } from './context-files.js';
+import { withStyleDiscipline } from './style-discipline.js';
 
 /**
  * 创建 Blueprint Agent 的选项
@@ -30,6 +31,11 @@ export interface CreateBlueprintAgentOptions {
   maxTurns?: number;
   /** 显式 token 预算（覆盖 config 与 maxTurns 折算）；0 / 缺省 = 用 config */
   tokenBudget?: number;
+  /**
+   * 自定义系统提示（polish Agent 用）：给定后**完全替换**默认的
+   * 「内置语言提示 + <project_context> + 文风纪律」组合，由调用方自备全文。
+   */
+  systemPrompt?: string;
   /** 进度回调（可选） */
   onEvent?: (event: CatalogEvent) => void;
 }
@@ -194,9 +200,23 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   logger.info(`System prompt doc_language: ${docLanguage} => "${SYSTEM_PROMPTS[docLanguage]}"`);
   // 目标仓库自述（AGENTS.md / CLAUDE.md …）注入系统提示：仓库若有架构说明/约定术语，
   // 让生成的 wiki 与仓库自述一致，减少纯靠读代码的猜测（见 context-files.ts）。
-  const contextFiles = loadProjectContextFiles({ cwd: process.cwd(), agentDir: getProjectHome() });
-  if (contextFiles.length > 0) {
-    logger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
+  // 文风纪律（humanizer）作为最后一段追加：排在 <project_context> 之后，蓝图与页面 Agent 同时生效。
+  const styleEnabled = config.polish?.enabled !== false;
+  let systemPrompt: string;
+  if (options.systemPrompt !== undefined) {
+    // polish Agent 自备系统提示（纪律 + Embedded mode），不叠加项目上下文
+    systemPrompt = options.systemPrompt;
+  } else {
+    const contextFiles = loadProjectContextFiles({ cwd: process.cwd(), agentDir: getProjectHome() });
+    if (contextFiles.length > 0) {
+      logger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
+    }
+    systemPrompt = withStyleDiscipline(
+      withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
+      docLanguage,
+      styleEnabled,
+    );
+    logger.info(`文风纪律（humanizer）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
   }
   const agent = CreateAgentSdk({
     model,
@@ -205,7 +225,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     providerId,
     cwd: process.cwd(),
     tools: options.tools,
-    systemPrompt: withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
+    systemPrompt,
     maxTurns,
     budget: {
       // 显式 token 预算（不传则由 maxTurns 折算，见 resolveBudgetOptions）

@@ -817,3 +817,91 @@ zread-pi 侧的接入差异：
   prune 的目录探测已移出锁外，主要耗时不在锁内。
 - **`AutoCompact` 与锁**：`HistoryLog` 自身的 compact / 修复写仍在锁内执行（经公开入口进入），
   直接使用 `HistoryLog` 的外部调用方需要自行持锁（当前仓库没有这种调用方）。
+
+## 15. 引入 humanizer 文风纪律与页面级 polish（第十三步）
+
+### 15.1 目标
+
+把两份外部 humanizer skill（`humanizer` / `humanizer-zh`，基于 Wikipedia "Signs of AI writing"）引入编排器，
+让生成的 wiki 读起来更像人写的，同时**不破坏本项目的文档结构约定**（代码块、`Sources:` 溯源行、
+Mermaid 引号标签、YAML frontmatter）。分两层落地：零成本的预防层（默认开）+ 可选的兜底层。
+
+| 层 | 时机 | 成本 | 默认 |
+|---|---|---|---|
+| 1 预防 | 蓝图 / 页面 Agent 的系统提示注入 | 0 次额外调用（只是提示词变长） | 开（`polish.enabled: true`） |
+| 2 兜底 | 页面 `write_page` 成功 + 落盘兜底之后 | 每页多 1 次 polish Agent（成功时通常 2 次请求） | 关（`polish.mode: prompt-only`） |
+
+### 15.2 第 1 层：vendored 纪律文件 + 提示注入
+
+- `packages/orchestrator/src/prompts/humanizer.en.md`（来源：blader/humanizer SKILL.md v3.0.0，MIT）
+- `packages/orchestrator/src/prompts/humanizer.zh.md`（来源：humanizer-zh，翻译自 blader/humanizer）
+
+精炼规则：保留模式清单（§1–§25）+ 核心规则 + 交付前检查清单，**删除教学式 before/after 长例**，
+并新增本项目专属的「绝对不许动」保护段（代码块 / 行内代码 / `Sources:` 行 / Mermaid 引号标签 / YAML frontmatter /
+标题层级与表格结构）。两份文件各 60~80 行，文件头 HTML 注释注明来源与精炼方式（`test:blueprint` 有断言守门）。
+
+| 模块 | 职责 |
+|---|---|
+| `agents/style-discipline.ts` | 加载两份 `.md`（`import ... with { type: 'text' }`）、按 `doc_language` 选择、生成 `<writing_discipline>` 注入块与 polish 提示词 |
+| `agents/create-agent.ts` | 系统提示 = 语言提示 + `<project_context>` + `<writing_discipline>`（纪律块**排在 project_context 之后**）；`polish.enabled=false` 时整块不注入 |
+| 蓝图 / 页面 Agent | 共用 `createAgent`，因此两层入口同时生效，零业务改动 |
+
+`create-agent.ts` 另新增可选 `systemPrompt`：给定后完全替换默认组合（供 polish Agent 自备系统提示）。
+
+### 15.3 第 2 层：`wiki/polish.ts` 的兜底润色
+
+`generate-wiki.ts` 在页面文件确认落盘（含写错路径的兜底移动）之后调用 `polishPageFile()`：
+
+- **同一模型、换一套系统提示**：纪律全文 + Embedded mode 输出约定（humanizer skill 自带的概念：
+  只回最终文本；这里进一步收缩为「用 Read/Edit 就地改文件，最终只回一行 `POLISHED` / `NO_CHANGE`」）；
+- **工具只给 `Read` / `Edit` / `Ls`**：没有 `write_page`，防止 polish Agent 重写整页；
+- **独立小 token 预算**：`DEFAULT_POLISH_TOKEN_BUDGET = 60000`，不占用页面 Agent 的预算；
+- **失败语义**：polish 失败不判页失败（页面产物已存在，polish 是增强不是必需，与 history 写入「失败不阻断」同一哲学）。
+  Agent 抛错只会写进 `PageResult.polish.error` 与日志；
+- **唯一的结构性复检**：polish 完成后重跑 `validateMermaidContent`（从 `page-tools.ts` 导出），
+  若改坏 Mermaid 则把文件回滚到 polish 前的内容并告警（`reason: 'mermaid-rollback'`）；
+- **结果回传**：`PageResult.polish`（新增可选字段）记录 `applied / reason / error / durationMs / tokenUsage`。
+
+### 15.4 配置面
+
+```yaml
+polish:
+  enabled: true      # 总开关；false = 既不注入纪律也不跑 polish Agent
+  mode: prompt-only  # prompt-only（默认）| full
+```
+
+- 旧 `config.yaml` 无 `polish` 段：`normalizePolishConfig()` 补齐 `{ enabled: true, mode: 'prompt-only' }`；
+  `polish.mode = 'full'` 但 `enabled = false` 时以 `enabled` 为准（不会跑 Agent）。
+- 配置界面新增 `/config/polish`：↑↓ 选择模式、Enter 应用并返回、`t` 启用/停用、`s` 保存并返回；
+  `ConfigStore.setPolish()` 整体写回（避免 `setField` 的 `string | number` 限制）。
+- 默认不开 `full` 的原因：它每页多一次 LLM 调用，成本接近翻倍，留给用户显式选择。
+
+### 15.5 打包与跨平台
+
+- `.md` 文本导入：Bun（源码运行 / 测试）走 import attributes `with { type: 'text' }`；
+  tsup / esbuild **原生 text loader 不接受该属性**（`Importing with a type attribute of "text" is not supported`），
+  因此由共用插件 `tools/tsup-md-text.ts`（`apps/cli` 与 `packages/orchestrator` 两处 tsup 配置的 `esbuildPlugins`）
+  接管 `.md` 的 resolve/load，直接生成 `export default "..."` 字符串模块；
+  `packages/orchestrator/src/prompts/md.d.ts` 提供 `*.md` 的类型声明。打包产物不依赖运行时读文件，天然跨平台。
+- polish Agent 打开的是绝对路径，Edit 工具的 CRLF/BOM 归一化与同文件串行化沿用既有实现（见 §1.3）。
+
+### 15.6 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:blueprint` | 10/10 + 11/11 + 17/17（新增：蓝图系统提示带 `<writing_discipline>` 且排在 `<project_context>` 之后；纪律纯函数 17 项含 vendored 行数守门） |
+| `bun run test:pages` | 15/15 + 7/7 + 16/16（新增 `page-polish.ts`：Edit 真实生效、Mermaid 回滚、no-change / Agent 失败不判页失败、prompt-only / enabled=false 开关语义） |
+| `bun run test:tui` | smoke-tui 209 项（新增文风润色页 19 项断言，含开关/模式写回与落盘）、全部 20 个路由渲染无超宽行 |
+| `bun run test` | 全部套件通过（catalog 34、tools 102、installer 70、history 61+24+10、lock 10、http 12、provider 5、analyzer 5+17、blueprint 10+11+17、pages 15+7+16、context 45、tui 209+9+10+25+21+28） |
+| `bun run mock:wiki` | `completed=4 failed=0` |
+| `cd apps/cli && bun run build` | 成功（`.md` 纪律已内联进产物） |
+
+### 15.7 风险与未决
+
+- **prompt-only 的效果依赖模型**：纪律是提示而非硬校验，弱模型可能仍写出 AI 腔；需要更硬的保证时用户可切 `full`。
+- **polish 的评估成本**：`AppConfig` 里没有「每页最大润色轮数」，只靠 60k token 预算与 Embedded mode 约束；
+  极端情况下 polish Agent 可能反复小改。后续可把它并入配置界面（模型/预算）。
+- **Mermaid 是唯一的结构性复检**：polish 若删掉 `Sources:` 行或改坏 frontmatter 不会被自动发现
+  （纪律里明确禁止，但无程序化校验）；后续可加「frontmatter 字段与溯源行数量不减」的校验。
+- **成本不透明**：`PageResult.polish.tokenUsage` 目前只进日志与结果对象，生成界面尚未展示 polish 用量。

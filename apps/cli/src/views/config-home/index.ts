@@ -73,6 +73,20 @@ const configItems: ConfigItem[] = [
     route: "/config/max-turns",
   },
   {
+    // 文风纪律 / 页面润色（humanizer）：开关 + prompt-only / full 两档
+    key: "polish",
+    labelKey: "config.polish",
+    getValue: (config, t) => {
+      const enabled = config.polish?.enabled ?? true;
+      const mode = config.polish?.mode ?? "prompt-only";
+      const stateLabel = enabled ? t("polish.enabled") : t("polish.disabled");
+      const modeLabel = mode === "full" ? t("polish.modeFull") : t("polish.modePromptOnly");
+      return `${stateLabel} · ${modeLabel}`;
+    },
+    default: "prompt-only",
+    route: "/config/polish",
+  },
+  {
     // 外部工具：展示就绪数量（rg / fd），详情见 /config/tools。
     // 注意：getValue 会在每次渲染时被调用，而状态探测要 spawn 子进程，
     // 因此这里只读页面初始化/返回时缓存的值（见 ConfigHomePage.toolsSummary）。

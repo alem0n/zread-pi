@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
 import { ensureDir, writeTextFileAtomic } from '../file-io';
 import { withFileLock } from '../lockfile.js';
 import { getProjectHome, projectHomePath } from '../project-home.js';
@@ -45,6 +45,36 @@ export function normalizeMaxTurns(value: unknown): number {
     if (Number.isInteger(parsed) && parsed >= MIN_MAX_TURNS) return parsed;
   }
   return DEFAULT_MAX_TURNS;
+}
+
+/**
+ * 文风纪律 / 页面润色（humanizer）配置
+ *
+ * - enabled=false = 完全关闭（既不注入风格纪律，也不跑 polish Agent）；
+ * - mode='prompt-only'（默认）= 只做第 1 层预防（系统提示注入，零额外调用）；
+ * - mode='full' = 预防 + 第 2 层兜底（每页落盘后多跑一次轻量 polish Agent）。
+ */
+export const DEFAULT_POLISH_ENABLED = true;
+export const DEFAULT_POLISH_MODE: PolishMode = 'prompt-only';
+
+/** 配置界面可选的全部润色模式（顺序即展示顺序） */
+export const POLISH_MODES: PolishMode[] = ['prompt-only', 'full'];
+
+/** 判断任意值是否是合法的润色模式 */
+export function isPolishMode(value: unknown): value is PolishMode {
+  return value === 'prompt-only' || value === 'full';
+}
+
+/** 归一化润色配置：非法/缺省值回退默认（启用 + prompt-only），旧 config.yaml 无需迁移 */
+export function normalizePolishConfig(value: unknown): PolishConfig {
+  const raw =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_POLISH_ENABLED,
+    mode: isPolishMode(raw.mode) ? raw.mode : DEFAULT_POLISH_MODE,
+  };
 }
 
 /**
@@ -141,6 +171,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     max_turns: DEFAULT_MAX_TURNS,
     token_budget: DEFAULT_TOKEN_BUDGET,
   },
+  polish: normalizePolishConfig(undefined),
   tools: normalizeToolsConfig(undefined),
   concurrency: {
     max_concurrent: 1,
@@ -309,6 +340,8 @@ export function validateConfig(raw: unknown): AppConfig {
       max_turns: normalizeMaxTurns(agent.max_turns),
       token_budget: normalizeTokenBudget(agent.token_budget),
     },
+    // 旧配置没有 polish 段：归一化为「启用 + prompt-only」
+    polish: normalizePolishConfig(config.polish),
     tools: normalizeToolsConfig(config.tools),
     concurrency: {
       max_concurrent: concurrency.max_concurrent as number,
