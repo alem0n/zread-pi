@@ -330,6 +330,14 @@ export const enUS: TranslationKeys = {
     retry: 'Regenerate',
     exit: 'Exit',
     usageTotals: 'Total input {input} · output {output} · cache hit {ratio}',
+    // Per-agent rows: input / output / cache hit / context usage
+    metricsCache: 'cache {ratio}',
+    metricsContext: 'context {used}/{window} ({ratio})',
+    // Catalog agent row labels (classify / topics / titles / condense subagent)
+    agentClassify: 'Classify',
+    agentTopics: 'Topics · {section}',
+    agentTitles: 'Titles · {section}',
+    agentCondense: 'Condense · {section}',
     // Three-stage blueprint: stage switch + per-section progress
     stageClassify: 'Classifying',
     stageTopics: 'Topics {current}/{total}',

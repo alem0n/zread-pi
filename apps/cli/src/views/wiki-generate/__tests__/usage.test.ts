@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { cacheHitRatio, collectUsageTotals, formatPercent, slotUsageTotal, toUsageTotals } from '../usage';
+import { cacheHitRatio, collectUsageTotals, contextUsage, formatPercent, slotUsageTotal, toUsageTotals } from '../usage';
 import type { ArticlesState, CatalogState, PageStatus, TokenUsage } from '../types';
 
 const catalogState = (usage?: TokenUsage): CatalogState => ({ status: 'completed', usage });
@@ -167,6 +167,23 @@ describe('slotUsageTotal', () => {
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
     });
+  });
+});
+
+describe('contextUsage', () => {
+  test('已用 / 窗口 → 占比', () => {
+    expect(contextUsage(24_000, 200_000)).toEqual({ used: 24_000, window: 200_000, ratio: 0.12 });
+  });
+
+  test('缺窗口 / 缺已用 / 非正数时返回 null（UI 省略该片段）', () => {
+    expect(contextUsage(1500, undefined)).toBeNull();
+    expect(contextUsage(undefined, 200_000)).toBeNull();
+    expect(contextUsage(0, 200_000)).toBeNull();
+    expect(contextUsage(1500, 0)).toBeNull();
+  });
+
+  test('窗口溢出时如实展示（ratio > 1）', () => {
+    expect(contextUsage(250_000, 200_000)).toEqual({ used: 250_000, window: 200_000, ratio: 1.25 });
   });
 });
 

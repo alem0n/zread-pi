@@ -77,6 +77,29 @@ export function cacheHitRatio(totals: UsageTotals): number {
   return totals.totalInput > 0 ? totals.cacheRead / totals.totalInput : 0;
 }
 
+/** 上下文占比（已用 / 窗口）的展示口径 */
+export interface ContextUsage {
+  /** 最近一次响应的上下文体量 */
+  used: number;
+  /** 模型上下文窗口 */
+  window: number;
+  /** used / window（可超过 1：窗口溢出时如实展示） */
+  ratio: number;
+}
+
+/**
+ * 上下文占比 = 已用 / 上下文窗口。
+ *
+ * 「已用」口径与 pi 的 compaction 判定一致：最近一次响应的
+ * input + output + cacheRead + cacheWrite（不是累计用量）。
+ * 缺窗口（旧事件 / 未上报）时返回 null，UI 省略该片段。
+ */
+export function contextUsage(contextTokens?: number, contextWindow?: number): ContextUsage | null {
+  if (contextTokens === undefined || contextWindow === undefined) return null;
+  if (contextTokens <= 0 || contextWindow <= 0) return null;
+  return { used: contextTokens, window: contextWindow, ratio: contextTokens / contextWindow };
+}
+
 /** 占比文案（一位小数，例如 `62.3%`） */
 export function formatPercent(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;

@@ -103,10 +103,13 @@ export function truncateByDisplayWidth(str: string, maxWidth: number): string {
 }
 
 /**
- * 格式化流量/字节数字
- * 9900 -> 9.9k
+ * 格式化 token / 字节数字
+ * 9900 -> 9.9k；200000 -> 200.0k；1500000 -> 1.5M
  */
 export function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000) {
+    return `${(bytes / 1_000_000).toFixed(1)}M`;
+  }
   if (bytes >= 1000) {
     return `${(bytes / 1000).toFixed(1)}k`;
   }

@@ -267,6 +267,13 @@ export class WikiGenerateController {
       section: rawEvent.section,
       progress: rawEvent.progress,
       failedSections: rawEvent.failedSections,
+      // 逐 Agent 信息（每个 Agent 一行）：身份 / 生命周期 / 行内用量 / 上下文报表值
+      agentKey: rawEvent.agentKey,
+      agentRole: rawEvent.agentRole,
+      agentStatus: rawEvent.agentStatus,
+      agentUsage: rawEvent.agentUsage,
+      contextTokens: rawEvent.contextTokens,
+      contextWindow: rawEvent.contextWindow,
     };
 
     const next = catalogEventToState(this.state.catalog, event);
@@ -275,7 +282,9 @@ export class WikiGenerateController {
       this.options.onChange();
     }
 
-    if (rawEvent.type === "complete") {
+    if (rawEvent.type === "complete" && !rawEvent.agentKey) {
+      // 只处理「整个目录完成」；带 agentKey 的 complete 是单个 Agent 的终态
+      // （每个 Agent 一行），不能触发 reload + 启动文章生成
       void this.handleCatalogComplete();
     }
   }

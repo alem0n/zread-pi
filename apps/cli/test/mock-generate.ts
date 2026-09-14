@@ -387,7 +387,7 @@ async function waitFor(condition: () => boolean, timeoutMs: number, label: strin
     if (condition()) return true;
     await sleep(100);
   }
-  console.error(`  ! 超时未满足条件：${label}`);
+  console.error(`  ! 超时未满足条件：${label}（requests=${requestCount}）`);
   console.error(
     screenText()
       .split("\n")
@@ -431,8 +431,52 @@ check(
   catalogSamples.filter((text) => text.includes("分类中") || /主题 \d+\/\d+/.test(text)).slice(0, 3).join(" || "),
 );
 
+// 目录按 Agent 分类显示：分类 / 每个分类的主题 / 标题各一行（生成中就能看到）
+check(
+  "目录按 Agent 分类显示（主题 · / 标题 · 各一行）",
+  catalogSamples.some((text) => text.includes("主题 · ")) &&
+    catalogSamples.some((text) => text.includes("标题 · ")),
+  catalogSamples.find((text) => text.includes("主题 · "))?.split("\n").filter((line) => line.includes(" · ")).slice(0, 3).join(" || "),
+);
+check(
+  "目录 Agent 行渲染四个状态指标（输入/输出/缓存占比/上下文占比）",
+  catalogSamples.some(
+    (text) =>
+      text.includes("缓存占比") &&
+      text.includes("上下文 ") &&
+      /↑\d/.test(text) &&
+      /↓\d/.test(text),
+  ),
+  catalogSamples.find((text) => text.includes("上下文 "))?.split("\n").find((line) => line.includes("上下文 ")) ?? "(无)",
+);
+
 const allDone = await waitFor(() => screenText().includes("文章 12/12"), 60000, "全部页面生成完成");
 check("十二篇文章全部完成（文章 12/12）", allDone);
+
+// 已完成的目录 Agent 行也要继续显示指标（[完成] 右侧：↑ / ↓ / 缓存占比 / 上下文占比）
+const catalogAgentLines = screenText()
+  .split("\n")
+  .filter((line) => line.includes("分类") || line.includes("主题 · ") || line.includes("标题 · "));
+check(
+  "完成后目录 Agent 行仍显示四个指标（[完成] 右侧）",
+  catalogAgentLines.some(
+    (line) =>
+      line.includes("[完成]") &&
+      /↑\d/.test(line) &&
+      /↓\d/.test(line) &&
+      line.includes("缓存占比") &&
+      line.includes("上下文 "),
+  ),
+  catalogAgentLines.slice(0, 3).join("\n      ") || "(无)",
+);
+
+// 已完成/失败的文章行也要继续显示指标
+const articleLines = screenText().split("\n").filter((line) => line.includes("[完成]"));
+check(
+  "完成后文章行也显示四个指标（[完成] 右侧）",
+  articleLines.some((line) => line.includes("缓存占比") && line.includes("上下文 ")),
+  articleLines[0] ?? "(无)",
+);
 
 // 底部合计行：三阶段目录（分类 / 主题×4 / 标题×4 各 2 次请求 = 18）+ 12 个页面 Agent × 2 = 24，
 // 共 42 次请求；单次请求 60 非缓存输入 + 60 缓存读 + 30 输出

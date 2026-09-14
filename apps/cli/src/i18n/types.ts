@@ -341,6 +341,14 @@ export interface TranslationKeys {
     exit: string;
     /** 底部合计行：输入 / 输出 token 与缓存占比 */
     usageTotals: string;
+    /** 逐 Agent 行：缓存占比 / 上下文占比（已用 / 窗口） */
+    metricsCache: string;
+    metricsContext: string;
+    /** 目录 Agent 行的标签（每个 Agent 一行） */
+    agentClassify: string;
+    agentTopics: string;
+    agentTitles: string;
+    agentCondense: string;
     /** 三阶段蓝图：阶段切换与分类级进度 */
     stageClassify: string;
     stageTopics: string;

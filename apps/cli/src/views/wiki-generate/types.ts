@@ -9,7 +9,7 @@
  */
 
 import type { WikiPage } from '@zread-pi/types';
-import type { TokenUsage, BlueprintFailedSection } from '@zread-pi/orchestrator';
+import type { TokenUsage, BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus } from '@zread-pi/orchestrator';
 
 // ==================== 基础状态类型 ====================
 
@@ -38,7 +38,53 @@ export type ArticleEventType =
 // ==================== 导出外部类型 ====================
 
 export type { WikiPage } from '@zread-pi/types';
-export type { TokenUsage, ArticleEventPayload, BlueprintFailedSection } from '@zread-pi/orchestrator';
+export type {
+  TokenUsage,
+  ArticleEventPayload,
+  BlueprintFailedSection,
+  CatalogAgentRole,
+  CatalogAgentStatus,
+} from '@zread-pi/orchestrator';
+
+// ==================== 目录 Agent 行（每个 Agent 一行） ====================
+
+/**
+ * 单个目录 Agent 的展示状态。
+ *
+ * 目录生成会并发跑多个 Agent（分类 1 个 + 每个分类的主题 / 标题各 1 个，
+ * 数量越界时还有缩编 subagent），UI 为每个 Agent 渲染一行，
+ * 行内用量是该 Agent **自己**的累计快照（不是目录级聚合）。
+ */
+export interface CatalogAgentState {
+  /** 生命周期状态 */
+  status: Status;
+  /** 所属阶段（分类 / 分主题 / 标题） */
+  stage: CatalogStage;
+  /** Agent 角色（缩编 subagent 单独成行） */
+  role: CatalogAgentRole;
+  /** 该 Agent 负责的分类（分类 Agent 无） */
+  section?: string;
+  /** 当前阶段（请求中 / 响应中 / 工具 / 重试） */
+  phase?: CatalogPhase;
+  /** 当前工具名（tool 阶段） */
+  currentTool?: string;
+  /** 该 Agent 自己的累计用量快照 */
+  usage?: TokenUsage;
+  /** 当前上下文体量（最近一次响应的 input + output + cacheRead + cacheWrite） */
+  contextTokens?: number;
+  /** 模型上下文窗口 */
+  contextWindow?: number;
+  /** 耗时（毫秒） */
+  durationMs?: number;
+  /** 错误信息 */
+  error?: string;
+  /** 重试次数（retry 阶段） */
+  retryCount?: number;
+  /** 最大重试次数（retry 阶段） */
+  maxRetries?: number;
+  /** 重试延迟毫秒（retry 阶段） */
+  delayMs?: number;
+}
 
 // ==================== 目录状态 ====================
 
@@ -56,6 +102,8 @@ export interface CatalogState {
   sectionsProgress?: { current: number; total: number };
   /** 分主题 / 标题阶段失败的分类 */
   failedSections?: BlueprintFailedSection[];
+  /** 每个目录 Agent 一行的状态（key = agentKey；插入顺序即展示顺序） */
+  agents?: Record<string, CatalogAgentState>;
   /** Token 使用统计（本轮运行的累计快照） */
   usage?: TokenUsage;
   /**
@@ -85,6 +133,13 @@ export interface PageStatus {
   currentTool?: string;
   /** Token 使用统计（本轮运行的累计快照） */
   usage?: TokenUsage;
+  /**
+   * 该页面 Agent 当前上下文体量（最近一次响应的 input + output + cacheRead + cacheWrite）。
+   * 展示口径为「最近一次响应」，与累计用量 `usage` 不同。
+   */
+  contextTokens?: number;
+  /** 模型上下文窗口（用于「已用 / 窗口」占比） */
+  contextWindow?: number;
   /**
    * 历史轮次已消耗的累计用量（重新生成时把上一轮的 `usage` 结转到此处）。
    * 展示口径 = `carryUsage + usage`：成功 + 失败 + 重试的消耗都留在槽位里。
@@ -155,6 +210,18 @@ export interface CatalogEventPayload {
   section?: string;
   /** 分类级进度（带 stage 的事件） */
   progress?: { current: number; total: number };
+  /** 产生该事件的 Agent 标识（每个 Agent 一行；缺省 = 目录级事件） */
+  agentKey?: string;
+  /** 产生该事件的 Agent 角色 */
+  agentRole?: CatalogAgentRole;
+  /** 该 Agent 的生命周期状态 */
+  agentStatus?: CatalogAgentStatus;
+  /** 该 Agent **自己**的累计用量快照（`usage` 仍是目录级聚合） */
+  agentUsage?: TokenUsage;
+  /** 该 Agent 当前上下文体量 */
+  contextTokens?: number;
+  /** 模型上下文窗口 */
+  contextWindow?: number;
   usage?: TokenUsage;
   error?: string;
   durationMs?: number;

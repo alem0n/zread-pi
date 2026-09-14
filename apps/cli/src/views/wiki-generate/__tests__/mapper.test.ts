@@ -140,6 +140,120 @@ describe('catalogEventToState', () => {
   });
 });
 
+// ==================== 逐 Agent 行（每个 Agent 一行） ====================
+
+describe('catalogEventToState（逐 Agent 行）', () => {
+  const plan = {
+    type: 'requesting' as const,
+    stage: 'topics' as const,
+    section: '核心架构',
+    agentKey: 'topics:核心架构',
+    agentRole: 'topics' as const,
+    agentStatus: 'waiting' as const,
+  };
+
+  test('计划事件建立等待行（还没有用量）', () => {
+    const state = catalogEventToState(initialCatalogState, plan);
+    const agent = state.agents?.['topics:核心架构'];
+
+    expect(state.status).toBe('loading');
+    expect(agent?.status).toBe('waiting');
+    expect(agent?.role).toBe('topics');
+    expect(agent?.section).toBe('核心架构');
+    expect(agent?.usage).toBeUndefined();
+  });
+
+  test('运行事件的行内用量取 agentUsage（不是目录级聚合）', () => {
+    let state = catalogEventToState(initialCatalogState, plan);
+    state = catalogEventToState(state, {
+      type: 'responding',
+      stage: 'topics',
+      section: '核心架构',
+      agentKey: 'topics:核心架构',
+      agentRole: 'topics',
+      agentStatus: 'running',
+      agentUsage: usage,
+      contextTokens: 24_000,
+      contextWindow: 200_000,
+      // 目录级聚合（usage）不能进这一行
+      usage: { input_tokens: 999, output_tokens: 9 },
+    });
+
+    const agent = state.agents?.['topics:核心架构'];
+    expect(agent?.status).toBe('loading');
+    expect(agent?.phase).toBe('responding');
+    expect(agent?.usage).toEqual(usage);
+    expect(agent?.contextTokens).toBe(24_000);
+    expect(agent?.contextWindow).toBe(200_000);
+    expect(state.usage).toEqual({ input_tokens: 999, output_tokens: 9 });
+  });
+
+  test('单个 Agent 的终态事件改行不改目录整体状态', () => {
+    const running = catalogEventToState(initialCatalogState, {
+      ...plan,
+      agentStatus: 'running',
+    });
+
+    const done = catalogEventToState(running, {
+      type: 'complete',
+      stage: 'topics',
+      section: '核心架构',
+      agentKey: 'topics:核心架构',
+      agentRole: 'topics',
+      agentStatus: 'completed',
+      agentUsage: usage,
+      contextTokens: 1000,
+      contextWindow: 200_000,
+      durationMs: 500,
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+
+    expect(done.status).toBe('loading'); // 目录整体仍在跑
+    expect(done.agents?.['topics:核心架构']?.status).toBe('completed');
+    expect(done.agents?.['topics:核心架构']?.durationMs).toBe(500);
+
+    // 业务判失败（markAgentFailed）：Agent 运行正常结束也会被改成失败行
+    const failed = catalogEventToState(done, {
+      type: 'error',
+      stage: 'topics',
+      section: '核心架构',
+      agentKey: 'topics:核心架构',
+      agentRole: 'topics',
+      agentStatus: 'failed',
+      error: '模型未调用 submit_section_topics',
+    });
+
+    expect(failed.status).toBe('loading');
+    const agent = failed.agents?.['topics:核心架构'];
+    expect(agent?.status).toBe('failed');
+    expect(agent?.error).toContain('submit_section_topics');
+    // 终态事件不带用量 / 上下文 / 耗时时，保留旧值（已完成行也要继续显示指标）
+    expect(agent?.usage).toEqual(usage);
+    expect(agent?.contextTokens).toBe(1000);
+    expect(agent?.contextWindow).toBe(200_000);
+    expect(agent?.durationMs).toBe(500);
+  });
+
+  test('目录整体 complete 保留 Agent 行（完成后仍可展示逐 Agent 指标）', () => {
+    const running = catalogEventToState(initialCatalogState, plan);
+    const done = catalogEventToState(running, {
+      type: 'complete',
+      usage: { input_tokens: 1000, output_tokens: 200 },
+      durationMs: 100,
+    });
+
+    expect(done.status).toBe('completed');
+    expect(done.agents?.['topics:核心架构']?.status).toBe('waiting');
+  });
+
+  test('scanning 清空上一轮的 Agent 行（新一轮重新规划）', () => {
+    const running = catalogEventToState(initialCatalogState, { ...plan, agentStatus: 'running' });
+    const restarted = catalogEventToState(running, { type: 'scanning' });
+
+    expect(restarted.agents).toEqual({});
+  });
+});
+
 describe('articleEventToState', () => {
   test('page_error 不带 usage 时保留该页最后一次快照', () => {
     let state = createInitialArticlesState([makePage()]);
@@ -194,6 +308,31 @@ describe('articleEventToState', () => {
     expect(state.pages.a.phase).toBe('retry');
     expect(state.pages.a.usage).toMatchObject(usage);
     expect(slotUsageTotal(state.pages.a)).toMatchObject(usage);
+  });
+
+  test('页面事件带上下文报表值（已用 / 窗口），终态沿用、重新生成清零', () => {
+    let state = createInitialArticlesState([makePage()]);
+    state = articleEventToState(state, { type: 'page_start', slug: 'a' });
+    state = articleEventToState(state, {
+      type: 'responding',
+      slug: 'a',
+      usage,
+      contextTokens: 1500,
+      contextWindow: 200_000,
+    });
+
+    expect(state.pages.a.contextTokens).toBe(1500);
+    expect(state.pages.a.contextWindow).toBe(200_000);
+
+    // 终态事件不带上下文时沿用最后一次（完成行仍能显示上下文占比）
+    state = articleEventToState(state, { type: 'page_complete', slug: 'a', usage, durationMs: 1 });
+    expect(state.pages.a.contextTokens).toBe(1500);
+    expect(state.pages.a.contextWindow).toBe(200_000);
+
+    // 重新生成是新的一轮：不沿用上一轮的上下文报表值
+    state = articleEventToState(state, { type: 'page_start', slug: 'a' });
+    expect(state.pages.a.contextTokens).toBeUndefined();
+    expect(state.pages.a.contextWindow).toBeUndefined();
   });
 
   test('失败页重试：合计 = 上一轮（含失败估算）+ 本轮实时快照（成功 + 失败 + 重试）', () => {

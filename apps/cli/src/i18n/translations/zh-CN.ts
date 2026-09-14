@@ -330,6 +330,14 @@ export const zhCN: TranslationKeys = {
     retry: '重新生成',
     exit: '退出',
     usageTotals: '合计 输入 {input} · 输出 {output} · 缓存占比 {ratio}',
+    // 逐 Agent 行：四个状态指标（输入 / 输出 / 缓存占比 / 上下文占比）
+    metricsCache: '缓存占比 {ratio}',
+    metricsContext: '上下文 {used}/{window} ({ratio})',
+    // 目录 Agent 行标签（分类 / 分主题 / 标题 / 缩编 subagent，每个 Agent 一行）
+    agentClassify: '分类',
+    agentTopics: '主题 · {section}',
+    agentTitles: '标题 · {section}',
+    agentCondense: '缩编 · {section}',
     // 三阶段蓝图：阶段切换与分类级进度
     stageClassify: '分类中',
     stageTopics: '主题 {current}/{total}',

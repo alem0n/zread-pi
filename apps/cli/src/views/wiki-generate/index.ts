@@ -18,8 +18,15 @@ import { Screen } from "../../tui/screen";
 import { theme } from "../../theme";
 import { formatBytes, formatDuration } from "../../utils/display";
 import { WikiGenerateController } from "./controller";
-import { cacheHitRatio, collectUsageTotals, formatPercent, slotUsageTotal } from "./usage";
-import type { WikiPage } from "./types";
+import {
+  cacheHitRatio,
+  collectUsageTotals,
+  contextUsage,
+  formatPercent,
+  slotUsageTotal,
+  toUsageTotals,
+} from "./usage";
+import type { CatalogAgentState, TokenUsage, WikiPage } from "./types";
 
 type ArticleItem = { value: string; page: WikiPage };
 
@@ -177,23 +184,8 @@ export default class WikiGeneratePage extends Screen {
       statusText = this.t(`wikiGenerate.${status}`);
     }
 
-    // 右栏：状态 + Token
-    let rightText = `[${statusText}]`;
-
-    // loading 状态显示 Token（累计显示）
-    if (status === "loading" && usage) {
-      if (usage.input_tokens > 0) rightText += ` ↑${formatBytes(usage.input_tokens)}`;
-      if (usage.output_tokens > 0) rightText += ` ↓${formatBytes(usage.output_tokens)}`;
-    }
-
-    // completed 状态显示耗时和 Token
-    if (status === "completed") {
-      if (durationMs !== undefined) rightText += ` ${formatDuration(durationMs)}`;
-      if (usage) {
-        if (usage.input_tokens > 0) rightText += ` ↑${formatBytes(usage.input_tokens)}`;
-        if (usage.output_tokens > 0) rightText += ` ↓${formatBytes(usage.output_tokens)}`;
-      }
-    }
+    // 右栏：状态 + 用量指标（输入 / 输出 / 缓存占比 / 耗时；完成、失败也照常显示）
+    const rightText = `[${statusText}]` + this.usageSuffix({ usage, durationMs });
 
     const rightColor =
       status === "loading"
@@ -213,7 +205,129 @@ export default class WikiGeneratePage extends Screen {
     return [
       ...new Divider(this.t("wikiGenerate.catalogTitle")).render(width),
       statusRow(width, left, style(rightText, { color: rightColor })),
+      // 目录生成会并发跑多个 Agent：分类 / 每个分类的主题、标题 / 缩编 subagent，
+      // 每个 Agent 一行（其中一行的用量不是目录级聚合，是该 Agent 自己的快照）
+      ...this.renderAgentRows(width),
     ];
+  }
+
+  /** 目录 Agent 行：每个 Agent 一行（按规划顺序，记录 key 的插入顺序即展示顺序） */
+  private renderAgentRows(width: number): string[] {
+    const agents = this.controller.state.catalog.agents;
+    if (!agents) return [];
+    return Object.entries(agents).map(([key, agent]) => this.renderAgentRow(width, key, agent));
+  }
+
+  /** 单个目录 Agent 行：缩进 + 图标 + 角色标签 / 状态 + 四个用量指标 */
+  private renderAgentRow(width: number, key: string, agent: CatalogAgentState): string {
+    const rightText =
+      `[${this.agentStatusText(key, agent)}]` +
+      this.usageSuffix({
+        usage: agent.usage,
+        contextTokens: agent.contextTokens,
+        contextWindow: agent.contextWindow,
+        durationMs: agent.durationMs,
+      });
+
+    const rightColor =
+      agent.status === "loading"
+        ? theme.warning
+        : agent.status === "completed"
+          ? theme.success
+          : agent.status === "failed"
+            ? theme.error
+            : theme.muted;
+
+    const left =
+      "  " +
+      statusIcon(agent.status, "default", this.spinnerFrame) +
+      " " +
+      style(this.agentLabel(agent), { dim: true });
+
+    return statusRow(width, left, style(rightText, { color: rightColor }));
+  }
+
+  /** Agent 标签（分类 / 主题 · 分类名 / 标题 · 分类名 / 缩编 · 分类名） */
+  private agentLabel(agent: CatalogAgentState): string {
+    switch (agent.role) {
+      case "topics":
+        return this.t("wikiGenerate.agentTopics", { section: agent.section ?? "" });
+      case "titles":
+        return this.t("wikiGenerate.agentTitles", { section: agent.section ?? "" });
+      case "condense":
+        return this.t("wikiGenerate.agentCondense", {
+          section: agent.section ?? this.t("wikiGenerate.agentClassify"),
+        });
+      default:
+        return this.t("wikiGenerate.agentClassify");
+    }
+  }
+
+  /** Agent 行的状态文字（等待 / 请求中 / 工具 / 重试倒计时 / 完成 / 失败） */
+  private agentStatusText(key: string, agent: CatalogAgentState): string {
+    if (agent.status === "loading" && agent.phase === "retry") {
+      const seconds = this.retrySeconds(this.agentRetryKey(key), agent.delayMs ?? 10000);
+      return this.t("wikiGenerate.retrying", {
+        n: agent.retryCount ?? 1,
+        max: agent.maxRetries ?? 3,
+        seconds,
+      });
+    }
+    if (agent.status === "loading" && agent.phase === "tool" && agent.currentTool) {
+      const toolDisplay = agent.currentTool.replace(/_/g, " ").replace(/^get /, "");
+      return this.t("wikiGenerate.tool", { name: toolDisplay });
+    }
+    if (agent.status === "loading" && agent.phase) {
+      return this.t(`wikiGenerate.${agent.phase}`);
+    }
+    if (agent.status === "loading") {
+      // 已规划未开始 / 运行开始的瞬间：统一显示请求中
+      return this.t("wikiGenerate.requesting");
+    }
+    if (agent.status === "failed" && agent.error) {
+      return agent.error.split("\n")[0].slice(0, 60);
+    }
+    return this.t(`wikiGenerate.${agent.status}`);
+  }
+
+  /**
+   * 行内用量后缀（右侧状态后追加的指标串）：
+   * 输入侧总量 / 输出 / 缓存占比 / 上下文（已用 / 窗口 + 占比）/ 耗时。
+   * 任一指标无数据时自动省略（不做零值占位）。
+   */
+  private usageSuffix(input: {
+    usage?: TokenUsage;
+    contextTokens?: number;
+    contextWindow?: number;
+    durationMs?: number;
+  }): string {
+    const parts: string[] = [];
+
+    if (input.usage) {
+      const totals = toUsageTotals(input.usage);
+      const tokenParts: string[] = [];
+      if (totals.totalInput > 0) tokenParts.push(`↑${formatBytes(totals.totalInput)}`);
+      if (totals.output > 0) tokenParts.push(`↓${formatBytes(totals.output)}`);
+      if (tokenParts.length > 0) parts.push(tokenParts.join(" "));
+      if (totals.totalInput > 0) {
+        parts.push(this.t("wikiGenerate.metricsCache", { ratio: formatPercent(cacheHitRatio(totals)) }));
+      }
+    }
+
+    const context = contextUsage(input.contextTokens, input.contextWindow);
+    if (context) {
+      parts.push(
+        this.t("wikiGenerate.metricsContext", {
+          used: formatBytes(context.used),
+          window: formatBytes(context.window),
+          ratio: formatPercent(context.ratio),
+        }),
+      );
+    }
+
+    if (input.durationMs !== undefined) parts.push(formatDuration(input.durationMs));
+
+    return parts.length > 0 ? ` ${parts.join(" · ")}` : "";
   }
 
   /** 三阶段状态文字（classify / topics / titles；带分类级进度） */
@@ -321,31 +435,30 @@ export default class WikiGeneratePage extends Screen {
       statusIcon(status, isSelected ? "active" : "default", this.spinnerFrame) +
       style(" " + page.title, { bold: isSelected });
 
+    // 右栏指标（输入 / 输出 / 缓存占比 / 上下文占比 / 耗时）
+    // 口径：用量 = 历史结转 + 本轮快照；上下文 = 最近一次响应（与累计用量不同）。
+    // 完成 / 失败也照常显示（要求：即便已完成也在 [完成] 右侧显示）。
+    const suffix = this.usageSuffix({
+      usage,
+      contextTokens: pageState?.contextTokens,
+      contextWindow: pageState?.contextWindow,
+      durationMs: pageState?.durationMs,
+    });
+
     // 重试状态使用特殊逻辑（带倒计时）
     if (isRetrying) {
       const seconds = this.retrySeconds(page.slug, delayMs);
-      let countdownText = `[${this.t("wikiGenerate.retrying", {
-        n: retryCount,
-        max: maxRetries,
-        seconds,
-      })}]`;
-      if (usage) {
-        if (usage.input_tokens > 0)
-          countdownText += ` ↑${formatBytes(usage.input_tokens)}`;
-        if (usage.output_tokens > 0)
-          countdownText += ` ↓${formatBytes(usage.output_tokens)}`;
-      }
+      const countdownText =
+        `[${this.t("wikiGenerate.retrying", {
+          n: retryCount,
+          max: maxRetries,
+          seconds,
+        })}]` + suffix;
       return statusRow(width, left, style(countdownText, { color: rightColor }));
     }
 
     // 普通状态
-    let rightText = `[${statusText}]`;
-    if (status === "loading" && usage) {
-      if (usage.input_tokens > 0)
-        rightText += ` ↑${formatBytes(usage.input_tokens)}`;
-      if (usage.output_tokens > 0)
-        rightText += ` ↓${formatBytes(usage.output_tokens)}`;
-    }
+    const rightText = `[${statusText}]` + suffix;
 
     return statusRow(width, left, style(rightText, { color: rightColor }));
   }
@@ -357,6 +470,11 @@ export default class WikiGeneratePage extends Screen {
     return Math.max(0, Math.ceil((delayMs - (Date.now() - startedAt)) / 1000));
   }
 
+  /** 目录 Agent 的倒计时 key（与页面 slug 共用一张表，前缀避免重名） */
+  private agentRetryKey(key: string): string {
+    return `agent:${key}`;
+  }
+
   /** 目录或任一文章是否处于 loading 状态（决定 spinner 是否需要转动） */
   private hasLoadingItem(): boolean {
     if (this.controller.state.catalog.status === "loading") return true;
@@ -366,7 +484,7 @@ export default class WikiGeneratePage extends Screen {
     );
   }
 
-  /** 同步 retry 状态的倒计时起点；返回是否仍有页面在重试 */
+  /** 同步 retry 状态的倒计时起点（页面 + 目录 Agent）；返回是否仍有条目在重试 */
   private syncRetryStates(): boolean {
     const statusMap = this.controller.state.articles.pages;
     let anyRetrying = false;
@@ -382,6 +500,21 @@ export default class WikiGeneratePage extends Screen {
         this.retryStartedAt.delete(page.slug);
       }
     }
+
+    // 目录 Agent 行（分类 / 主题 / 标题 / 缩编）也要倒计时
+    const agents = this.controller.state.catalog.agents ?? {};
+    for (const [key, agent] of Object.entries(agents)) {
+      const mapKey = this.agentRetryKey(key);
+      if (agent.status === "loading" && agent.phase === "retry") {
+        if (!this.retryStartedAt.has(mapKey)) {
+          this.retryStartedAt.set(mapKey, Date.now());
+        }
+        anyRetrying = true;
+      } else {
+        this.retryStartedAt.delete(mapKey);
+      }
+    }
+
     return anyRetrying;
   }
 }

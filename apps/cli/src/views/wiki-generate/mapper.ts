@@ -11,6 +11,7 @@
 import type { ArticleEventPayload, TokenUsage } from '@zread-pi/orchestrator';
 import { sumTokenUsage } from '@zread-pi/agent-runtime';
 import type {
+  CatalogAgentState,
   CatalogState,
   ArticlesState,
   PageStatus,
@@ -54,6 +55,7 @@ function catalogStateEquals(a: CatalogState, b: CatalogState): boolean {
     a.sectionsProgress?.current === b.sectionsProgress?.current &&
     a.sectionsProgress?.total === b.sectionsProgress?.total &&
     (a.failedSections ?? null) === (b.failedSections ?? null) &&
+    agentsEqual(a.agents, b.agents) &&
     tokenUsageEquals(a.usage, b.usage) &&
     tokenUsageEquals(a.carryUsage, b.carryUsage) &&
     a.durationMs === b.durationMs &&
@@ -62,6 +64,120 @@ function catalogStateEquals(a: CatalogState, b: CatalogState): boolean {
     a.maxRetries === b.maxRetries &&
     a.delayMs === b.delayMs
   );
+}
+
+function agentStateEquals(a: CatalogAgentState, b: CatalogAgentState): boolean {
+  return (
+    a.status === b.status &&
+    a.stage === b.stage &&
+    a.role === b.role &&
+    a.section === b.section &&
+    a.phase === b.phase &&
+    a.currentTool === b.currentTool &&
+    tokenUsageEquals(a.usage, b.usage) &&
+    a.contextTokens === b.contextTokens &&
+    a.contextWindow === b.contextWindow &&
+    a.durationMs === b.durationMs &&
+    a.error === b.error &&
+    a.retryCount === b.retryCount &&
+    a.maxRetries === b.maxRetries &&
+    a.delayMs === b.delayMs
+  );
+}
+
+function agentsEqual(
+  a?: Record<string, CatalogAgentState>,
+  b?: Record<string, CatalogAgentState>,
+): boolean {
+  if (a === b) return true;
+  const aKeys = a ? Object.keys(a) : [];
+  const bKeys = b ? Object.keys(b) : [];
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => {
+    const left = a?.[key];
+    const right = b?.[key];
+    return left !== undefined && right !== undefined && agentStateEquals(left, right);
+  });
+}
+
+/** 事件 → 单个 Agent 行的状态（`agentStatus` 缺省按事件类型推断；running 映射为展示态的 loading） */
+function agentStatusFor(event: CatalogEventPayload): CatalogAgentState['status'] {
+  switch (event.agentStatus) {
+    case 'running':
+      return 'loading';
+    case 'waiting':
+      return 'waiting';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    default:
+      break;
+  }
+  if (event.type === 'complete') return 'completed';
+  if (event.type === 'error') return 'failed';
+  return 'loading';
+}
+
+/** 事件类型 → Agent 行内的阶段（终态 / 计划态没有 phase） */
+function agentPhaseFor(event: CatalogEventPayload): CatalogAgentState['phase'] {
+  switch (event.type) {
+    case 'requesting':
+      return 'requesting';
+    case 'responding':
+      return 'responding';
+    case 'tool_start':
+      return 'tool';
+    case 'tool_result':
+      return 'responding';
+    case 'retry':
+      return 'retry';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * 把「某个 Agent 的事件」写进行状态表（每个 Agent 一行）。
+ *
+ * - `usage` 是目录级聚合，行内用量取 `agentUsage`（该 Agent 自己的累计快照）；
+ * - 终态事件可能不带 phase / 工具 / 上下文：用行内旧值兼底；
+ * - 已终态的行不被后续 running 事件倒推回 loading（安全网，正常时序不会发生）；
+ * - 无变化时返回原 state（保持引用相等语义）。
+ */
+function applyAgentEvent(state: CatalogState, event: CatalogEventPayload): CatalogState {
+  const key = event.agentKey;
+  if (!key) return state;
+
+  const existing = state.agents?.[key];
+  const incoming = agentStatusFor(event);
+  const status =
+    existing && (existing.status === 'completed' || existing.status === 'failed') && incoming === 'loading'
+      ? existing.status
+      : incoming;
+  const phase = agentPhaseFor(event);
+
+  const next: CatalogAgentState = {
+    ...(existing ?? {}),
+    status,
+    stage: event.stage ?? existing?.stage ?? 'classify',
+    role: event.agentRole ?? existing?.role ?? 'classify',
+    ...(event.section !== undefined ? { section: event.section } : {}),
+    ...(event.agentUsage ? { usage: event.agentUsage } : {}),
+    ...(event.contextTokens !== undefined ? { contextTokens: event.contextTokens } : {}),
+    ...(event.contextWindow !== undefined ? { contextWindow: event.contextWindow } : {}),
+    ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+    ...(event.error !== undefined ? { error: event.error } : {}),
+    ...(event.retryCount !== undefined ? { retryCount: event.retryCount } : {}),
+    ...(event.maxRetries !== undefined ? { maxRetries: event.maxRetries } : {}),
+    ...(event.delayMs !== undefined ? { delayMs: event.delayMs } : {}),
+    ...(event.toolName !== undefined ? { currentTool: event.toolName } : {}),
+    ...(phase !== undefined ? { phase } : {}),
+  };
+
+  if (existing && agentStateEquals(existing, next)) return state;
+
+  return { ...state, agents: { ...(state.agents ?? {}), [key]: next } };
 }
 
 /**
@@ -104,6 +220,8 @@ function pageStatusEquals(a: PageStatus, b: PageStatus): boolean {
     a.currentTool === b.currentTool &&
     tokenUsageEquals(a.usage, b.usage) &&
     tokenUsageEquals(a.carryUsage, b.carryUsage) &&
+    a.contextTokens === b.contextTokens &&
+    a.contextWindow === b.contextWindow &&
     a.durationMs === b.durationMs &&
     a.error === b.error &&
     a.outputPath === b.outputPath &&
@@ -128,14 +246,25 @@ export function catalogEventToState(
   state: CatalogState,
   event: CatalogEventPayload
 ): CatalogState {
+  // 先写「每个 Agent 一行」的行状态（无 agentKey 的事件原样返回）
+  const base = applyAgentEvent(state, event);
+
+  // 单个 Agent 的终态事件（带 agentKey 的 complete / error）：只反映该行，
+  // 不改目录整体状态（目录整体的 complete / error 由不带 agentKey 的事件发出）。
+  if (event.agentKey && (event.type === 'complete' || event.type === 'error')) {
+    const nextState: CatalogState = event.usage ? { ...base, usage: event.usage } : base;
+    return reuseCatalogStateIfUnchanged(state, applyStageFields(nextState, event));
+  }
+
   let nextState: CatalogState;
 
   switch (event.type) {
     case 'scanning':
     case 'parsing':
-      // 每轮目录生成的起点：把上一轮的累计快照结转到 carryUsage（重试不清零）
+      // 每轮目录生成的起点：把上一轮的累计快照结转到 carryUsage（重试不清零）。
+      // 行状态表同时清空：新一轮会重新规划 Agent（用量已进聚合 carryUsage）。
       nextState = carryForward({
-        ...state,
+        ...base,
         status: 'loading',
         phase: 'scanning',
         error: undefined,
@@ -144,12 +273,13 @@ export function catalogEventToState(
         section: undefined,
         sectionsProgress: undefined,
         failedSections: undefined,
+        agents: {},
       });
       break;
 
     case 'requesting':
       nextState = {
-        ...state,
+        ...base,
         status: 'loading',
         phase: 'requesting',
         usage: event.usage, // 直接使用，不累加
@@ -158,7 +288,7 @@ export function catalogEventToState(
 
     case 'responding':
       nextState = {
-        ...state,
+        ...base,
         status: 'loading',
         phase: 'responding',
         usage: event.usage, // 直接使用，不累加
@@ -167,7 +297,7 @@ export function catalogEventToState(
 
     case 'tool_start':
       nextState = {
-        ...state,
+        ...base,
         status: 'loading',
         phase: 'tool',
         currentTool: event.toolName,
@@ -177,7 +307,7 @@ export function catalogEventToState(
 
     case 'tool_result':
       nextState = {
-        ...state,
+        ...base,
         status: 'loading',
         phase: 'responding',
         usage: event.usage, // 直接使用，不累加
@@ -186,20 +316,22 @@ export function catalogEventToState(
 
     case 'complete':
       nextState = {
+        ...base,
         status: 'completed',
         usage: event.usage,
-        carryUsage: state.carryUsage,
+        carryUsage: base.carryUsage,
         durationMs: event.durationMs ?? 0,
       };
       break;
 
     case 'error':
       nextState = {
+        ...base,
         status: 'failed',
         // 失败事件可能不带用量（例如扫描/解析阶段抛错）：保留最后一次已知快照，
         // 否则目录已消耗的 token 会被合计清零。
-        usage: event.usage ?? state.usage,
-        carryUsage: state.carryUsage,
+        usage: event.usage ?? base.usage,
+        carryUsage: base.carryUsage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
       };
@@ -207,7 +339,7 @@ export function catalogEventToState(
 
     case 'retry':
       nextState = {
-        ...state,
+        ...base,
         status: 'loading',
         phase: 'retry',
         retryCount: event.retryCount,
@@ -215,7 +347,7 @@ export function catalogEventToState(
         delayMs: event.delayMs,
         error: event.error,
         // 重试事件同样可能不带用量：保留本轮快照（carryUsage 本来就在 state 里）
-        usage: event.usage ?? state.usage,
+        usage: event.usage ?? base.usage,
       };
       break;
 
@@ -244,6 +376,14 @@ export function articleEventToState(
   // 获取当前页面状态
   const currentStatus = state.pages[event.slug] || initialPageStatus;
 
+  // 上下文报表值（已用 / 窗口）只随「最近一次响应」更新；
+  // 事件未带时沿用旧值（终态 / 重试事件能继续显示上一次的上下文状态）。
+  // 注意：page_start（新一轮）不使用该 patch，因此重新生成会清零。
+  const contextPatch = {
+    contextTokens: event.contextTokens ?? currentStatus.contextTokens,
+    contextWindow: event.contextWindow ?? currentStatus.contextWindow,
+  };
+
   // 计算新页面状态（usage 直接使用，不累加）
   let newPageStatus: PageStatus;
 
@@ -257,6 +397,7 @@ export function articleEventToState(
         carryUsage: currentStatus.carryUsage,
         usage: currentStatus.usage,
       });
+      // 新一轮的上下文从零开始（不沿用上一轮的报表值）
       break;
 
     case 'requesting':
@@ -265,6 +406,7 @@ export function articleEventToState(
         status: 'loading',
         phase: 'requesting',
         usage: event.usage, // 直接使用，不累加
+        ...contextPatch,
       };
       break;
 
@@ -274,6 +416,7 @@ export function articleEventToState(
         status: 'loading',
         phase: 'responding',
         usage: event.usage, // 直接使用，不累加
+        ...contextPatch,
       };
       break;
 
@@ -284,6 +427,7 @@ export function articleEventToState(
         phase: 'tool',
         currentTool: event.toolName,
         usage: event.usage, // 直接使用，不累加
+        ...contextPatch,
       };
       break;
 
@@ -293,6 +437,7 @@ export function articleEventToState(
         status: 'loading',
         phase: 'responding',
         usage: event.usage, // 直接使用，不累加
+        ...contextPatch,
       };
       break;
 
@@ -306,6 +451,7 @@ export function articleEventToState(
         delayMs: event.delayMs,
         error: event.error,
         usage: event.usage ?? currentStatus.usage,
+        ...contextPatch,
       };
       break;
 
@@ -316,6 +462,7 @@ export function articleEventToState(
         carryUsage: currentStatus.carryUsage,
         durationMs: event.durationMs ?? 0,
         outputPath: event.outputPath,
+        ...contextPatch,
       };
       break;
 
@@ -327,6 +474,7 @@ export function articleEventToState(
         carryUsage: currentStatus.carryUsage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
+        ...contextPatch,
       };
       break;
 
