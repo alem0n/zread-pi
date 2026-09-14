@@ -55,7 +55,7 @@ const OVER_SECTIONS = [
 
 /** C1：缩编 subagent 返回的收敛清单（5 个业务分类；落盘时再强补 3 个基础分类 → 8） */
 const CONDENSED_SECTIONS = [
-	{ title: "合并域A", description: "由领域 A/B 合并" },
+	{ title: "合并域A", description: "由领域 A/B 合并", scope: ["包含：A 与 B 的调度机制", "不包含：C 的持久化（→ 合并域B）"] },
 	{ title: "合并域B", description: "由领域 C/D 合并" },
 	{ title: "合并域C", description: "由领域 E 合并" },
 	{ title: "合并域D", description: "补充的架构暗线" },
@@ -71,6 +71,7 @@ const FOUR_SECTIONS = [...COMPLIANT_SECTIONS];
 /** C2：核心模块的越界主题（12 篇 > high 上限 10；每 6 篇一个 group，验证 group-first 兜底） */
 const OVER_TOPICS = Array.from({ length: 12 }, (_, index) => ({
 	title: `主题${index + 1}`,
+	summary: `主题${index + 1} 摘要`,
 	slug: `topic-${index + 1}`,
 	group: index < 6 ? "g1" : "g2",
 	level: "Intermediate",
@@ -81,6 +82,7 @@ function topicsFor(section: string): Array<Record<string, unknown>> {
 	if (section === "核心模块") return OVER_TOPICS;
 	return [1, 2, 3].map((index) => ({
 		title: `${section}主题${index}`,
+		summary: `${section}主题${index}：一句话摘要`,
 		slug: `${section === "概览" ? "overview" : section === "快速开始" ? "quickstart" : section === "核心架构" ? "architecture" : "topic"}-${index}`,
 		level: "Intermediate",
 		associatedFiles: ["README.md"],
@@ -292,7 +294,8 @@ const {
 	MINIMAL_PANORAMA_REQUIREMENT,
 } = await import("../src/agents/blueprint-detail.js");
 const { renderClassifyPrompt } = await import("../src/prompts/classify.js");
-const { renderTopicsPrompt } = await import("../src/prompts/topics.js");
+const { renderTopicsPrompt, SYNC_TOPICS_RULES } = await import("../src/prompts/topics.js");
+const TitlesPrompt = (await import("../src/prompts/titles.js")).default;
 const {
 	createSubmitSectionsTool,
 	createSubmitSectionTopicsTool,
@@ -547,6 +550,24 @@ check("A9 minimal 全景导览要求写死了 Mermaid 架构图", MINIMAL_PANORA
 check("A9 越界上限轮数 = 2", MAX_QUANTITY_FEEDBACK_ROUNDS === 2);
 check("A9 兜底注记文案", QUANTITY_FALLBACK_NOTE === "（已达到调整轮次上限，代码侧收尾）");
 
+{
+	const classifyHigh = renderClassifyPrompt({ spec: high });
+	const topicsHigh = renderTopicsPrompt({ spec: high });
+	check(
+		"A10 分类提示词要求每个分类给 scope（包含 / 不包含两条式）",
+		classifyHigh.includes("scope") && classifyHigh.includes("包含：") && classifyHigh.includes("不包含："),
+	);
+	check(
+		"A10 主题提示词带范围锁定规则 + summary 输出字段",
+		topicsHigh.includes("范围锁定（scope，硬约束）") && topicsHigh.includes("`summary`"),
+	);
+	check(
+		"A10 标题提示词带「不越出分类边界」规则",
+		TitlesPrompt.includes("不越出分类边界") && TitlesPrompt.includes("scope"),
+	);
+	check("A10 sync 主题规则要求 summary 逐字保留", SYNC_TOPICS_RULES.includes("summary") && SYNC_TOPICS_RULES.includes("逐字"));
+}
+
 // ---------------------------------------------------------------------------
 // B) 输出工具（无 LLM）
 // ---------------------------------------------------------------------------
@@ -753,6 +774,123 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	check("B8 resolveWikiVariant：无任何变体 → undefined", resolveWikiVariant("high") === undefined);
 }
 
+// ---- B9：scope / summary / topicSummary 透传 + 旧数据兼容 ----
+{
+	const sectionsTool = createSubmitSectionsTool({ detail: "high" });
+	check(
+		"B9 submit_sections schema 声明 scope",
+		sectionsTool.inputSchema.properties.sections.items?.properties?.scope?.type === "array",
+	);
+	const topicsSchemaTool = createSubmitSectionTopicsTool({ title: "概览" }, { detail: "high" });
+	check(
+		"B9 submit_section_topics schema 声明 summary",
+		topicsSchemaTool.inputSchema.properties.topics.items?.properties?.summary?.type === "string",
+	);
+}
+
+{
+	await resetWiki();
+	const config = await loadConfig();
+	const withScope: WikiSection[] = [
+		{ title: "概览", description: "项目定位", scope: ["包含：整体定位", "不包含：模块实现（→ 核心架构）"] },
+		{ title: "领域A", scope: [" 包含：A 机制 ", "包含：A 机制", "", "不包含：B 机制"] },
+	];
+	await initWikiSkeleton(withScope, config, undefined, { variant: "high" });
+	const blueprint = await loadWikiBlueprint(undefined, "high");
+	const overview = blueprint.sections?.find((section) => section.title === "概览");
+	const domainA = blueprint.sections?.find((section) => section.title === "领域A");
+	check("B9 分类 scope 透传落盘", overview?.scope?.length === 2, JSON.stringify(overview?.scope));
+	check(
+		"B9 scope 归一化：trim + 去空 + 去重",
+		domainA?.scope?.length === 2 && domainA.scope[0] === "包含：A 机制" && domainA.scope[1] === "不包含：B 机制",
+		JSON.stringify(domainA?.scope),
+	);
+
+	const state: QuantityToolState<WikiTopic[]> = { called: false, persisted: false, outOfRange: 0, exhausted: false };
+	const tool = createSubmitSectionTopicsTool({ title: "领域A" }, { detail: "high", state });
+	await tool.call(
+		{
+			section: "领域A",
+			topics: [
+				{ title: "A 机制", slug: "a-mechanism", summary: "以 a.ts 为证，说明 A 机制的收敛过程", level: "Intermediate", associatedFiles: ["README.md"] },
+				{ title: "A 边界", slug: "a-boundary", level: "Intermediate", associatedFiles: ["README.md"] },
+				{ title: "A 补充", slug: "a-extra", level: "Intermediate", associatedFiles: ["README.md"] },
+			],
+		},
+		ctx,
+	);
+	const afterTopics = await loadWikiBlueprint(undefined, "high");
+	const withSummary = afterTopics.pages.find((page) => page.title === "A 机制");
+	const withoutSummary = afterTopics.pages.find((page) => page.title === "A 边界");
+	check(
+		"B9 主题 summary 透传为 page.topicSummary",
+		withSummary?.topicSummary === "以 a.ts 为证，说明 A 机制的收敛过程",
+		JSON.stringify(withSummary?.topicSummary),
+	);
+	check(
+		"B9 无 summary 的主题不写 topicSummary（旧数据兼容）",
+		withoutSummary !== undefined && withoutSummary.topicSummary === undefined,
+		JSON.stringify(withoutSummary?.topicSummary),
+	);
+
+	// sync 复用：模型提交新 summary 时更新，缺失时保留既有锚点
+	const reuseState: QuantityToolState<WikiTopic[]> = { called: false, persisted: false, outOfRange: 0, exhausted: false };
+	const reuseTool = createSubmitSectionTopicsTool(
+		{ title: "领域A" },
+		{ detail: "high", state: reuseState, reuseExisting: true },
+	);
+	await reuseTool.call(
+		{ section: "领域A", topics: [{ title: "A 机制", slug: "a-mechanism", summary: "更新后的摘要" }] },
+		ctx,
+	);
+	await reuseTool.call({ section: "领域A", topics: [{ title: "A 边界", slug: "a-boundary" }] }, ctx);
+	const afterReuse = await loadWikiBlueprint(undefined, "high");
+	check(
+		"B9 sync 复用：summary 随模型提交更新",
+		afterReuse.pages.find((page) => page.title === "A 机制")?.topicSummary === "更新后的摘要",
+		JSON.stringify(afterReuse.pages.find((page) => page.title === "A 机制")?.topicSummary),
+	);
+	check(
+		"B9 sync 复用：缺失 summary 时保留既有锚点",
+		afterReuse.pages.every((page) => page.slug !== "a-boundary" || page.topicSummary === undefined),
+	);
+
+	const legacySections = normalizeBlueprintSections([{ title: "领域A" }], "zh", 8);
+	check(
+		"B9 旧数据兼容：无 scope 字段照常归一化",
+		legacySections.length === 4 && legacySections.every((section) => section.scope === undefined),
+		JSON.stringify(legacySections.map((section) => section.title)),
+	);
+}
+
+{
+	await resetWiki();
+	const config = await loadConfig();
+	await initWikiSkeleton(
+		[{ title: "概览" }, { title: "快速开始" }, { title: "核心架构" }, { title: "领域A" }],
+		config,
+		undefined,
+		{ variant: "low" },
+	);
+	const state: QuantityToolState<WikiSection[]> = { called: false, persisted: false, outOfRange: 0, exhausted: false };
+	const tool = createSubmitSectionsTool({ merge: true, detail: "low", state });
+	await tool.call(
+		{ sections: [{ title: "领域A", scope: ["包含：A"] }, { title: "领域B", scope: ["包含：B"] }] },
+		ctx,
+	);
+	const blueprint = await loadWikiBlueprint(undefined, "low");
+	check(
+		"B9 sync merge：既有分类缺失的 scope 被补齐",
+		blueprint.sections?.find((section) => section.title === "领域A")?.scope?.[0] === "包含：A",
+		JSON.stringify(blueprint.sections?.find((section) => section.title === "领域A")?.scope),
+	);
+	check(
+		"B9 sync merge：新增分类带 scope",
+		blueprint.sections?.find((section) => section.title === "领域B")?.scope?.[0] === "包含：B",
+		JSON.stringify(blueprint.sections?.find((section) => section.title === "领域B")?.scope),
+	);
+}
+
 // ---------------------------------------------------------------------------
 // C) mock LLM 端到端：缩编成功 / 缩编失败降级 / minimal
 // ---------------------------------------------------------------------------
@@ -783,6 +921,32 @@ console.log("\n▶ C1) 分类越界 → 缩编 subagent 收敛");
 	);
 	check("C1 最终页面数 = 8 分类 × 3 = 24", result.pagesCount === 24, String(result.pagesCount));
 	check("C1 无失败分类", result.failedSections === undefined, JSON.stringify(result.failedSections));
+	check(
+		"C1 分类 scope 全链路落盘（缩编结果保留边界）",
+		(blueprint.sections ?? []).some(
+			(section) => section.title === "合并域A" && section.scope?.[0] === "包含：A 与 B 的调度机制",
+		),
+		JSON.stringify((blueprint.sections ?? []).find((section) => section.title === "合并域A")?.scope),
+	);
+	check(
+		"C1 主题 summary 全链路落盘为 page.topicSummary",
+		blueprint.pages.length > 0 &&
+			blueprint.pages.every((page) => typeof page.topicSummary === "string" && page.topicSummary.length > 0),
+		JSON.stringify(blueprint.pages.slice(0, 2).map((page) => page.topicSummary)),
+	);
+	check(
+		"C1 分主题提示词注入 scope 边界",
+		seenPromptTexts.some(
+			(text) => text.includes("范围边界（scope）") && text.includes("包含：A 与 B 的调度机制"),
+		),
+	);
+	check(
+		"C1 标题提示词注入 scope 边界",
+		seenPromptTexts.some(
+			(text) =>
+				text.includes("第三步：为**当前这一个分类**精修文章标题") && text.includes("包含：A 与 B 的调度机制"),
+		),
+	);
 }
 
 console.log("\n▶ C2) 主题越界 → 缩编失败 → 代码兜底");
@@ -815,6 +979,11 @@ console.log("\n▶ C2) 主题越界 → 缩编失败 → 代码兜底");
 		log.split("\n").filter((line) => line.includes("代码兜底")).slice(-1)[0] ?? "(无)",
 	);
 	check("C2 无失败分类（兜底不算页失败）", result.failedSections === undefined, JSON.stringify(result.failedSections));
+	check(
+		"C2 代码兜底保留主题 summary",
+		corePages.length > 0 && corePages.every((page) => typeof page.topicSummary === "string"),
+		JSON.stringify(corePages.slice(0, 2).map((page) => page.topicSummary)),
+	);
 }
 
 console.log("\n▶ C3) minimal：单分类 + 单篇 + 跳过标题精修");

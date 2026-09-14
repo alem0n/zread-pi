@@ -276,22 +276,25 @@ export function buildCondenseSectionTask(options: {
   sync?: boolean;
 }): string {
   const { spec, sections } = options;
-  const lines = sections.map(
-    (section) => `- ${section.title}${section.description ? `：${section.description}` : ''}`,
-  );
+  const lines = sections.flatMap((section) => {
+    const head = `- ${section.title}${section.description ? `：${section.description}` : ''}`;
+    const scope = section.scope?.length ? section.scope.map((item) => `  - ${item}`) : [];
+    return [head, ...scope];
+  });
   const rules = options.sync
     ? [
-        '既有分类必须全部保留，标题逐字一致；',
+        '既有分类必须全部保留，标题逐字一致；description 与 scope 原样保留；',
         `只能把新增分类并入既有分类，合并后总数不得超过 ${spec.sections.max} 个；`,
       ]
     : spec.sections.max < sections.length
       ? [
           '优先合并同一领域、同一受众的分类（description 融合两者要点）；',
+          '合并后的分类必须保留 scope 边界：两者 scope 取并集，「不包含」冲突时保留更明确的一条；',
           '概览 / 快速开始 / 核心架构永不合并；高密度核心机制分类永不合并；',
         ]
       : [
           '把覆盖过宽的条目拆成更细的子领域，或补充能承载多个模块的顶级分类；',
-          '每个分类都必须给出一句 description。',
+          '每个分类都必须给出一句 description 与 scope（包含 / 不包含清单）。',
         ];
 
   return [
@@ -302,7 +305,7 @@ export function buildCondenseSectionTask(options: {
     '## 待处理的分类清单',
     ...lines,
     '',
-    '请调用 submit_condensed_sections 提交最终清单（只输出清单本身）。',
+    '请调用 submit_condensed_sections 提交最终清单（只输出清单本身，逐条保留 scope）。',
   ].join('\n');
 }
 
@@ -317,23 +320,25 @@ export function buildCondenseTopicsTask(options: {
   const { spec, section, topics } = options;
   const lines = topics.map((topic) => {
     const group = topic.group ? `（group: ${topic.group}）` : '';
+    const summary = topic.summary ? `（summary: ${topic.summary}）` : '';
     const files = topic.associatedFiles?.length ? ` [files: ${topic.associatedFiles.join(', ')}]` : '';
-    return `- ${topic.title}${group}${files}`;
+    return `- ${topic.title}${group}${summary}${files}`;
   });
   const rules = options.sync
     ? [
-        '旧页面必须原样保留（title 逐字一致），不能通过删除页面收敛数量；',
+        '旧页面必须原样保留（title 与 summary 逐字一致），不能通过删除页面收敛数量；',
         `只能把新增主题并入既有主题，合并后数量不得超过 ${spec.topics.max} 篇。`,
       ]
     : spec.topics.max < topics.length
       ? [
           '优先合并同一 group 内、面向同一读者、粒度相近的主题；',
+          '合并后的主题保留更贴切的 summary（融合两者要点，仍为一句话）；',
           '同一领域的不同平台 / 协议实现不合并；高密度核心机制永不合并；',
           '合并后的主题保留更贴切的 group 与 associatedFiles 并集。',
         ]
       : [
           '把覆盖多个功能点的宽泛主题拆成独立成篇的主题；',
-          '补充尚未覆盖的子系统 / 核心文件，并给出 associatedFiles。',
+          '补充尚未覆盖的子系统 / 核心文件，并给出 associatedFiles 与一句话 summary。',
         ];
 
   return [
@@ -344,7 +349,7 @@ export function buildCondenseTopicsTask(options: {
     '## 待处理的主题清单',
     ...lines,
     '',
-    '请调用 submit_condensed_topics 提交最终清单（只输出清单本身）。',
+    '请调用 submit_condensed_topics 提交最终清单（只输出清单本身，逐条保留 summary）。',
   ].join('\n');
 }
 

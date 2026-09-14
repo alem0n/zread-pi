@@ -48,7 +48,14 @@ function baseChunk(delta: Record<string, unknown>, finishReason: string | null):
 }
 
 const pages = [
-	{ slug: "1-overview", title: "概览", file: "1-overview.md", section: "入门指南", level: "Beginner" },
+	{
+		slug: "1-overview",
+		title: "概览",
+		file: "1-overview.md",
+		section: "入门指南",
+		level: "Beginner",
+		topicSummary: "以 src/a.ts 为证，说明项目的最小可用形态",
+	},
 	{ slug: "2-arch", title: "架构", file: "2-arch.md", section: "入门指南", level: "Intermediate" },
 	{ slug: "3-api", title: "接口", file: "3-api.md", section: "参考", level: "Advanced" },
 ];
@@ -367,6 +374,24 @@ check(
 		minimalPrompt.includes("**Slug**: 1-overview") &&
 			minimalPrompt.includes("输出路径规范") &&
 			minimalPrompt.includes("write_page"),
+	);
+
+	const promptWithSummary = buildPagePrompt(pages[0], getDetailSpec("high"));
+	const promptWithoutSummary = buildPagePrompt(pages[1], getDetailSpec("high"));
+	check(
+		"页面提示词注入主题摘要（topicSummary）",
+		promptWithSummary.includes("**主题摘要**: 以 src/a.ts 为证，说明项目的最小可用形态"),
+		promptWithSummary.split("\n").find((line) => line.includes("主题摘要")) ?? "(无)",
+	);
+	check(
+		"页面提示词带范围纪律（主题摘要 + 关联路径划定范围）",
+		promptWithSummary.includes("**范围纪律**:") && promptWithSummary.includes("不得超出"),
+	);
+	check(
+		"旧产物无 topicSummary：省略摘要行，其余段落仍在",
+		!promptWithoutSummary.includes("**主题摘要**:") &&
+			promptWithoutSummary.includes("**关联路径**:") &&
+			promptWithoutSummary.includes("**范围纪律**:"),
 	);
 }
 

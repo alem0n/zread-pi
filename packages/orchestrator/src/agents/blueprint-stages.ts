@@ -224,6 +224,12 @@ function buildClassifyPrompt(spec: BlueprintDetailSpec, merge: boolean, extraCon
     .join('\n\n');
 }
 
+/** 把 section.scope 渲染成提示词里的边界清单行（无 scope 时返回空数组，旧产物照常） */
+function formatScopeLines(scope?: string[]): string[] {
+  if (!scope || scope.length === 0) return [];
+  return ['- 范围边界（scope）:', ...scope.map((item) => `  - ${item}`)];
+}
+
 function buildTopicsPrompt(
   spec: BlueprintDetailSpec,
   section: WikiSection,
@@ -237,6 +243,7 @@ function buildTopicsPrompt(
     '## 当前分类',
     `- 分类: ${section.title}`,
     `- 说明: ${section.description ?? '（无）'}`,
+    ...formatScopeLines(section.scope),
     '',
     '请调用 submit_section_topics 提交该分类下的主题清单（section 字段必须与上面的分类标题一致）。',
   ]
@@ -258,6 +265,7 @@ function buildTitlesPrompt(section: WikiSection, pages: WikiPage[]): string {
     '## 当前分类',
     `- 分类: ${section.title}`,
     `- 说明: ${section.description ?? '（无）'}`,
+    ...formatScopeLines(section.scope),
     '',
     '## 当前分类的页面列表',
     ...pageLines,
