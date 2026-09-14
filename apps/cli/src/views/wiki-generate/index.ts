@@ -247,7 +247,7 @@ export default class WikiGeneratePage extends Screen {
     return statusRow(width, left, style(rightText, { color: rightColor }));
   }
 
-  /** Agent 标签（分类 / 主题 · 分类名 / 标题 · 分类名 / 缩编 · 分类名） */
+  /** Agent 标签（名称描述该 Agent 此刻在做什么：规划主题 / 拟定标题 / 精修标题 / 精简清单） */
   private agentLabel(agent: CatalogAgentState): string {
     switch (agent.role) {
       case "topics":
@@ -255,9 +255,10 @@ export default class WikiGeneratePage extends Screen {
       case "titles":
         return this.t("wikiGenerate.agentTitles", { section: agent.section ?? "" });
       case "condense":
-        return this.t("wikiGenerate.agentCondense", {
-          section: agent.section ?? this.t("wikiGenerate.agentClassify"),
-        });
+        // 缩编 subagent 精简的是它所在阶段的清单：分类阶段是主题清单，其余是标题清单
+        return agent.stage === "classify"
+          ? this.t("wikiGenerate.agentCondenseSections")
+          : this.t("wikiGenerate.agentCondenseTopics", { section: agent.section ?? "" });
       default:
         return this.t("wikiGenerate.agentClassify");
     }

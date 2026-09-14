@@ -333,17 +333,18 @@ export const zhCN: TranslationKeys = {
     // 逐 Agent 行：四个状态指标（输入 / 输出 / 缓存占比 / 上下文占比）
     metricsCache: '缓存占比 {ratio}',
     metricsContext: '上下文 {used}/{window} ({ratio})',
-    // 目录 Agent 行标签（分类 / 分主题 / 标题 / 缩编 subagent，每个 Agent 一行）
-    agentClassify: '分类',
-    agentTopics: '主题 · {section}',
-    agentTitles: '标题 · {section}',
-    agentCondense: '缩编 · {section}',
-    // 三阶段蓝图：阶段切换与分类级进度
-    stageClassify: '分类中',
-    stageTopics: '主题 {current}/{total}',
-    stageTitles: '标题 {current}/{total}',
-    stageTopicsIdle: '主题规划中',
-    stageTitlesIdle: '标题精修中',
+    // 目录 Agent 行标签（每个 Agent 一行；名称描述该 Agent 此刻在做什么）
+    agentClassify: '规划主题',
+    agentTopics: '拟定标题 · {section}',
+    agentTitles: '精修标题 · {section}',
+    agentCondenseSections: '精简主题',
+    agentCondenseTopics: '精简标题 · {section}',
+    // 三阶段进度：与 Agent 行同词，避免同一阶段出现两种叫法
+    stageClassify: '规划主题中',
+    stageTopics: '拟定标题 {current}/{total}',
+    stageTitles: '精修标题 {current}/{total}',
+    stageTopicsIdle: '拟定标题中',
+    stageTitlesIdle: '精修标题中',
     stageSection: ' · {section}',
     failedSections: '{n} 个分类失败',
   },

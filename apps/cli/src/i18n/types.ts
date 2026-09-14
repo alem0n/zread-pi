@@ -344,12 +344,13 @@ export interface TranslationKeys {
     /** 逐 Agent 行：缓存占比 / 上下文占比（已用 / 窗口） */
     metricsCache: string;
     metricsContext: string;
-    /** 目录 Agent 行的标签（每个 Agent 一行） */
+    /** 目录 Agent 行的标签（每个 Agent 一行；名称为该 Agent 此刻在做什么） */
     agentClassify: string;
     agentTopics: string;
     agentTitles: string;
-    agentCondense: string;
-    /** 三阶段蓝图：阶段切换与分类级进度 */
+    agentCondenseSections: string;
+    agentCondenseTopics: string;
+    /** 三阶段蓝图：阶段切换与分类级进度（与 Agent 行同词） */
     stageClassify: string;
     stageTopics: string;
     stageTitles: string;
