@@ -48,6 +48,12 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 （token 预算耗尽且强制交卷后仍无目标产物，见 §12）；
 `result.usage` 在第十步起为 **harness usage ledger 的累计值**（单次响应用量仍在 `assistant` 事件上，见 §12.5）。
 
+第十九步的展示层扩展（均为**新增可选字段**，旧调用点零改动，见 §21）：
+`system/init` 新增 `context_window?`（本次解析出的模型上下文窗口）；
+`CatalogEvent` 新增 `contextTokens?` / `contextWindow?`（该 Agent 最近一次响应的上下文体量）与
+`agentKey?` / `agentRole?` / `agentStatus?` / `agentUsage?`（逐 Agent 行；带 `agentKey` 的 `complete` / `error`
+是**单个 Agent 的终态**，不带才是目录整体终态）；`ArticleEventPayload` 新增 `contextTokens?` / `contextWindow?`。
+
 ## 4. 与旧实现的行为差异（有意为之，均已验证）
 
 | 差异 | 说明 |
@@ -1301,3 +1307,85 @@ scope 里的「不包含：…（→ 相邻分类）」才阻止模型「顺手�
 - scope / summary 的质量取决于模型，代码不做语义校验；字段缺失时下游按「无边界」降级（旧产物等价）。
 - 同步时 summary 依赖模型逐字带回；即使模型漏带，`mergeSectionTopics` 也保留旧锚点（不漂移、也不更新）。
 - 缩编 subagent 若不按提示保留 scope / summary，该路径会丢弃它们（代码兜底路径不丢）。
+
+## 21. 生成页逐 Agent 行 + 上下文占比（第十九步）
+
+### 21.1 目标
+
+生成文档界面（`/wiki/generate`）的**每条目右侧状态后**都要看到四个指标：
+输入 token、输出 token、缓存占比、当前上下文占比（已用 / 上下文窗口）——**完成 / 失败也照常显示**，
+且不能再有「运行时才有数字、完成后什么都不剩」的空窗。
+
+目录生成会并发跑多个 Agent（分类 1 个 + 每个分类的主题 / 标题各 1 个 + 数量越界的缩编 subagent），
+因此「目录」不再是一行聚合：**每个 Agent 一行**（缩进在目录聚合行下方），各自带自己的状态与四个指标；
+文章列表的每篇文章同样带四个指标。
+
+### 21.2 数据来源与口径
+
+| 需要的东西 | 来源 | 口径 |
+|---|---|---|
+| 上下文窗口 | harness 的 `system/init` 新增 `context_window`（`driver.ts` 取 `request.model.contextWindow`） | 本次运行实际解析出的模型（含自定义 / 回退默认 200k） |
+| 上下文已用 | `orchestrator/src/agents/create-agent.ts` 从**最近一次 assistant 响应的 usage** 计算 | `input + output + cacheRead + cacheWrite`，与 pi compaction 的 `calculateContextTokens` 同口径（不是累计用量） |
+| 逐 Agent 身份 | `CatalogEvent.agentKey` / `agentRole` / `agentStatus` | `classify` / `topics:<section>` / `titles:<section>` / `condense:<...>` |
+| 行内用量 | `CatalogEvent.agentUsage` | 该 Agent **自己**的累计快照（`usage` 仍是目录级聚合，两者不同语义，不能混用） |
+
+生命周期事件：计划行（`agentStatus: 'waiting'`，阶段开始时一次性铺全所有 Agent）→ `running`（开始前一条 +
+create-agent 的流式事件）→ 终态（`completed` / `failed`，在用量结算进聚合账本**之后**发出，
+`usage` = 新聚合值、`agentUsage` = 该 Agent 终值）。
+业务层判定「模型没调输出工具 / Agent 报错」时由 `markAgentFailed()` 补一条 `agentStatus: 'failed'`，
+覆盖「Agent 运行正常结束但没产出」的行状态（单 section 失败仍不阻断其余，语义不变）。
+
+### 21.3 CLI 落点
+
+| 位置 | 改动 |
+|---|---|
+| `agent-runtime/src/types.ts` / `harness/driver.ts` | `SDKSystemMessage.context_window?`；init 事件带模型上下文窗口 |
+| `orchestrator/src/types.ts` / `wiki/types.ts` | `CatalogEvent` 新增逐 Agent 字段 + 上下文报表值；`ArticleEventPayload` 新增上下文报表值 |
+| `orchestrator/src/agents/create-agent.ts` | `AgentResult` 新增 `contextTokens?` / `contextWindow?`；所有事件带上下文报表值 |
+| `orchestrator/src/agents/blueprint-stages.ts` | 计划 / running / 终态事件 + `markAgentFailed`；缩编 subagent 单独成行（`agentRole: 'condense'`） |
+| `orchestrator/src/wiki/generate-wiki.ts` | 页面事件转发 `contextTokens` / `contextWindow`（`page_complete` 优先用 `AgentResult` 终值，`page_error` 用最后已知值） |
+| `apps/cli/.../wiki-generate/types.ts` | `CatalogAgentState` + `CatalogState.agents`（key = agentKey，插入顺序 = 展示顺序）；`PageStatus.contextTokens/contextWindow` |
+| `apps/cli/.../wiki-generate/mapper.ts` | `applyAgentEvent`（逐 Agent 行）；带 `agentKey` 的 `complete` / `error` 只改行、不改目录整体状态；`scanning` 清空行（用量已进聚合 `carryUsage`）；页面上下文「终态沿用 / `page_start` 清零」 |
+| `apps/cli/.../wiki-generate/controller.ts` | **只把不带 `agentKey` 的 `complete` 当作目录完成**（否则首个 Agent 完成就会 reload + 提前启动页面，见 21.5）；转发逐 Agent 字段 |
+| `apps/cli/.../wiki-generate/index.ts` | 目录聚合行 + 逐 Agent 缩进行；`usageSuffix()` 统一四个指标 + 耗时；重试倒计时覆盖目录 Agent |
+| `apps/cli/src/views/wiki-sync/controller.ts` | 同步页不展示逐 Agent 行，忽略带 `agentKey` 的事件（否则单 Agent 终态会被当成目录完成 / 失败） |
+| `apps/cli/src/utils/display.ts` | `formatBytes` 增加 `M` 档（如 1M 窗口不再显示 `1000.0k`） |
+
+展示格式：`[完成] ↑12.0k ↓1.3k · 缓存占比 50.0% · 上下文 24.0k/200.0k (12.0%) · 1.2s`，
+无数据的片段自动省略（不占位）；窄终端由 `renderTwoColumn` 按显示宽度截断（既有行为）。
+
+### 21.4 兼容性
+
+- 全部为**新增可选字段**：旧 orchestrator 不发 `agentKey` 时 UI 退回原来的单行聚合；
+  旧配置 / 旧 `wiki.json` 零影响；`SDKSystemMessage.context_window` 缺省时上下文片段自动省略。
+- `CatalogEvent.usage` 语义没变（目录级聚合）；逐 Agent 用量另开 `agentUsage`，
+  底部合计（§16）仍按目录聚合 + 页面槽位 reduce，不重复计数。
+- 聚合目录行**不展示上下文**（多 Agent 没有单一上下文值）；上下文只在逐 Agent 行与文章行展示。
+
+### 21.5 修掉的竞态（本次一并修复）
+
+逐 Agent 终态事件也是 `type: 'complete'`。生成页控制器原先对**任何** `complete` 都执行
+「reload wiki.json → 启动文章生成」，于是分类 Agent 一完成就会拿**当时只有部分页面**的 wiki.json
+启动页面批次，`isInitialized` 随即置位，剩余页面永远不会开始（现象：文章只生成前几篇，其余永远等待，
+且不再发生任何 LLM 请求）。现在只有不带 `agentKey` 的整体 `complete` 才触发该流程；
+同期同步页控制器忽略带 `agentKey` 的事件。
+
+### 21.6 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:agent` | 20/20（新增 `system/init` 带 `context_window`，faux 模型 128000） |
+| `bun run test:blueprint` | e2e-blueprint 36/36（新增逐 Agent 行 / running+completed 终态 / `agentUsage` / 上下文窗口 200k / 失败分类行标 failed）；blueprint-detail 115/115；e2e-sync 23/23；context-files 11/11；style-discipline 17/17 |
+| `bun run test:pages` | e2e-page-generation 24/24（新增页面完成 / 失败事件带上下文报表值）；page-output-fallback 7/7；page-polish 16/16 |
+| `bun test apps/cli/src/views/wiki-generate/__tests__` | 37/37（新增逐 Agent 行 5 项 + 页面上下文沿用/清零 1 项 + `contextUsage` 3 项） |
+| `bun run test:tui` | smoke-tui 226、real-run 9、output-guard 10、target-dir 36、wiki-generate 单测 37、mock-generate 46（新增「目录按 Agent 分类显示」「目录 Agent 行四个指标」「完成后目录/文章行仍显示四指标」）、browse-server 50 |
+| `bun run test` | 全部套件通过（EXIT=0） |
+
+### 21.7 风险与未决
+
+- **上下文「已用」是最近一次响应的报表值**，不是 harness 的 `estimateContextTokens`（后者还会估算
+  usage 之后新增消息）；压缩发生在 run 边界，UI 看不到压缩前峰值。对展示可接受，但不要把该数字当预算判据。
+- **每行指标变多**：窄终端下右栏可能被截断（优先保留左侧状态图标 + 标题）；如需可后续做「按宽度逐级降级显示」。
+- **失败行的错误文案已截断**（首行 60 字符），完整错误仍在日志 / `page_error` 事件里。
+- polish Agent 的用量仍不进事件（与 §16.6 相同）。
