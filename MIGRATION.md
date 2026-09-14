@@ -1404,3 +1404,63 @@ create-agent 的流式事件）→ 终态（`completed` / `failed`，在用量�
 - **每行指标变多**：窄终端下右栏可能被截断（优先保留左侧状态图标 + 标题）；如需可后续做「按宽度逐级降级显示」。
 - **失败行的错误文案已截断**（首行 60 字符），完整错误仍在日志 / `page_error` 事件里。
 - polish Agent 的用量仍不进事件（与 §16.6 相同）。
+
+## 22. 发布说明正文未生效的修复（第二十步）
+
+### 22.1 现象
+
+`.github/release-notes/<tag>.md` 从引入以来（v1.4.0 起）**从未**成为 Release 正文：
+v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 的正文都是自动生成的 `**Full Changelog**: …compare/…`（78 字符），
+而仓库里的说明文件是 3.6 ~ 8.4 KB。
+
+### 22.2 根因（有证据）
+
+原 workflow 用的是：
+
+```yaml
+body_path: ${{ hashFiles(format('.github/release-notes/{0}.md', github.ref_name)) != '' && format(...) || '' }}
+```
+
+当 `hashFiles(...) == ''`（文件在 action 的工作目录里不可见）时，表达式回落为**空字符串**，
+而 GitHub Actions 在处理 step `with:` 时会**丢弃空值输入** —— 运行日志的 `with:`
+只有 `files` / `generate_release_notes` / `overwrite_files` / `token`，根本不出现 `body_path`，
+于是 `generate_release_notes: true` 每次生效。
+
+两点旁证：
+
+1. `softprops/action-gh-release@v2` 的实现是 `config.body_path` 为 falsy 时才回退 `generate_release_notes`
+   （空字符串在字符串路径上本应被 `fs.readFileSync('')` 报错，而实际是静默回落）。
+2. 仓库根的执行上下文里 `hashFiles` 对这个文件本应命中（在 tag 树上用 `git ls-tree` 验证过文件存在），
+   所以问题不在「文件未入库」，而在「输入被过滤」。
+
+### 22.3 修法
+
+`release` job 不再依赖 `hashFiles`：
+
+1. 新增 `actions/checkout@v5`（release job 不跑构建，checkout 成本可忽略）；
+2. 新增 `Resolve release notes body` step：shell 判断 `.github/release-notes/${GITHUB_REF_NAME}.md`
+   是否存在，写入 `$GITHUB_OUTPUT` 的 `body_path`（不存在时写空值）；
+3. `Create Release` 用 `body_path: ${{ steps.notes.outputs.body_path }}`。
+
+未命中时输出空字符串，action 按 falsy 回退 `generate_release_notes`，行为与文档一致。
+
+### 22.4 历史 Release 正文回填
+
+v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 的正文用仓库内对应说明文件覆盖（`gh release edit --notes-file`）。
+说明文件均为人工编写，历史版本号未变，不涉及 tag / 产物变更。
+
+### 22.5 验证（实际执行结果）
+
+| 命令 / 动作 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误（仅 workflow 与文档改动） |
+| 工作流片段断言 | 关键片段齐备、`hashFiles` 已无活动引用、无 tab 缩进 |
+| 历史正文回填 | v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 正文长度与仓库内说明文件对齐 |
+| 下一次 tag | v1.5.2+ 推送后由 CI 自动带上说明文件正文（修法已入库） |
+
+### 22.6 风险与未决
+
+- 回填是**改写已发布 Release 的正文**（AGENTS.md §4.5 的异常处理只允许在 Release 未对外使用时改 tag；
+  正文编辑不动 tag / 产物，但仍属对外可见变更，本次由用户明确授权执行）。
+- `body_path` 未命中时不输出 `body_path` 也能工作（action 对空值 falsy 回退），
+  当前实现显式写空值，两种行为都已在注释里说明，便于后续维护者理解。
