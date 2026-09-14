@@ -422,21 +422,21 @@ const catalogDone = await waitFor(
 clearInterval(stageSampler);
 check("目录完成后展示文章列表", catalogDone);
 
-// 三阶段进度文案（分类中 / 主题 x/y / 标题 x/y）必须在生成页真实渲染过
+// 三阶段进度文案（规划主题中 / 拟定标题 x/y / 精修标题 x/y）必须在生成页真实渲染过
 check(
-  "生成页渲染三阶段进度文案（分类/主题/标题）",
-  catalogSamples.some((text) => text.includes("分类中")) &&
-    catalogSamples.some((text) => /主题 \d+\/\d+/.test(text)) &&
-    catalogSamples.some((text) => /标题 \d+\/\d+/.test(text)),
-  catalogSamples.filter((text) => text.includes("分类中") || /主题 \d+\/\d+/.test(text)).slice(0, 3).join(" || "),
+  "生成页渲染三阶段进度文案（规划主题 / 拟定标题 / 精修标题）",
+  catalogSamples.some((text) => text.includes("规划主题中")) &&
+    catalogSamples.some((text) => /拟定标题 \d+\/\d+/.test(text)) &&
+    catalogSamples.some((text) => /精修标题 \d+\/\d+/.test(text)),
+  catalogSamples.filter((text) => text.includes("规划主题中") || /拟定标题 \d+\/\d+/.test(text)).slice(0, 3).join(" || "),
 );
 
-// 目录按 Agent 分类显示：分类 / 每个分类的主题 / 标题各一行（生成中就能看到）
+// 目录按 Agent 分类显示：规划主题 / 每个分类的拟定标题 / 精修标题各一行（生成中就能看到）
 check(
-  "目录按 Agent 分类显示（主题 · / 标题 · 各一行）",
-  catalogSamples.some((text) => text.includes("主题 · ")) &&
-    catalogSamples.some((text) => text.includes("标题 · ")),
-  catalogSamples.find((text) => text.includes("主题 · "))?.split("\n").filter((line) => line.includes(" · ")).slice(0, 3).join(" || "),
+  "目录按 Agent 分类显示（规划主题 / 拟定标题 · / 精修标题 · 各一行）",
+  catalogSamples.some((text) => text.includes("拟定标题 · ")) &&
+    catalogSamples.some((text) => text.includes("精修标题 · ")),
+  catalogSamples.find((text) => text.includes("拟定标题 · "))?.split("\n").filter((line) => line.includes(" · ")).slice(0, 3).join(" || "),
 );
 check(
   "目录 Agent 行渲染四个状态指标（输入/输出/缓存占比/上下文占比）",
@@ -456,7 +456,7 @@ check("十二篇文章全部完成（文章 12/12）", allDone);
 // 已完成的目录 Agent 行也要继续显示指标（[完成] 右侧：↑ / ↓ / 缓存占比 / 上下文占比）
 const catalogAgentLines = screenText()
   .split("\n")
-  .filter((line) => line.includes("分类") || line.includes("主题 · ") || line.includes("标题 · "));
+  .filter((line) => line.includes("规划主题") || line.includes("拟定标题 · ") || line.includes("精修标题 · "));
 check(
   "完成后目录 Agent 行仍显示四个指标（[完成] 右侧）",
   catalogAgentLines.some(

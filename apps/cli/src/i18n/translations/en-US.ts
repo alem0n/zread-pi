@@ -333,16 +333,17 @@ export const enUS: TranslationKeys = {
     // Per-agent rows: input / output / cache hit / context usage
     metricsCache: 'cache {ratio}',
     metricsContext: 'context {used}/{window} ({ratio})',
-    // Catalog agent row labels (classify / topics / titles / condense subagent)
-    agentClassify: 'Classify',
-    agentTopics: 'Topics · {section}',
-    agentTitles: 'Titles · {section}',
-    agentCondense: 'Condense · {section}',
-    // Three-stage blueprint: stage switch + per-section progress
-    stageClassify: 'Classifying',
-    stageTopics: 'Topics {current}/{total}',
-    stageTitles: 'Titles {current}/{total}',
-    stageTopicsIdle: 'Planning topics',
+    // Catalog agent row labels (one row per agent; names describe what the agent is doing)
+    agentClassify: 'Planning themes',
+    agentTopics: 'Drafting titles · {section}',
+    agentTitles: 'Refining titles · {section}',
+    agentCondenseSections: 'Trimming themes',
+    agentCondenseTopics: 'Trimming titles · {section}',
+    // Three-stage progress: same wording as the agent rows
+    stageClassify: 'Planning themes',
+    stageTopics: 'Drafting titles {current}/{total}',
+    stageTitles: 'Refining titles {current}/{total}',
+    stageTopicsIdle: 'Drafting titles',
     stageTitlesIdle: 'Refining titles',
     stageSection: ' · {section}',
     failedSections: '{n} section(s) failed',

@@ -1058,7 +1058,8 @@ polish:
 ### 17.5 CLI 展示
 
 生成页（`/wiki/generate`）按 `stage` / `section` / 分类级 `progress` 渲染阶段切换：
-`分类中` → `主题 {current}/{total} · {section}` → `标题 {current}/{total} · {section}`；
+`规划主题中` → `拟定标题 {current}/{total}` → `精修标题 {current}/{total}`（第十九步起 Agent 行标签与阶段进度同词，
+内部 stage 名仍是 `classify` / `topics` / `titles`，见 §21.3）；
 完成时若有失败分类，显示 `完成 · N 个分类失败`。目录状态新增 `stage/section/sectionsProgress/failedSections` 槽位（mapper 纯函数可单测）。
 
 `loadWikiBlueprint` 放宽后，只有骨架（pages 为空）的 wiki.json 在首页视同「尚无目录」，不会再出现「文档已生成 (0 篇)」的卡死状态。
@@ -1353,6 +1354,20 @@ create-agent 的流式事件）→ 终态（`completed` / `failed`，在用量�
 
 展示格式：`[完成] ↑12.0k ↓1.3k · 缓存占比 50.0% · 上下文 24.0k/200.0k (12.0%) · 1.2s`，
 无数据的片段自动省略（不占位）；窄终端由 `renderTwoColumn` 按显示宽度截断（既有行为）。
+
+**Agent 行命名**（描述「这一步在做什么」，而不是阶段名词）：
+
+| 内部 stage | Agent 行标签（zh） | 干嘛 |
+|---|---|---|
+| `classify` | 规划主题 | 分析仓库，产出主题（章节）清单与各自范围边界 |
+| `topics` | 拟定标题 · <主题> | 为一个主题拟定文章标题（以及文件 / 难度等草稿） |
+| `titles` | 精修标题 · <主题> | 精修该主题下已拟定好的标题 |
+| `condense`（分类阶段） | 精简主题 | 主题清单超出数量区间时归并精简（缩编 subagent） |
+| `condense`（主题阶段） | 精简标题 · <主题> | 标题清单超出数量区间时归并精简（缩编 subagent） |
+
+目录聚合行的阶段进度文案与行标签**同词**（`规划主题中` / `拟定标题 {current}/{total}` / `精修标题 {current}/{total}`），
+避免同一阶段在屏幕上出现两种叫法。内部 `CatalogEvent.stage`（`classify` / `topics` / `titles`）、
+`agentKey`、wiki.json 的 `sections` 字段名一律不变——UI 用词只影响 i18n 字符串。
 
 ### 21.4 兼容性
 
