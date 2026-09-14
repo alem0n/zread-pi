@@ -10,8 +10,10 @@
 #
 # 触发方式：
 #   1. 推送 tag（v*）→ 构建并创建 Release，附上三个平台的 zip
-#      正文：若仓库内存在 .github/release-notes/<tag>.md 就用它（人工编写的发布说明），
+#      正文：若仓库内存在 .github/release-notes/<tag>.md 就用它（人工编写的发布说明，正文与文件逐字一致）；
 #            否则回落到 GitHub 自动生成的变更列表
+#      注意：有说明文件时 `generate_release_notes` 必须为 false —— action 在两者同时开启时
+#            会把自动生成的变更列表**追加**在说明文件后面。
 #   2. workflow_dispatch → 手动构建，zip 上传到 workflow artifacts
 name: build-binary
 
@@ -107,14 +109,13 @@ jobs:
           merge-multiple: true
           path: dist-bin
 
-      # 仓库内准备了发布说明时用它作为 Release 正文（.github/release-notes/<tag>.md），
-      # 否则回落到自动生成的变更列表。
+      # 仓库内准备了发布说明时用它作为 Release 正文（.github/release-notes/<tag>.md，与文件逐字一致），
+      # 否则回落到自动生成的变更列表（生成开关也由这个 step 的结果决定，见 Create Release）。
       #
       # 注意：**不要**用 `body_path: ${{ hashFiles(...) != '' && ... || '' }}` ——
       # 表达式回路到空字符串时 GitHub 会把该输入整个过滤掉，等于没传 body_path，
       # 运行日志的 `with:` 里根本不出现该字段（v1.4.0 ~ v1.5.1 的正文因此一直是
-      # 自动生成的 Full Changelog）。改用 shell 判断 + step 输出，未命中时输出空字符串，
-      # action 会据此退回 `generate_release_notes`。
+      # 自动生成的 Full Changelog）。改用 shell 判断 + step 输出，未命中时输出空字符串。
       - name: Resolve release notes body
         id: notes
         shell: bash
@@ -133,5 +134,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist-bin/*.zip
-          generate_release_notes: true
+          # 只有在没有人工说明文件时才用自动生成的变更列表：
+          # `generate_release_notes: true` 与 `body_path` 同时生效时，action 会把自动生成的
+          # 变更列表**追加**在说明文件后面（v1.5.2 的正文就这样多了一段 Full Changelog）。
+          generate_release_notes: ${{ steps.notes.outputs.body_path == '' }}
           body_path: ${{ steps.notes.outputs.body_path }}
