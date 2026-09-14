@@ -1247,3 +1247,57 @@ AI 归并 + 代码兜底」四层机制，代码不替 AI 做语义决策。
   浏览页的「默认」条目仅用于阅读。
 - **browse 缺省档位依赖服务端配置**：`loadConfigSync()` 读的是 CLI 进程的用户配置；多用户共享同一项目目录时以启动服务器的用户配置为准。
 
+## 20. 三阶段大纲逐级注入 + 约束收敛（第十八步）
+
+### 20.1 目标与机制
+
+分类 → 分主题 → 标题三个阶段各自携带一份逐级细化的大纲：上一级的产物作为下一级的**硬约束边界**，
+避免「分类 Agent 跑去讲别的模块、主题 Agent 越界到其他分类、标题精修跑题」的全项目漂移。
+
+```
+分类大纲（project outline）        ← 分类阶段产出，注入所有下游 Agent
+  └─ 条目 = title + description + scope（包含 / 不包含边界清单）
+       └─ 主题大纲（section outline）← 分主题阶段产出，只注入本分类的下游 Agent
+            └─ 条目 = title + summary + associatedFiles
+                 └─ 页面提示词（topicSummary + 关联路径 + 范围纪律）
+```
+
+关键点：不止「带上文」，还带上**负向边界**。正向 description 只说明「写什么」；
+scope 里的「不包含：…（→ 相邻分类）」才阻止模型「顺手写别的」——这是防漂移的主要手段。
+
+### 20.2 字段与落点
+
+| 层 | 改动 |
+|---|---|
+| types | `WikiSection.scope?: string[]`（包含 / 不包含边界清单）、`WikiTopic.summary?: string`（一句话主题摘要）、`WikiPage.topicSummary?: string`（summary 透传）——全部可选，旧 wiki.json 照常读取 |
+| classify 提示词 | 硬性要求每个分类给 scope：1~3 条「包含：…」+ 1~3 条「不包含：…（→ 相邻分类）」，分类间互斥；示例同步更新 |
+| output-tools | `SECTION_ITEM_SCHEMA` 声明 `scope`、`TOPIC_ITEM_SCHEMA` 声明 `summary`；`summarizeSections` 回显 scope（模型可见的确认） |
+| utils | `normalizeBlueprintSections` 透传 scope（基础分类保留强补 title/description，但采纳模型声明的 scope；不再原地改写共享常量对象）；`mergeBlueprintSections` 仅在既有分类缺失时补齐 scope；`mergeSectionTopics` 把 summary 透传为 `page.topicSummary`（sync 复用可更新，缺失时保留旧锚点） |
+| topics 阶段 | `renderTopicsPrompt` 新增「范围锁定（scope，硬约束）」，`summary` 进入输出规范与示例；`buildTopicsPrompt` 注入「范围边界（scope）」（无则省略）；`SYNC_TOPICS_RULES` 把 summary 列为逐字保留字段 |
+| titles 阶段 | 新增「不越出分类边界」规则；`buildTitlesPrompt` 注入 scope |
+| 页面阶段 | `buildPagePrompt` 注入 `**主题摘要**:`（无则省略）+ 一行范围纪律（不得超出主题摘要 / 关联路径划定范围） |
+| sync | 旧页面清单带上 summary（供逐字带回）；分类合并的 extraContext 带上旧 scope |
+| 缩编 / 兜底 | 缩编提示词带上 scope / summary 与「原样保留」规则；代码兜底遍历对象，天然保留 |
+
+### 20.3 明确不做
+
+- **不做**代码级越界校验 / 归并拒绝：scope / summary 是语义约束，无法机械判定「越界」，
+  因此只有「注入 + 提示词约束」一层（数量控制可机械判定，才有多层防线）；
+- 不改工具名与既有必填字段；minimal 档位不做特判（单分类单篇，scope 生成后基本不起约束作用）；
+- `computeSyncDiff` 不感知新字段（status 仍由 title / group / level / 关联路径机械判定）。
+
+### 20.4 验证（实际执行结果）
+
+| 命令 | 结果 |
+|---|---|
+| `bun run typecheck` | 0 错误 |
+| `bun run test:blueprint` | e2e-blueprint 29/29；blueprint-detail 115/115（新增 B9 字段透传 / 旧数据兼容 / sync merge 补齐 scope、A10 提示词与 schema、C1/C2 全链路 scope+summary 落盘与注入断言）；e2e-sync 23/23（summary 逐字带回 + scope 注入 + 合并保留）；context-files 11/11；style-discipline 17/17 |
+| `bun run test:pages` | e2e-page-generation 22/22（topicSummary 注入 / 缺省省略 / 范围纪律）；page-output-fallback 7/7；page-polish 16/16 |
+| `bun run test` | 全部套件通过（EXIT=0） |
+| `bun run mock:wiki` | `completed=5 failed=0` 不回退 |
+
+### 20.5 风险与未决
+
+- scope / summary 的质量取决于模型，代码不做语义校验；字段缺失时下游按「无边界」降级（旧产物等价）。
+- 同步时 summary 依赖模型逐字带回；即使模型漏带，`mergeSectionTopics` 也保留旧锚点（不漂移、也不更新）。
+- 缩编 subagent 若不按提示保留 scope / summary，该路径会丢弃它们（代码兜底路径不丢）。
