@@ -210,15 +210,16 @@ function buildSyncTopicsRules(
       ? sectionPages.map((page) => {
           const group = page.group ? `（group: ${page.group}）` : '';
           const level = page.level ? `（level: ${page.level}）` : '';
+          const summary = page.topicSummary ? `（summary: ${page.topicSummary}）` : '';
           const files = page.associatedFiles?.length ? ` [files: ${page.associatedFiles.join(', ')}]` : '';
-          return `- ${page.slug}: ${page.title}${group}${level}${files}`;
+          return `- ${page.slug}: ${page.title}${group}${level}${summary}${files}`;
         })
       : ['（本分类暂无旧页面）'];
 
   return [
     SYNC_TOPICS_RULES,
     '',
-    '## 本分类的旧页面清单（保留的页面必须原样带回 slug 与 title）',
+    '## 本分类的旧页面清单（保留的页面必须原样带回 slug / title / summary）',
     ...pageLines,
     '',
     '## 文件变更摘要',
@@ -322,7 +323,10 @@ export async function syncWiki(
   if (uncoveredAdded.length > 0) {
     const extraContext = [
       '## 旧分类清单（已有分类的标题尽量保持不变）',
-      ...oldSections.map((section) => `- ${section.title}${section.description ? `：${section.description}` : ''}`),
+      ...oldSections.map((section) => {
+        const scope = section.scope?.length ? `（scope：${section.scope.join('；')}）` : '';
+        return `- ${section.title}${section.description ? `：${section.description}` : ''}${scope}`;
+      }),
       '',
       '## 文件变更摘要',
       diffSummary,

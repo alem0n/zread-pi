@@ -45,6 +45,7 @@ export function buildPagePrompt(
   variant?: BlueprintDetailLevel | null,
 ): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
+  const topicSummary = page.topicSummary ? `\n**主题摘要**: ${page.topicSummary}` : '';
   const panorama = spec.panorama ? `\n\n---\n\n${MINIMAL_PANORAMA_REQUIREMENT}` : '';
   const wikiBase = variant ? `.zread-pi/wiki/${variant}` : '.zread-pi/wiki';
 
@@ -58,10 +59,12 @@ export function buildPagePrompt(
 **Slug**: ${page.slug}
 **文件名**: ${page.file}
 **章节**: ${page.section}
-**难度**: ${page.level}
+**难度**: ${page.level}${topicSummary}
 
 **关联路径**:
 ${associatedFilesList}
+
+**范围纪律**: 文章内容不得超出上面的主题摘要（若有）与关联路径所划定的范围；关联文档 / 源码导航只指向同分类或相邻分类。
 
 ---
 

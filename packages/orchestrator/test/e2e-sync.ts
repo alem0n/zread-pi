@@ -50,9 +50,15 @@ const BASE_SECTIONS = [
 ];
 
 /** generation 阶段的分类（多一个「模块」承载两个文件页） */
-const GENERATE_SECTIONS = [...BASE_SECTIONS, { title: "模块", description: "源码模块说明" }];
+const GENERATE_SECTIONS = [
+	...BASE_SECTIONS,
+	{ title: "模块", description: "源码模块说明", scope: ["包含：src 下的模块实现", "不包含：新增文件说明（→ 新增模块）"] },
+];
 /** sync 阶段的分类（新增未覆盖文件 → 补一个「新增模块」） */
-const SYNC_SECTIONS = [...GENERATE_SECTIONS, { title: "新增模块", description: "本次新增文件的说明" }];
+const SYNC_SECTIONS = [
+	...GENERATE_SECTIONS,
+	{ title: "新增模块", description: "本次新增文件的说明", scope: ["包含：本次新增的 src/c.ts", "不包含：既有模块（→ 模块）"] },
+];
 
 const GENERATE_TOPICS: Record<string, Array<Record<string, unknown>>> = {
 	概览: [
@@ -71,9 +77,9 @@ const GENERATE_TOPICS: Record<string, Array<Record<string, unknown>>> = {
 		{ title: "数据流", slug: "data-flow", level: "Advanced", associatedFiles: ["README.md"] },
 	],
 	模块: [
-		{ title: "模块 A", slug: "module-a", level: "Intermediate", associatedFiles: ["src/a.ts"] },
-		{ title: "模块 B", slug: "module-b", level: "Intermediate", associatedFiles: ["src/b.ts"] },
-		{ title: "模块核心约定", slug: "module-core", level: "Intermediate", associatedFiles: ["README.md"] },
+		{ title: "模块 A", slug: "module-a", summary: "以 src/a.ts 为证，说明模块 A 的实现", level: "Intermediate", associatedFiles: ["src/a.ts"] },
+		{ title: "模块 B", slug: "module-b", summary: "以 src/b.ts 为证，说明模块 B 的实现", level: "Intermediate", associatedFiles: ["src/b.ts"] },
+		{ title: "模块核心约定", slug: "module-core", summary: "以 README.md 为证，说明模块约定", level: "Intermediate", associatedFiles: ["README.md"] },
 	],
 };
 
@@ -123,6 +129,8 @@ function textChunk(text: string): string {
 let phase: "generate" | "sync" = "generate";
 let requestCount = 0;
 const syncSeenSections: string[] = [];
+/** sync 阶段每个请求的完整提示词（验证 scope / summary 注入） */
+const syncPromptTexts: string[] = [];
 
 const server = Bun.serve({
 	port: 0,
@@ -141,7 +149,10 @@ const server = Bun.serve({
 				.filter((name): name is string => typeof name === "string"),
 		);
 		const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
-		if (phase === "sync" && section) syncSeenSections.push(section);
+		if (phase === "sync") {
+			syncSeenSections.push(...(section ? [section] : []));
+			syncPromptTexts.push(promptText);
+		}
 
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream<Uint8Array>({
@@ -161,14 +172,18 @@ const server = Bun.serve({
 							topics = GENERATE_TOPICS[section] ?? [];
 						} else if (section === "模块") {
 							// 解析旧页面清单（slug / title / files），原样带回 slug+title
-							topics = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^（\[\n]+)(?:（[^）]*）)?(?: \[files: ([^\]]*)\])?$/gm)].map(
-								(match) => ({
+							topics = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^（\[\n]+)(.*)$/gm)].map((match) => {
+								const tail = match[3];
+								const files = /\[files: ([^\]]*)\]/.exec(tail);
+								const summary = /（summary: ([^）]*)）/.exec(tail);
+								return {
 									slug: match[1],
 									title: match[2].trim(),
 									level: "Intermediate",
-									associatedFiles: match[3] ? match[3].split(", ").filter(Boolean) : [],
-								}),
-							);
+									...(summary ? { summary: summary[1] } : {}),
+									associatedFiles: files ? files[1].split(", ").filter(Boolean) : [],
+								};
+							});
 						} else if (section === "新增模块") {
 							topics = [
 								{ title: "模块 C", slug: "module-c", level: "Beginner", associatedFiles: ["src/c.ts"] },
@@ -237,8 +252,15 @@ const { saveCachedManifest } = await import("@zread-pi/utils");
 // 默认配置档位 high：产物落在变体子目录 `.zread-pi/wiki/high/`
 const wikiJsonPath = join(repo, ".zread-pi", "wiki", "high", "wiki.json");
 const readBlueprintFile = async (): Promise<{
-	sections?: Array<{ title: string }>;
-	pages: Array<{ slug: string; title: string; section: string; status?: string; associatedFiles?: string[] }>;
+	sections?: Array<{ title: string; scope?: string[] }>;
+	pages: Array<{
+		slug: string;
+		title: string;
+		section: string;
+		status?: string;
+		associatedFiles?: string[];
+		topicSummary?: string;
+	}>;
 }> => JSON.parse(await readFile(wikiJsonPath, "utf-8"));
 
 // ---------------------------------------------------------------------------
@@ -324,6 +346,25 @@ check(
 	"新增分类被合并进 sections",
 	synced.sections?.some((section) => section.title === "新增模块") === true,
 	JSON.stringify(synced.sections?.map((section) => section.title)),
+);
+check(
+	"sync 分主题提示词带入旧页面 summary（逐字保留锚点）",
+	syncPromptTexts.some((text) => text.includes("summary: 以 src/a.ts 为证，说明模块 A 的实现")),
+);
+check(
+	"sync 分主题提示词注入 scope 边界",
+	syncPromptTexts.some((text) => text.includes("范围边界（scope）") && text.includes("包含：src 下的模块实现")),
+);
+check(
+	"sync 后页面仍保留 topicSummary",
+	synced.pages.filter((page) => page.section === "模块").every((page) => typeof page.topicSummary === "string" && page.topicSummary.length > 0),
+	JSON.stringify(synced.pages.filter((page) => page.section === "模块").map((page) => page.topicSummary)),
+);
+check(
+	"sync 分类合并保留既有 scope 并带上新分类 scope",
+	synced.sections?.find((section) => section.title === "模块")?.scope?.[0] === "包含：src 下的模块实现" &&
+		synced.sections?.find((section) => section.title === "新增模块")?.scope?.[0] === "包含：本次新增的 src/c.ts",
+	JSON.stringify(synced.sections?.map((section) => ({ title: section.title, scope: section.scope }))),
 );
 check(
 	"归档页面仍保留在 wiki.json 并带 status=archived",

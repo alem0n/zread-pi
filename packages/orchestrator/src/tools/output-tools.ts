@@ -60,6 +60,12 @@ const SECTION_ITEM_SCHEMA: ToolInputSchemaProperty = {
   properties: {
     title: { type: 'string', description: '分类标题（简洁中文，≤10 字）' },
     description: { type: 'string', description: '分类说明（这个分类覆盖什么、面向哪类读者）' },
+    scope: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        '分类的边界清单：1~3 条「包含：本分类覆盖的功能领域」+ 1~3 条「不包含：明确不覆盖的相邻领域（→ 其他分类）」',
+    },
   },
   required: ['title'],
 }
@@ -69,6 +75,10 @@ const TOPIC_ITEM_SCHEMA: ToolInputSchemaProperty = {
   type: 'object',
   properties: {
     title: { type: 'string', description: '草稿标题（≤20 字）' },
+    summary: {
+      type: 'string',
+      description: '一句话主题摘要（≤40 字，说明这篇论证什么、以哪些文件为证据）',
+    },
     slug: { type: 'string', description: '英文 kebab-case 短名（用于 URL）' },
     group: { type: 'string', description: '二级模块聚合（可选）' },
     level: { type: 'string', description: '难度等级（Beginner/Intermediate/Advanced）' },
@@ -83,7 +93,11 @@ const TOPIC_ITEM_SCHEMA: ToolInputSchemaProperty = {
 
 function summarizeSections(sections: WikiSection[]): string {
   return sections
-    .map((section) => `- ${section.title}${section.description ? `：${section.description}` : ''}`)
+    .map((section) => {
+      const head = `- ${section.title}${section.description ? `：${section.description}` : ''}`;
+      const scope = section.scope?.length ? `\n  scope: ${section.scope.join('；')}` : '';
+      return `${head}${scope}`;
+    })
     .join('\n')
 }
 

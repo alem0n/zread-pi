@@ -28,6 +28,14 @@ export interface WikiSection {
   title: string;
   /** 分类说明（供分主题 / 标题 Agent 参考） */
   description?: string;
+  /**
+   * 本分类的边界清单（scope）：用「包含：…」/「不包含：…」两条式声明。
+   *
+   * 分类阶段产出，逐级注入分主题 / 标题 / 页面阶段，作为防全项目漂移的
+   * **负向边界**——「不包含」条目尽量点名相邻分类，形成分类间的互斥契约。
+   * 可选字段：旧 wiki.json 无该字段时下游照常工作。
+   */
+  scope?: string[];
 }
 
 /**
@@ -39,6 +47,11 @@ export interface WikiSection {
 export interface WikiTopic {
   /** 草稿标题（文档语言） */
   title: string;
+  /**
+   * 一句话主题摘要（≤40 字）：说明这篇文章论证什么、以哪些文件为证据。
+   * 标题阶段不改它；写作时逐字注入页面提示词，作为范围锚点（可选字段）。
+   */
+  summary?: string;
   /** 英文短名（kebab-case，用于 slug）；缺省时由代码从 title 派生 */
   slug?: string;
   /** 二级模块聚合（可选） */
@@ -70,6 +83,11 @@ export interface WikiPage {
    * 后续生成 Wiki 内容时，会读取这些路径获取上下文
    */
   associatedFiles?: string[];
+  /**
+   * 主题摘要（由 WikiTopic.summary 透传）：
+   * 页面提示词里的语义边界之一，与关联路径共同锁定文章写作范围（可选字段）。
+   */
+  topicSummary?: string;
   /** 同步状态（sync 流程中标记，非同步流程为 undefined） */
   status?: SyncPageStatus;
 }

@@ -81,8 +81,28 @@ function normalizeSectionEntry(entry: unknown): WikiSection | null {
   const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   if (!title) return null;
 
+  const section: WikiSection = { title };
   const description = typeof raw.description === 'string' ? raw.description.trim() : '';
-  return description ? { title, description } : { title };
+  if (description) section.description = description;
+  // scope 是语义字段（模型负责），代码只做 trim / 去空 / 去重，不校验内容
+  const scope = normalizeStringList(raw.scope);
+  if (scope) section.scope = scope;
+  return section;
+}
+
+/** 字符串数组归一化（trim + 去空 + 去重）；无有效条目时返回 undefined */
+function normalizeStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const item = entry.trim();
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    result.push(item);
+  }
+  return result.length > 0 ? result : undefined;
 }
 
 /** 把任意输入归一化为 section 列表（去空、去重、保持顺序，不注入基础分类） */
@@ -129,17 +149,26 @@ export function normalizeBlueprintSections(
   if (options.minimal) {
     const overview = baseSectionsFor(language)[0];
     const provided = normalizeSectionList(input).find((section) => sameTitle(section.title, overview.title));
-    return [provided?.description ? { ...overview, description: provided.description } : { ...overview }];
+    const result: WikiSection = { ...overview };
+    if (provided?.description) result.description = provided.description;
+    if (provided?.scope) result.scope = provided.scope;
+    return [result];
   }
 
   const result: WikiSection[] = [];
   const seen = new Set<string>();
+  const provided = normalizeSectionList(input);
+  const providedByKey = new Map(provided.map((section) => [sectionKey(section.title), section]));
 
-  for (const section of [...baseSectionsFor(language), ...normalizeSectionList(input)]) {
+  for (const section of [...baseSectionsFor(language), ...provided]) {
     const key = sectionKey(section.title);
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push(section);
+    const entry: WikiSection = { ...section };
+    // 基础分类的 title / description 保持强补值不变，但采纳模型声明的 scope（下游硬边界）
+    const declared = providedByKey.get(key);
+    if (declared?.scope && !entry.scope) entry.scope = declared.scope;
+    result.push(entry);
   }
 
   return result.slice(0, limit);
@@ -167,6 +196,10 @@ export function mergeBlueprintSections(
       const target = result.find((entry) => sectionKey(entry.title) === key);
       if (target && !target.description && section.description) {
         target.description = section.description;
+      }
+      // 既有分类保留自己的 scope（sync 稳定）；只在缺失时用新提交补齐
+      if (target && !target.scope && section.scope) {
+        target.scope = section.scope;
       }
       continue;
     }
@@ -243,6 +276,13 @@ function normalizeGroup(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const group = value.trim();
   return group.length > 0 ? group : undefined;
+}
+
+/** 主题摘要归一化：trim + 去空；不截断（语义字段由模型负责长度） */
+function normalizeSummary(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const summary = value.trim();
+  return summary.length > 0 ? summary : undefined;
 }
 
 function normalizeAssociatedFiles(value: unknown): string[] | undefined {
@@ -425,9 +465,10 @@ export async function mergeSectionTopics(
   return withWikiOutput(options.variant, (output) => {
     if (!Array.isArray(output.sections)) output.sections = [];
     if (!output.sections.some((entry) => sameTitle(entry.title, sectionTitle))) {
-      output.sections.push(
-        section.description ? { title: sectionTitle, description: section.description } : { title: sectionTitle },
-      );
+      const entry: WikiSection = { title: sectionTitle };
+      if (section.description) entry.description = section.description;
+      if (section.scope) entry.scope = section.scope;
+      output.sections.push(entry);
     }
 
     const existing = output.pages.filter((page) => sameTitle(page.section, sectionTitle));
@@ -457,6 +498,9 @@ export async function mergeSectionTopics(
         match.level = normalizeLevel(topic.level);
         const associatedFiles = normalizeAssociatedFiles(topic.associatedFiles);
         if (associatedFiles !== undefined) match.associatedFiles = associatedFiles;
+        // sync：summary 由模型逐字带回；缺失时保留既有锚点，不主动清空
+        const summary = normalizeSummary(topic.summary);
+        if (summary !== undefined) match.topicSummary = summary;
         usedTitles.add(title.toLowerCase());
         reused += 1;
         continue;
@@ -480,6 +524,8 @@ export async function mergeSectionTopics(
         level: normalizeLevel(topic.level),
         associatedFiles: normalizeAssociatedFiles(topic.associatedFiles),
       };
+      const summary = normalizeSummary(topic.summary);
+      if (summary !== undefined) page.topicSummary = summary;
 
       output.pages.push(page);
       usedSlugs.add(slug);
