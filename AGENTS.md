@@ -345,6 +345,10 @@ Refs: MIGRATION.md §4
 - **tag 只打在 `master` 上**（即合并复验之后的提交），不在功能分支上打。
 - **注释 tag**：消息格式 `vX.Y.Z —— <一句话摘要>`（与 v0.14.0 / v0.15.0 既有风格一致），摘要概括本次版本的核心变更。
 - **发布说明**：正文写入 `.github/release-notes/<tag>.md`（人工编写的发布说明），与 tag 摘要随分支提交、随合并后的 `master` 入库。
+  CI（`build-binary.yml` 的 `release` job）先 checkout，再用 shell 判断该文件是否存在并写入 step 输出，
+  `body_path` 直接引用该输出 —— **不要**用 `body_path: ${{ hashFiles(...) != '' && ... || '' }}`：
+  表达式回路到空字符串时 GitHub 会把该输入整个过滤掉（等于没传 `body_path`），
+  `generate_release_notes` 于是总是生效（v1.4.0 ~ v1.5.1 的 Release 正文因此都是自动生成的 Full Changelog）。
 - **CI 机制**：推送 `v*` tag 触发 `.github/workflows/build-binary.yml`，自动构建三平台产物并创建 Release——仓库内存在对应说明文件就用它作正文，否则回落到自动生成的变更列表；因此**说明文件必须先于（或与 tag 同批）推送入库**。
 - **职责边界**：AI 不得自行执行 `git tag` / `git push`；提请合并时交付建议的 tag 名、tag 摘要与发布说明文件，实际打 tag 与 push 由用户执行。
 - **异常处理**：tag 打错或摘要笔误，仅在 Release 尚未对外使用时删除本地与远端 tag 重建（`git tag -d` + `git push origin :refs/tags/<tag>`）；Release 已发布后禁止改写历史，走前向修复 + 新版本号。
