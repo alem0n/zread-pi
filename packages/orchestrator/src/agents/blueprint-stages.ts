@@ -70,7 +70,7 @@ import {
 import { renderClassifyPrompt } from '../prompts/classify';
 import { renderTopicsPrompt, SYNC_TOPICS_RULES } from '../prompts/topics';
 import TitlesPrompt from '../prompts/titles';
-import type { BlueprintFailedSection, CatalogEvent, CatalogStage } from '../types.js';
+import type { BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus, CatalogEvent, CatalogStage } from '../types.js';
 
 /** 探索类工具（分类 / 主题阶段共用；与旧蓝图 Agent 的工具面保持一致） */
 const EXPLORE_TOOLS: ToolDefinition[] = [
@@ -166,6 +166,8 @@ function emitStageEvent(
 interface RunAgentOptions {
   key: string;
   stage: CatalogStage;
+  /** Agent 角色（缺省 = stage；缩编 subagent 显式传 condense） */
+  role?: CatalogAgentRole;
   section?: string;
   tools: ToolDefinition[];
   prompts: string;
@@ -178,18 +180,65 @@ interface RunAgentOptions {
   tokenBudget?: number;
 }
 
-/** 运行一个阶段 Agent：事件附上 stage/section/聚合用量，结束时结算用量 */
+/**
+ * 运行一个阶段 Agent：事件附上 stage / section / 聚合用量 / Agent 身份，结束时结算用量。
+ *
+ * 每个 Agent 都会发出三类事件（供 UI 一个 Agent 一行展示）：
+ * 1. 运行态（`agentStatus: 'running'`）——开始前一次 + create-agent 的流式事件；
+ * 2. 流式中间态——带上该 Agent 自己的累计用量（`agentUsage`）与上下文报表值；
+ * 3. 终态（`agentStatus: 'completed' | 'failed'`）——在用量结算进聚合账本后发出，
+ *    因此 `usage` 仍是目录级聚合、`agentUsage` 是该 Agent 的最终快照。
+ *
+ * 终态事件的 `type` 是 `complete` / `error`；调用方（UI）以 `agentKey` 区分
+ * 「单个 Agent 完成」与「整个目录完成」。
+ */
 async function runAgentAndSettle(
   context: BlueprintStageContext,
   options: RunAgentOptions,
 ): Promise<AgentResult> {
+  const agentRole: CatalogAgentRole = options.role ?? options.stage;
+  const startedAt = Date.now();
+  /** 该 Agent 自己的最新快照（`usage` 事件字段是目录级聚合，不能拿它当行内用量） */
+  const own = {
+    usage: undefined as TokenUsage | undefined,
+    contextTokens: undefined as number | undefined,
+    contextWindow: undefined as number | undefined,
+  };
+
+  /** Agent 身份 + 行内用量（每个 Agent 一行） */
+  const identity = (status: CatalogAgentStatus) => ({
+    agentKey: options.key,
+    agentRole,
+    agentStatus: status,
+    ...(own.usage ? { agentUsage: own.usage } : {}),
+    ...(own.contextTokens !== undefined ? { contextTokens: own.contextTokens } : {}),
+    ...(own.contextWindow !== undefined ? { contextWindow: own.contextWindow } : {}),
+  });
+
+  // 开始前发出「运行中」：加载配置 / 建会话的窗口也算在运行态里
+  context.onEvent?.({
+    type: 'requesting',
+    stage: options.stage,
+    ...(options.section !== undefined ? { section: options.section } : {}),
+    usage: context.usage.total(),
+    ...identity('running'),
+  });
+
+  let result: AgentResult | undefined;
+  let failure: unknown;
+
   try {
-    return await createAgent({
+    result = await createAgent({
       tools: options.tools,
       prompts: options.prompts,
       ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
       ...(options.tokenBudget !== undefined ? { tokenBudget: options.tokenBudget } : {}),
       onEvent: (event) => {
+        // 该 Agent 自己的快照 / 上下文（不随聚合变化）
+        if (event.usage) own.usage = event.usage;
+        if (event.contextTokens !== undefined) own.contextTokens = event.contextTokens;
+        if (event.contextWindow !== undefined) own.contextWindow = event.contextWindow;
+
         const aggregate = context.usage.snapshot(options.key, event.usage);
 
         if (event.type === 'complete') return;
@@ -198,15 +247,72 @@ async function runAgentAndSettle(
         context.onEvent?.({
           ...event,
           stage: options.stage,
-          section: options.section,
+          ...(options.section !== undefined ? { section: options.section } : {}),
           usage: aggregate,
+          ...identity('running'),
           ...(options.progress ? { progress: options.progress } : {}),
         });
       },
     });
+    return result;
+  } catch (err) {
+    failure = err;
+    throw err;
   } finally {
-    context.usage.settle(options.key);
+    // 结算：把该 Agent 的最终用量写进聚合账本（后续事件的聚合值已含它）
+    context.usage.settle(options.key, result?.tokenUsage);
+    if (result?.tokenUsage) own.usage = result.tokenUsage;
+    if (result?.contextTokens !== undefined) own.contextTokens = result.contextTokens;
+    if (result?.contextWindow !== undefined) own.contextWindow = result.contextWindow;
+
+    if (result) {
+      context.onEvent?.({
+        type: 'complete',
+        stage: options.stage,
+        ...(options.section !== undefined ? { section: options.section } : {}),
+        usage: context.usage.total(),
+        durationMs: result.durationMs,
+        ...identity('completed'),
+      });
+    } else {
+      context.onEvent?.({
+        type: 'error',
+        stage: options.stage,
+        ...(options.section !== undefined ? { section: options.section } : {}),
+        usage: context.usage.total(),
+        durationMs: Date.now() - startedAt,
+        error: failure instanceof Error ? failure.message : String(failure),
+        ...identity('failed'),
+      });
+    }
   }
+}
+
+/**
+ * 业务层判定某 Agent「未产出有效结果」时的收尾事件。
+ *
+ * Agent 运行正常结束 ≠ 业务成功（如模型从未调用输出工具）；此时先用
+ * `agentStatus: 'failed'` 把该行改为失败，再抛错 / 记 failedSections。
+ */
+function markAgentFailed(
+  context: BlueprintStageContext,
+  options: {
+    key: string;
+    stage: CatalogStage;
+    role?: CatalogAgentRole;
+    section?: string;
+    error: string;
+  },
+): void {
+  context.onEvent?.({
+    type: 'error',
+    stage: options.stage,
+    ...(options.section !== undefined ? { section: options.section } : {}),
+    agentKey: options.key,
+    agentRole: options.role ?? options.stage,
+    agentStatus: 'failed',
+    error: options.error,
+  });
 }
 
 /** 当前档位（数量控制用；旧配置 / 非法值已在 validateConfig 回退 high） */
@@ -291,6 +397,13 @@ export async function runClassifyStage(
   const merge = options.merge === true;
   const spec = getDetailSpec(detailOf(context));
   emitStageEvent(context, 'classify', { type: 'requesting' });
+  // 分类 Agent 的等待行（每个 Agent 一行：UI 先建行，再进入运行态）
+  emitStageEvent(context, 'classify', {
+    type: 'requesting',
+    agentKey: 'classify',
+    agentRole: 'classify',
+    agentStatus: 'waiting',
+  });
 
   const state = { succeeded: false, error: undefined as string | undefined };
   const quantity: QuantityToolState<WikiSection[]> = {
@@ -313,9 +426,16 @@ export async function runClassifyStage(
   });
 
   const failureMessage = `分类阶段未产出有效 wiki.json：模型未成功调用 submit_sections${state.error ? `（${state.error}）` : ''}`;
-  if (!quantity.called) throw new Error(failureMessage);
+  if (!quantity.called) {
+    // Agent 运行可能正常结束（模型只是没调工具）：行内状态以业务判定为准
+    markAgentFailed(context, { key: 'classify', stage: 'classify', error: failureMessage });
+    throw new Error(failureMessage);
+  }
   if (!quantity.persisted) {
-    if (quantity.outOfRange === 0) throw new Error(failureMessage);
+    if (quantity.outOfRange === 0) {
+      markAgentFailed(context, { key: 'classify', stage: 'classify', error: failureMessage });
+      throw new Error(failureMessage);
+    }
     await persistSectionsAfterQuantityFailure(context, quantity, { merge, spec });
   }
 
@@ -358,6 +478,7 @@ async function runSectionCondenseAgent(
     await runAgentAndSettle(context, {
       key: 'condense:classify',
       stage: 'classify',
+      role: 'condense',
       tools: [tool],
       prompts: buildCondenseSectionTask({
         spec: options.spec,
@@ -455,6 +576,16 @@ export async function runTopicsStage(
     type: 'requesting',
     progress: { current: 0, total: sections.length },
   });
+  // 每个分类一个 Agent 行（waiting）：并发槽位未到时 UI 也能看到完整清单
+  for (const section of sections) {
+    emitStageEvent(context, 'topics', {
+      type: 'requesting',
+      section: section.title,
+      agentKey: `topics:${section.title}`,
+      agentRole: 'topics',
+      agentStatus: 'waiting',
+    });
+  }
 
   const tasks = sections.map((section, index) =>
     limit(async () => {
@@ -513,6 +644,12 @@ export async function runTopicsStage(
             stage: 'topics',
             error: state.error ?? '模型未调用 submit_section_topics',
           });
+          markAgentFailed(context, {
+            key,
+            stage: 'topics',
+            section: section.title,
+            error: state.error ?? '模型未调用 submit_section_topics',
+          });
           logger.warn(`[topics] 分类「${section.title}」失败：${state.error ?? '模型未调用工具'}`);
         } else {
           logger.info(`[topics] 分类「${section.title}」完成（${index + 1}/${sections.length}）`);
@@ -524,6 +661,7 @@ export async function runTopicsStage(
           logger.warn(`[topics] 分类「${section.title}」已落盘但 Agent 报错：${message}`);
         } else {
           failed.push({ section: section.title, stage: 'topics', error: message });
+          markAgentFailed(context, { key, stage: 'topics', section: section.title, error: message });
           logger.warn(`[topics] 分类「${section.title}」失败：${message}`);
         }
       } finally {
@@ -554,6 +692,7 @@ async function runTopicsCondenseAgent(
     await runAgentAndSettle(context, {
       key: `condense:topics:${section.title}`,
       stage: 'topics',
+      role: 'condense',
       section: section.title,
       tools: [tool],
       prompts: buildCondenseTopicsTask({
@@ -662,6 +801,16 @@ export async function runTitlesStage(
     type: 'requesting',
     progress: { current: 0, total: targets.length },
   });
+  // 每个有页面的分类一个标题 Agent 行（waiting）
+  for (const target of targets) {
+    emitStageEvent(context, 'titles', {
+      type: 'requesting',
+      section: target.section.title,
+      agentKey: `titles:${target.section.title}`,
+      agentRole: 'titles',
+      agentStatus: 'waiting',
+    });
+  }
 
   const tasks = targets.map((target) =>
     limit(async () => {
@@ -694,11 +843,18 @@ export async function runTitlesStage(
             stage: 'titles',
             error: state.error ?? '模型未调用 refine_section_titles',
           });
+          markAgentFailed(context, {
+            key,
+            stage: 'titles',
+            section: section.title,
+            error: state.error ?? '模型未调用 refine_section_titles',
+          });
           logger.warn(`[titles] 分类「${section.title}」失败，保留原标题：${state.error ?? '模型未调用工具'}`);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         failed.push({ section: section.title, stage: 'titles', error: message });
+        markAgentFailed(context, { key, stage: 'titles', section: section.title, error: message });
         logger.warn(`[titles] 分类「${section.title}」失败，保留原标题：${message}`);
       } finally {
         completed += 1;

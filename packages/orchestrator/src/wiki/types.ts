@@ -123,6 +123,13 @@ export interface ArticleEventPayload {
   slug: string;
   /** Token 使用统计 */
   usage?: TokenUsage;
+  /**
+   * 该页面 Agent 当前上下文体量（最近一次响应的 input + output + cacheRead + cacheWrite）；
+   * 未响应过时为 undefined。
+   */
+  contextTokens?: number;
+  /** 模型上下文窗口（来自 agent-runtime 的 system/init 事件） */
+  contextWindow?: number;
   /** 工具名称（tool_start 时） */
   toolName?: string;
   /** 错误信息 */

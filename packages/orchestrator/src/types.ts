@@ -48,6 +48,12 @@ export interface BlueprintResult {
 /** 蓝图三阶段（分类 → 分主题 → 标题） */
 export type CatalogStage = 'classify' | 'topics' | 'titles';
 
+/** 产生目录事件的 Agent 角色（每个 Agent 一行；缩编 subagent 单独成行） */
+export type CatalogAgentRole = 'classify' | 'topics' | 'titles' | 'condense';
+
+/** 单个目录 Agent 的生命周期状态 */
+export type CatalogAgentStatus = 'waiting' | 'running' | 'completed' | 'failed';
+
 /** 某个分类在某个阶段失败（记录后可继续其余分类） */
 export interface BlueprintFailedSection {
   /** 分类标题 */
@@ -79,6 +85,25 @@ export interface CatalogEvent {
   stage?: CatalogStage;
   /** 当前处理的分类（topics / titles 阶段） */
   section?: string;
+  /**
+   * 产生该事件的 Agent 标识（每个 Agent 一行）：
+   * `classify` / `topics:<section>` / `titles:<section>` / `condense:<...>`。
+   * 带该字段的事件只描述「某一个 Agent」，目录整体状态由不带该字段的事件承担。
+   */
+  agentKey?: string;
+  /** 产生该事件的 Agent 角色（分类 / 分主题 / 标题 / 缩编 subagent） */
+  agentRole?: CatalogAgentRole;
+  /** 该 Agent 的生命周期状态（缺省按事件类型推断：complete→completed / error→failed / 其余→running） */
+  agentStatus?: CatalogAgentStatus;
+  /** 该 Agent **自己**的累计用量快照（`usage` 仍是目录级聚合，两者不同） */
+  agentUsage?: TokenUsage;
+  /**
+   * 该 Agent 当前上下文体量（最近一次响应的 input + output + cacheRead + cacheWrite，
+   * 口径与 pi 的 compaction 判定一致）；未响应过时为 undefined。
+   */
+  contextTokens?: number;
+  /** 模型上下文窗口（来自 agent-runtime 的 system/init 事件） */
+  contextWindow?: number;
   /** scanning/parsing 阶段的进度信息；带 stage 时表示分类级进度 */
   progress?: {
     current: number;

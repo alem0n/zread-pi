@@ -248,6 +248,8 @@ const progress: string[] = [];
 const events: string[] = [];
 // 事件级用量快照：用于验证失败路径也带上「最后一次累计用量」（底部合计的依据）
 const eventUsages = new Map<string, { input_tokens: number; output_tokens: number } | undefined>();
+// 事件级上下文报表值：用于验证每个页面的「已用 / 窗口」（UI 的上下文占比依据）
+const eventContexts = new Map<string, { contextTokens?: number; contextWindow?: number }>();
 console.log("▶ generateWikiContent({ maxConcurrent: 3 }) …");
 const result = await generateWikiContent({
 	pages: [...pages, badPage, noWritePage, misplacedPage, budgetPage],
@@ -258,6 +260,10 @@ const result = await generateWikiContent({
 			`${event.type}:${event.slug}`,
 			event.usage ? { input_tokens: event.usage.input_tokens, output_tokens: event.usage.output_tokens } : undefined,
 		);
+		eventContexts.set(`${event.type}:${event.slug}`, {
+			contextTokens: event.contextTokens,
+			contextWindow: event.contextWindow,
+		});
 	},
 	onProgress: (state) => {
 		progress.push(`${state.completed}/${state.total}`);
@@ -356,6 +362,18 @@ check(
 	"page_error 带上最后一次累计用量（失败页也计入合计）",
 	(eventUsages.get(`page_error:${budgetPage.slug}`)?.input_tokens ?? 0) >= 120,
 	JSON.stringify(eventUsages.get(`page_error:${budgetPage.slug}`) ?? null),
+);
+check(
+	"页面事件带上下文报表值（已用 / 窗口；回退模型默认 200k）",
+	(eventContexts.get(`page_complete:${pages[0].slug}`)?.contextTokens ?? 0) > 0 &&
+		eventContexts.get(`page_complete:${pages[0].slug}`)?.contextWindow === 200000,
+	JSON.stringify(eventContexts.get(`page_complete:${pages[0].slug}`) ?? null),
+);
+check(
+	"失败页的 page_error 也带上下文报表值（失败行仍可显示上下文占比）",
+	(eventContexts.get(`page_error:${budgetPage.slug}`)?.contextTokens ?? 0) > 0 &&
+		eventContexts.get(`page_error:${budgetPage.slug}`)?.contextWindow === 200000,
+	JSON.stringify(eventContexts.get(`page_error:${budgetPage.slug}`) ?? null),
 );
 
 // ---- blueprint.detail = minimal：页面提示词附加「全景导览」段（传递断言）----

@@ -325,7 +325,19 @@ const WIKI_DETAIL = "high";
 const wikiJsonPath = join(repo, ".zread-pi", "wiki", WIKI_DETAIL, "wiki.json");
 
 console.log("▶ generateWikiCatalog()（三阶段）…");
-const events: Array<{ type: string; stage?: string; section?: string; progressTotal?: number }> = [];
+const events: Array<{
+	type: string;
+	stage?: string;
+	section?: string;
+	progressTotal?: number;
+	agentKey?: string;
+	agentRole?: string;
+	agentStatus?: string;
+	agentInputTokens?: number;
+	agentOutputTokens?: number;
+	contextTokens?: number;
+	contextWindow?: number;
+}> = [];
 let skeletonCheck: Promise<{ pages: number; sections: number }> | undefined;
 
 const result = await generateWikiCatalog((event) => {
@@ -334,6 +346,13 @@ const result = await generateWikiCatalog((event) => {
 		stage: event.stage,
 		section: event.section,
 		progressTotal: event.progress?.total,
+		agentKey: event.agentKey,
+		agentRole: event.agentRole,
+		agentStatus: event.agentStatus,
+		agentInputTokens: event.agentUsage?.input_tokens,
+		agentOutputTokens: event.agentUsage?.output_tokens,
+		contextTokens: event.contextTokens,
+		contextWindow: event.contextWindow,
 	});
 	if (event.stage === "classify" && event.type === "tool_result" && !skeletonCheck) {
 		skeletonCheck = loadWikiBlueprint(undefined, WIKI_DETAIL).then((blueprint) => ({
@@ -428,6 +447,48 @@ check(
 	events.some((event) => event.stage === "topics" && event.progressTotal === 4),
 	JSON.stringify(events.filter((event) => event.progressTotal !== undefined).slice(0, 5)),
 );
+
+// 逐 Agent 行：每个 Agent 的事件带稳定 key / 角色 / 生命周期 / 行内用量 / 上下文窗口
+// （UI 据此把「目录」展开成每个 Agent 一行）
+const agentEvents = events.filter((event) => event.agentKey !== undefined);
+const agentKeys = [...new Set(agentEvents.map((event) => event.agentKey))];
+const topicsKeys = [...new Set(agentEvents.filter((event) => event.agentRole === "topics").map((event) => event.agentKey))];
+const titlesKeys = [...new Set(agentEvents.filter((event) => event.agentRole === "titles").map((event) => event.agentKey))];
+check(
+	"分类别 Agent 有独立行（agentKey=classify）",
+	agentKeys.includes("classify"),
+	JSON.stringify(agentKeys),
+);
+check(
+	"每个分类一个主题 Agent 行（4 行）",
+	topicsKeys.length === 4,
+	JSON.stringify(topicsKeys),
+);
+check(
+	"每个有页面的分类一个标题 Agent 行（4 行）",
+	titlesKeys.length === 4,
+	JSON.stringify(titlesKeys),
+);
+check(
+	"每个 Agent 行都有 running 与 completed 终态（UI 行状态依据）",
+	topicsKeys.every(
+		(key) =>
+			agentEvents.some((event) => event.agentKey === key && event.agentStatus === "running") &&
+			agentEvents.some((event) => event.agentKey === key && event.agentStatus === "completed"),
+	),
+	JSON.stringify(agentEvents.filter((event) => event.agentStatus === "completed").map((event) => event.agentKey)),
+);
+check(
+	"Agent 事件带行内用量（agentUsage）",
+	agentEvents.some((event) => (event.agentInputTokens ?? 0) > 0 && (event.agentOutputTokens ?? 0) > 0),
+	JSON.stringify(agentEvents.find((event) => (event.agentInputTokens ?? 0) > 0) ?? null),
+);
+check(
+	"Agent 事件带上下文窗口与上下文已用（回退模型默认 200k）",
+	agentEvents.some((event) => event.contextWindow === 200000) &&
+		agentEvents.some((event) => (event.contextTokens ?? 0) > 0),
+	JSON.stringify(agentEvents.filter((event) => event.contextWindow !== undefined).slice(0, 2)),
+);
 const visitedSections = new Set(seenSections);
 check(
 	"每个分类都跑到了主题/标题阶段",
@@ -495,7 +556,10 @@ check(
 
 mode = "section-skip";
 console.log("\n▶ generateWikiCatalog()（核心模块不调用工具）…");
-const partial = await generateWikiCatalog();
+const partialAgentEvents: Array<{ agentKey?: string; agentStatus?: string }> = [];
+const partial = await generateWikiCatalog((event) => {
+	partialAgentEvents.push({ agentKey: event.agentKey, agentStatus: event.agentStatus });
+});
 let partialBlueprint: Record<string, unknown> | undefined;
 try {
 	partialBlueprint = JSON.parse(await readFile(wikiJsonPath, "utf-8")) as Record<string, unknown>;
@@ -512,6 +576,17 @@ check(
 check("失败分类不阻断其余分类", partialPages.length === 9, `实际 ${partialPages.length}`);
 check("失败后 wiki.json 仍可加载", partialBlueprint !== undefined);
 check("失败后 pagesCount 反映实际页面数", partial.pagesCount === 9, String(partial.pagesCount));
+check(
+	"未产出工具的分类其 Agent 行被标为 failed（业务判定，不是运行状态）",
+	partialAgentEvents.some(
+		(event) =>
+			event.agentKey !== undefined &&
+			event.agentKey.includes("核心模块") &&
+			event.agentKey.startsWith("topics:") &&
+			event.agentStatus === "failed",
+	),
+	JSON.stringify(partialAgentEvents.filter((event) => event.agentStatus !== undefined).slice(-4)),
+);
 
 // ---------------------------------------------------------------------------
 // 6) 失败语义 2：分类阶段不产出 sections —— 必须报错

@@ -48,10 +48,28 @@ export interface AgentResult {
   durationMs: number;
   /** Token 使用统计（harness usage ledger 的累计值） */
   tokenUsage?: TokenUsage;
+  /** 最后一次响应的上下文体量（input + output + cacheRead + cacheWrite） */
+  contextTokens?: number;
+  /** 模型上下文窗口（来自 agent-runtime 的 system/init 事件） */
+  contextWindow?: number;
 }
 
 /** 每「轮」折算的 token 预算（与适配层 `TOKENS_PER_TURN` 保持一致） */
 const TOKENS_PER_TURN = 25_000;
+
+/**
+ * 一次响应的上下文体量（口径与 pi 的 compaction 判定一致：
+ * input + output + cacheRead + cacheWrite，缓存读写也算进上下文）。
+ */
+function contextTokensFromUsage(usage: TokenUsage | undefined): number | undefined {
+  if (!usage) return undefined;
+  const tokens =
+    usage.input_tokens +
+    usage.output_tokens +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0);
+  return tokens > 0 ? tokens : undefined;
+}
 
 /** 两段式预算提示文案（按文档语言本地化，并点名最终的输出工具） */
 const BUDGET_NOTICES: Record<'zh' | 'en', { soft: (tool: string) => string; hard: (tool: string) => string }> = {
@@ -147,6 +165,15 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   // 最终以 result 事件的 usage（harness usage ledger 的权威累计）为准覆盖。
   let totalUsage: TokenUsage = emptyTokenUsage();
 
+  // 上下文占比：窗口来自 system/init（本次解析出的模型），已用 = 最近一次响应的上下文体量。
+  // 两者都是**每次响应**的报表值，与累计用量（totalUsage）不同口径。
+  let contextWindow: number | undefined;
+  let contextTokens: number | undefined;
+  const contextFields = (): { contextWindow?: number; contextTokens?: number } => ({
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(contextTokens !== undefined ? { contextTokens } : {}),
+  });
+
   // 构建钩子配置（如果有 onEvent 回调）
   const onEvent = options.onEvent;
   const hooks = onEvent ? {
@@ -158,6 +185,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
             toolName: input.toolName as string,
             toolInput: JSON.stringify(input.toolInput || {}).slice(0, 100),
             usage: totalUsage,
+            ...contextFields(),
           });
         },
       ],
@@ -170,6 +198,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
             toolName: input.toolName as string,
             output: String(input.toolOutput || '').slice(0, 200),
             usage: totalUsage,
+            ...contextFields(),
           });
         },
       ],
@@ -200,6 +229,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
           delayMs: info.delayMs,
           error: info.error,
           usage: totalUsage,
+          ...contextFields(),
         });
       }
       logger.warn(`API 错误，${info.delayMs / 1000}秒后重试 (${info.attempt}/${info.maxRetries}): ${info.error}`);
@@ -252,20 +282,27 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   });
 
   // 发送开始事件
-  options.onEvent?.({ type: 'requesting', usage: totalUsage });
+  options.onEvent?.({ type: 'requesting', usage: totalUsage, ...contextFields() });
 
   for await (const event of agent.query(options.prompts)) {
     const msg = event as SDKMessage;
 
+    // 模型上下文窗口（本次运行解析出的模型；UI 的「上下文占比」分母）
+    if (msg.type === 'system' && msg.subtype === 'init' && msg.context_window !== undefined) {
+      contextWindow = msg.context_window;
+    }
+
     // Partial 流式输出
     if (isPartialMessage(msg)) {
-      options.onEvent?.({ type: 'responding', usage: totalUsage });
+      options.onEvent?.({ type: 'responding', usage: totalUsage, ...contextFields() });
     }
 
     // Log progress
     if (isAssistantMessage(msg)) {
       if (msg.usage) {
         totalUsage = addTokenUsage(totalUsage, msg.usage);
+        // 每次响应都带当前上下文报表值（最近一次响应为准）
+        contextTokens = contextTokensFromUsage(msg.usage) ?? contextTokens;
       }
 
       for (const block of msg.message?.content || []) {
@@ -295,11 +332,13 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
           type: 'complete',
           usage: totalUsage,
           durationMs: Math.round(performance.now() - startTime),
+          ...contextFields(),
         });
 
         return {
           durationMs: Math.round(performance.now() - startTime),
           tokenUsage: totalUsage,
+          ...contextFields(),
         };
       } else {
         const errors = msg.errors?.join('\n') || msg.subtype;
@@ -309,6 +348,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
           durationMs: Math.round(performance.now() - startTime),
           // 失败也要归账：带上最后一次累计用量，供 UI 合计（否则失败页记为 0）
           usage: totalUsage,
+          ...contextFields(),
         });
         if (msg.errors) {
           for (const err of msg.errors) {
@@ -324,5 +364,6 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   return {
     durationMs: Math.round(performance.now() - startTime),
     tokenUsage: totalUsage,
+    ...contextFields(),
   };
 }

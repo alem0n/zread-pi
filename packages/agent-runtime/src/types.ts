@@ -164,6 +164,11 @@ export interface SDKSystemMessage {
   cwd: string
   mcp_servers: Array<{ name: string; status: string }>
   permission_mode: string
+  /**
+   * 本次运行解析出的模型上下文窗口（tokens）。
+   * 供 UI 展示「当前上下文已用 / 上下文窗口」占比（已用口径见 `message_end` 的 usage）。
+   */
+  context_window?: number
 }
 
 /** Marks a compaction boundary in the conversation. */

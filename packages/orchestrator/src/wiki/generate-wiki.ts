@@ -337,6 +337,9 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
       // 页面 Agent 的最后一次累计用量快照：失败路径（Agent 抛错）拿不到
       // `result.tokenUsage`，用它在 page_error 上归账，避免失败页在合计里记为 0。
       let lastUsage: TokenUsage | undefined;
+      // 上下文占比：已用 = 最近一次响应的上下文体量，窗口来自 Agent 的 system/init
+      let lastContextTokens: number | undefined;
+      let lastContextWindow: number | undefined;
       const writeAttempts: PageWriteAttempt[] = [];
       const writePageTool: ToolDefinition = {
         ...writeTool,
@@ -380,6 +383,8 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           onEvent: (catalogEvent) => {
             // 任何带用量的中间事件都刷新累计快照（usage 已是该 Agent 的累计值）
             if (catalogEvent.usage) lastUsage = catalogEvent.usage;
+            if (catalogEvent.contextTokens !== undefined) lastContextTokens = catalogEvent.contextTokens;
+            if (catalogEvent.contextWindow !== undefined) lastContextWindow = catalogEvent.contextWindow;
 
             // 将 CatalogEvent 转换为 ArticleEventPayload
             let articleEventType: ArticleEventPayload['type'];
@@ -409,6 +414,8 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
                   maxRetries: catalogEvent.maxRetries,
                   delayMs: catalogEvent.delayMs,
                   error: catalogEvent.error,
+                  contextTokens: lastContextTokens,
+                  contextWindow: lastContextWindow,
                 });
                 return;
               case 'error':
@@ -427,6 +434,8 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
               slug: page.slug,
               usage: catalogEvent.usage,
               toolName,
+              contextTokens: lastContextTokens,
+              contextWindow: lastContextWindow,
             });
           },
         });
@@ -488,6 +497,8 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           outputPath: pageResult.outputPath,
           durationMs: pageResult.durationMs,
           usage: result.tokenUsage,
+          contextTokens: result.contextTokens ?? lastContextTokens,
+          contextWindow: result.contextWindow ?? lastContextWindow,
         });
 
         logger.success(`[${page.slug}] 完成 (${pageResult.durationMs}ms)`);
@@ -516,6 +527,8 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           error: message,
           durationMs: pageResult.durationMs,
           usage: lastUsage,
+          contextTokens: lastContextTokens,
+          contextWindow: lastContextWindow,
         });
 
         logger.error(`[${page.slug}] 失败: ${message}`);

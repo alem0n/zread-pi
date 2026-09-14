@@ -305,6 +305,7 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 		);
 
 		// 会话初始化事件（与旧引擎的 system/init 对齐；首个 run 段开始前发出）
+		// context_window = 本次解析出的模型窗口，供 UI 计算「当前上下文占比」
 		const initMessage: SDKMessage = {
 			type: "system",
 			subtype: "init",
@@ -314,6 +315,7 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 			cwd: request.cwd,
 			mcp_servers: [],
 			permission_mode: request.permissionMode,
+			...(typeof request.model.contextWindow === "number" ? { context_window: request.model.contextWindow } : {}),
 		};
 
 		// ----------------------------------------------------------------

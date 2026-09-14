@@ -47,10 +47,10 @@ faux.setResponses([
 
 const hookLog: string[] = [];
 const retryLog: string[] = [];
-const events: string[] = [];
-let assistantTexts: string[] = [];
+const events: string[] = [];let assistantTexts: string[] = [];
 let finalUsage: { input_tokens: number; output_tokens: number } | undefined;
 let resultSubtype: string | undefined;
+let initContextWindow: number | undefined;
 let capturedReasoning: SimpleStreamOptions["reasoning"];
 let capturedMaxRetries: number | undefined;
 let capturedMaxRetryDelayMs: number | undefined;
@@ -109,6 +109,9 @@ for await (const event of agent.query("把结果写入文件")) {
 	const message = event as SDKMessage;
 	events.push(message.type === "system" ? `system/${message.subtype}` : message.type);
 
+	if (message.type === "system" && message.subtype === "init") {
+		initContextWindow = message.context_window;
+	}
 	if (message.type === "assistant") {
 		assistantTexts = message.message.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
@@ -128,6 +131,11 @@ await agent.close();
 
 console.log("\n▶ 断言");
 check("收到 system/init 事件", events.includes("system/init"));
+check(
+	"system/init 带模型上下文窗口（供 UI 算上下文占比）",
+	typeof initContextWindow === "number" && initContextWindow > 0,
+	String(initContextWindow),
+);
 check("收到 partial_message 流式事件", events.includes("partial_message"));
 check("收到 tool_result 事件", events.includes("tool_result"));
 check("PreToolUse 钩子被触发", hookLog.includes("pre:Write"), hookLog.join(","));
