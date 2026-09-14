@@ -1440,13 +1440,20 @@ body_path: ${{ hashFiles(format('.github/release-notes/{0}.md', github.ref_name)
 1. 新增 `actions/checkout@v5`（release job 不跑构建，checkout 成本可忽略）；
 2. 新增 `Resolve release notes body` step：shell 判断 `.github/release-notes/${GITHUB_REF_NAME}.md`
    是否存在，写入 `$GITHUB_OUTPUT` 的 `body_path`（不存在时写空值）；
-3. `Create Release` 用 `body_path: ${{ steps.notes.outputs.body_path }}`。
+3. `Create Release` 用 `body_path: ${{ steps.notes.outputs.body_path }}`，
+   并用同一个输出控制 `generate_release_notes: ${{ steps.notes.outputs.body_path == '' }}`。
 
-未命中时输出空字符串，action 按 falsy 回退 `generate_release_notes`，行为与文档一致。
+未命中时输出空字符串并开启 `generate_release_notes`，行为与文档一致。
+
+**为什么第 3 步要条件化生成开关**：`softprops/action-gh-release` 在 `generate_release_notes: true`
+与 `body_path` 同时生效时，会把自动生成的变更列表**追加**在说明文件后面（v1.5.2 的正文
+就是「说明文件 + 一段 Full Changelog」，而手工回填的 v1.4.0 ~ v1.5.1 只有文件本身）。
+条件化后正文与提交的说明文件**逐字一致**，便于用「body == git show <tag>:<file>」验证。
 
 ### 22.4 历史 Release 正文回填
 
-v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 的正文用仓库内对应说明文件覆盖（`gh release edit --notes-file`）。
+v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 的正文用仓库内对应说明文件覆盖（`gh release edit --notes-file`）；
+v1.5.2 的正文同样是它的说明文件。五个 Release 的正文都与各自 tag 上的文件逐行一致。
 说明文件均为人工编写，历史版本号未变，不涉及 tag / 产物变更。
 
 ### 22.5 验证（实际执行结果）
@@ -1455,12 +1462,14 @@ v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 的正文用仓库内对应说明文件覆盖�
 |---|---|
 | `bun run typecheck` | 0 错误（仅 workflow 与文档改动） |
 | 工作流片段断言 | 关键片段齐备、`hashFiles` 已无活动引用、无 tab 缩进 |
-| 历史正文回填 | v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 正文长度与仓库内说明文件对齐 |
+| 回填核对 | v1.4.0 / v1.4.1 / v1.5.0 / v1.5.1 正文与仓库内说明文件**逐行一致**（`body == git show <tag>:<file>`） |
+| v1.5.2 端到端 | 运行日志 `with:` 中首次出现 `body_path: .github/release-notes/v1.5.2.md`（修法生效）；正文 = 说明文件 + 追加的 Full Changelog |
+| v1.5.3 端到端 | 条件化 `generate_release_notes` 后，正文与仓库内说明文件逐字一致（无追加段） |
 | 下一次 tag | v1.5.2+ 推送后由 CI 自动带上说明文件正文（修法已入库） |
 
 ### 22.6 风险与未决
 
 - 回填是**改写已发布 Release 的正文**（AGENTS.md §4.5 的异常处理只允许在 Release 未对外使用时改 tag；
   正文编辑不动 tag / 产物，但仍属对外可见变更，本次由用户明确授权执行）。
-- `body_path` 未命中时不输出 `body_path` 也能工作（action 对空值 falsy 回退），
-  当前实现显式写空值，两种行为都已在注释里说明，便于后续维护者理解。
+- 无说明文件时仍走 `generate_release_notes`，此时 `body_path` 为空值 —— 该输入会被 GitHub 过滤掉，
+  等于没传（这正是预期的回落路径）。
