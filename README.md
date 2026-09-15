@@ -244,15 +244,17 @@ slug、文件编号与去重全部由代码统一分配（不依赖模型命名�
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Anthropic · OpenAI · Google Gemini · Mistral · Cohere · xAI · Groq | DeepSeek · Moonshot · MiniMax · 智谱 · Qwen · 豆包 · Yi · 百川 · StepFun 等 |
 
-没找到你的？在 TUI 里走「自定义 Provider」流程，填任意 OpenAI 兼容 Base URL 即可；
-还能为任意 Provider 添加自定义模型（上下文窗口 / 最大输出 / 思考 / 图片能力）。
+没找到你的？在 TUI 里走「自定义 Provider」流程：填写 Provider 名称、任意 OpenAI / Anthropic / Gemini 兼容
+Base URL 与协议即可创建一个与内置 Provider 等价的提供商（可起任意名字、可添加多个自定义模型，
+API Key 与模型列表都在其详情页里维护）；也能为任意 Provider 添加自定义模型
+（上下文窗口 / 最大输出 / 思考 / 图片能力）。
 
 ## 配置
 
 配置归 zread-pi 自管理，全部可在 TUI 中维护，无需手写 YAML：
 
 - `~/.zread-pi/config.yaml` —— 非敏感配置：UI / 文档语言、`llm.provider/model`、每个 Provider 的
-  `base_url` 与自定义模型、思考深度（`llm.thinking_level`）、模型上下文/输出覆盖（`llm.context_window` /
+  名称（自定义 Provider）、`base_url` 与自定义模型、思考深度（`llm.thinking_level`）、模型上下文/输出覆盖（`llm.context_window` /
   `llm.max_tokens`，留空 = 跟随模型目录默认；配置界面 `/config/model-size`）、token 预算（`agent.token_budget`，0 = 按
   `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、文风润色（`polish.enabled`，
   `polish.mode = prompt-only | full`）、蓝图细节档位（`blueprint.detail = minimal | low | medium | high | max`，默认
