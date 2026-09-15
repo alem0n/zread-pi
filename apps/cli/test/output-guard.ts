@@ -19,6 +19,8 @@ import { join } from 'node:path';
 
 const home = await mkdtemp(join(tmpdir(), 'zread-pi-guard-home-'));
 process.env.ZREAD_PI_HOME = home;
+// 杂散写入的 needle 断言读的是文本日志文件——文本 sink 默认关闭，测试显式开启
+process.env.ZREAD_PI_LOG_TEXT = '1';
 
 const { getLogFile } = await import('@zread-pi/utils');
 const {

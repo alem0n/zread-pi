@@ -1715,14 +1715,25 @@ pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens
 ### 25.11 JSONL exporter（机器可读 sink，本仓库新增）
 
 与 file-exporter 同一偏差族：harness 没有文件 sink，JSONL 是为「日志事后分析」新增的能力。
+**JSONL 是默认文件 sink**；文本 file-exporter 降级为可选（见下）。
 
 - 落 `~/.zread-pi/logs/zread-pi-<yyyy-MM-dd>.jsonl`，与文本文件同目录同日期口径；
 - 每行一条 JSON：`{ sn, ts, time, name, type, level, msg }`——`msg` 走与文本 sink 相同的
   printf 渲染（`LoggerFormat.format`），语义完全一致；单行超过 10240 字符截断补 `...`；
-- **默认开启**：`ZREAD_PI_LOG_JSONL=0`（或 `false` / `no`）显式关闭，
-  避免不想维护双文件的用户被动写两份；
+- **默认开启**：`ZREAD_PI_LOG_JSONL=0`（或 `false` / `no`）显式关闭；
 - 级别与文本 file-exporter 同口径（排障 sink，默认记录含 debug 的全部级别，
   不受 `ZREAD_PI_LOG_LEVEL` 影响）；
 - 保留期清理与文本文件共用 `sweepOldLogFiles`（同时扫 `.log` 与 `.jsonl` 两种后缀，
   `ZREAD_PI_LOG_RETENTION_DAYS` 同一份配置）；
 - 写失败 / 序列化失败一律静默（与其它 exporter 相同的「日志绝不打断业务」契约）。
+
+### 25.12 文本 file-exporter 降级为可选 sink
+
+JSONL 承担默认文件 sink 后，文本输出沦为重复内容，改为**默认关闭**：
+
+- `ZREAD_PI_LOG_TEXT=1`（或 `true` / `yes`）显式开启——适合人工翻阅、
+  既有 needle 脚本 / 外部 grep 工具（行格式 `[本地时间] [级别] 模块名 消息` 不变）；
+- 行格式、级别口径（全级别含 debug）、保留期清理、跨天切换、写失败静默等行为均不变；
+- 兼容层的 `getLogFile()` 仍返回文本文件路径（开启后才有内容）；
+  依赖文本文件的测试（`test:logger` needle 段、`test:tui` 的 output-guard / smoke-tui）
+  已在测试内显式设置 `ZREAD_PI_LOG_TEXT=1`。

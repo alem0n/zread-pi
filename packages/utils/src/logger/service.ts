@@ -12,8 +12,9 @@
  *  2. 分配全局 `sn` / `ts`，广播给所有 exporter；
  *  3. 每个 exporter 用 `resolveExporterLevel` 判定是否发出（级别阈值）。
  *
- * 默认注册的 exporter：内置环形缓冲（1000 条，全级别）+ 文本文件 exporter +
- * JSONL exporter（结构化机器可读 sink，`ZREAD_PI_LOG_JSONL=0` 关闭）。
+ * 默认注册的 exporter：内置环形缓冲（1000 条，全级别）+ JSONL exporter
+ * （结构化机器可读 sink，`ZREAD_PI_LOG_JSONL=0` 关闭）；
+ * 文本文件 exporter 默认关闭（`ZREAD_PI_LOG_TEXT=1` 开启，needle 兼容 / 人工翻阅用）。
  * console exporter **默认不注册**（显式 `ZREAD_PI_LOG_CONSOLE=1` 才开），
  * 因为 TUI 期间 console-guard 会把 console 输出转回总线，两者同时开启会往
  * 日志文件里双写（详见 MIGRATION.md）。
@@ -25,7 +26,7 @@ import {
   LOG_CONSOLE_ENV,
   LOG_LEVEL_ENV,
 } from './console-exporter.js';
-import { FileExporter } from './file-exporter.js';
+import { FileExporter, isTextLogEnabled } from './file-exporter.js';
 import { JsonlExporter, isJsonlEnabled } from './jsonl-exporter.js';
 import {
   LoggerLevel,
@@ -156,8 +157,11 @@ export class LoggerService {
       },
     });
 
-    // 文本文件 exporter（默认开启，日期按写入时刻取）
-    this.addExporter(new FileExporter());
+    // 文本文件 exporter：默认关闭（ZREAD_PI_LOG_TEXT=1 开启）——
+    // 结构化数据由 JSONL exporter（默认开启）承担，文本 sink 沦为重复内容
+    if (isTextLogEnabled()) {
+      this.addExporter(new FileExporter());
+    }
 
     // JSONL exporter：默认开启（ZREAD_PI_LOG_JSONL=0 关闭），结构化机器可读 sink
     if (isJsonlEnabled()) {

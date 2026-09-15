@@ -10,6 +10,9 @@
  *
  * 级别：文件是**排障 sink**，默认记录全部级别（含 debug），
  * 不受 `ZREAD_PI_LOG_LEVEL`（只调 console exporter）影响。
+ *
+ * 默认**关闭**：结构化数据已由 JSONL exporter 承担（默认开启），文本 sink 沦为
+ * 重复内容；`ZREAD_PI_LOG_TEXT=1` 显式开启（needle 兼容 / 人工翻阅场景）。
  */
 
 import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
@@ -22,6 +25,9 @@ import { projectHomePath } from '../project-home.js';
 /** 日志保留天数（默认 30 天）；`ZREAD_PI_LOG_RETENTION_DAYS` 可覆盖，<= 0 表示不清理。 */
 export const DEFAULT_LOG_RETENTION_DAYS = 30;
 export const LOG_RETENTION_DAYS_ENV = 'ZREAD_PI_LOG_RETENTION_DAYS';
+
+/** 文本 sink 开关环境变量（默认关闭；`1`/`true`/`yes` 显式开启）。 */
+export const LOG_TEXT_ENV = 'ZREAD_PI_LOG_TEXT';
 
 /** 日志文件名前缀与目录名（目录路径统一走 projectHomePath）；sweep 同时覆盖 .log 与 .jsonl。 */
 export const LOG_FILE_PREFIX = 'zread-pi-';
@@ -123,4 +129,10 @@ function readRetentionDaysFromEnv(): number {
   // 负数合法：<= 0 表示禁用清理（与文档承诺一致），只拒绝非数字
   if (!Number.isFinite(parsed)) return DEFAULT_LOG_RETENTION_DAYS;
   return Math.trunc(parsed);
+}
+
+/** 是否由环境变量开启文本 sink（默认关闭；`1`/`true`/`yes` 显式开启）。 */
+export function isTextLogEnabled(): boolean {
+  const raw = process.env[LOG_TEXT_ENV];
+  return raw === '1' || raw === 'true' || raw === 'yes';
 }

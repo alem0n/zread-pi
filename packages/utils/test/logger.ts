@@ -29,6 +29,7 @@ import {
   LOG_JSONL_ENV,
   LOG_LEVEL_ENV,
   LOG_RETENTION_DAYS_ENV,
+  LOG_TEXT_ENV,
   Time,
   addExporter,
   createLogger,
@@ -301,8 +302,9 @@ async function readLog(): Promise<string> {
   check('近期文件保留', remaining.includes(recentName), remaining.join(','));
   check('retention<=0 不清理', sweepOldLogFiles(0) === 0);
 
-  // needle 兼容（兼容层 info 行仍含 [INFO] + 消息）
+  // needle 兼容（兼容层 info 行仍含 [INFO] + 消息）——文本 sink 默认关闭，显式开启
   resetLoggerServiceForTesting();
+  process.env[LOG_TEXT_ENV] = '1';
   logger.info('needle-compat-4242');
   const content = await readLog();
   check('兼容层 info 行含 [INFO] 与消息', content.includes('[INFO]') && content.includes('needle-compat-4242'), content.split('\n').slice(-2)[0]);
@@ -320,6 +322,8 @@ async function readLog(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 {
+  // 文本 sink 默认关闭，⑥⑦⑧ 段的 needle 断言需要它——显式开启
+  process.env[LOG_TEXT_ENV] = '1';
   resetLoggerServiceForTesting();
   const named: Logger = createLogger('orchestrator.pages');
   named.info('named-needle-99');
@@ -335,6 +339,7 @@ async function readLog(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 {
+  process.env[LOG_TEXT_ENV] = '1';
   resetLoggerServiceForTesting();
   logger.progress('Scanning project', '/tmp/x');
   logger.success('All done');
@@ -474,23 +479,31 @@ async function readLog(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 {
-  // 9a) 默认开启：不设 ZREAD_PI_LOG_JSONL 时服务里有 JsonlExporter
+  // 9a) JSONL 默认开启 + 文本默认关闭：不设环境变量时 exporter = 缓冲 + jsonl
   resetLoggerServiceForTesting();
   delete process.env[LOG_JSONL_ENV];
+  delete process.env[LOG_TEXT_ENV];
   const svc = getLoggerService();
   const names = svc.exporters.size;
   createLogger('probe.default').info('jsonl-on-probe');
   const jsonlPath = getJsonlLogFilePath();
   const existsAfterOn = await readFile(jsonlPath, 'utf-8').then(() => true, () => false);
   check('JSONL 默认开启：产出 .jsonl 文件', existsAfterOn);
-  check('JSONL 默认开启：exporter 数量含 jsonl（3 = 缓冲 + 文本 + jsonl）', names === 3, `exporters=${names}`);
+  check('默认组合：exporter 数量 2（缓冲 + jsonl，文本默认关闭）', names === 2, `exporters=${names}`);
+  // 早期段落（⑥ retention 测试）写过 .log 文件；先删除再验证「默认关闭不产出」
+  await rm(getLogFile(), { force: true });
+  createLogger('probe.text-off').info('text-off-probe');
+  const textOff = await readFile(getLogFile(), 'utf-8').then(() => true, () => false);
+  check('文本 sink 默认关闭：不产出 .log 文件', !textOff);
 
-  // 9a-2) 显式关闭：ZREAD_PI_LOG_JSONL=0 时不注册 jsonl exporter
+  // 9a-2) 显式开关：文本 =1 开启、jsonl =0 关闭
   resetLoggerServiceForTesting();
+  process.env[LOG_TEXT_ENV] = '1';
   process.env[LOG_JSONL_ENV] = '0';
-  const offSvc = getLoggerService();
-  check('JSONL 显式关闭（=0）：exporter 数量 2（缓冲 + 文本）', offSvc.exporters.size === 2, `exporters=${offSvc.exporters.size}`);
+  const onSvc = getLoggerService();
+  check('文本 =1 开启 / jsonl =0 关闭：exporter 数量 2（缓冲 + 文本）', onSvc.exporters.size === 2, `exporters=${onSvc.exporters.size}`);
   resetLoggerServiceForTesting();
+  delete process.env[LOG_TEXT_ENV];
   delete process.env[LOG_JSONL_ENV];
 
   // 9b) 默认开启下：结构化行可解析、字段完整、printf 语义

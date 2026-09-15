@@ -33,7 +33,7 @@ export {
   DEFAULT_BUFFER_SIZE,
 } from './logger/service.js';
 export { LoggerFacade, LoggerService } from './logger/service.js';
-export { FileExporter, getLogFilePath, sweepOldLogFiles, DEFAULT_LOG_RETENTION_DAYS, LOG_RETENTION_DAYS_ENV } from './logger/file-exporter.js';
+export { FileExporter, isTextLogEnabled, getLogFilePath, sweepOldLogFiles, DEFAULT_LOG_RETENTION_DAYS, LOG_RETENTION_DAYS_ENV, LOG_TEXT_ENV } from './logger/file-exporter.js';
 export { ConsoleExporter, STDOUT_CAPTURE_LOGGER_NAME, detectColorLevel, LOG_CONSOLE_ENV, LOG_LEVEL_ENV } from './logger/console-exporter.js';
 export {
   JsonlExporter,
