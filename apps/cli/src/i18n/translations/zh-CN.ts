@@ -252,7 +252,7 @@ export const zhCN: TranslationKeys = {
   tools: {
     title: '外部工具',
     homeLabel: '外部工具',
-    intro: '安装 ripgrep / fd 会让 Grep 与 Glob 更快；未安装时自动使用内置实现，功能不受影响。',
+    intro: '安装 ripgrep / fd 会让 grep 与 find 更快；未安装时自动使用内置实现，功能不受影响。',
     ready: '就绪',
     readyRatio: '{ready}/{total} 就绪',
     stateSystem: '系统已安装',
@@ -273,7 +273,7 @@ export const zhCN: TranslationKeys = {
     managedHint: '按 d 可卸载（仅删除 zread-pi 安装的副本）',
     systemHint: '使用系统 PATH 中的版本；需要在 zread-pi 内管理时可覆盖安装',
     missingHint: '按 Enter 下载并安装；也可以按住 t 停用以强制使用内置实现',
-    disabledHint: '已停用：即使本机安装也不会使用，Grep / Glob 走内置实现',
+    disabledHint: '已停用：即使本机安装也不会使用，grep / find 走内置实现',
     notInstallable: '当前平台不支持自动安装，请手动安装后重新打开此页',
     enabled: '已启用',
     disabled: '已停用',
@@ -293,8 +293,8 @@ export const zhCN: TranslationKeys = {
     detailFooter: 'ESC 返回 | Enter 安装/重装 | d 卸载 | t 启用/停用 | s 保存并返回',
     busyFooter: '安装中… 请稍候（ctrl+c 退出）',
     usage: {
-      rg: 'Grep（文件内容搜索）',
-      fd: 'Glob（文件名搜索）',
+      rg: 'grep（文件内容搜索）',
+      fd: 'find（文件名搜索）',
     },
   },
   common: {

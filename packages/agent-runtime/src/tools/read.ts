@@ -17,7 +17,7 @@
  *  4. 旧实现 offset 是 0-based 且会给每行加 `行号\t` 前缀（与 Edit 的精确匹配语义无关，
  *     纯属浪费 token）。现在与上游一致：offset 1-based，输出原始文本。
  *
- * 参数兼容：主参数沿用本仓库既有的 `file_path`，同时接受上游的 `path` 别名。
+ * 参数对齐上游 pi：主参数 `path`；旧契约的 `file_path` 仍被接受（兼容历史调用方）。
  */
 
 import { readFile, stat } from 'node:fs/promises'
@@ -32,20 +32,20 @@ import { resolveReadPathAsync } from './path-utils.js'
 import { toTruncationDetails, truncateHead, formatSize, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from './truncate.js'
 
 function resolveFilePath(input: ToolInputParams): string {
-  const filePath = getString(input, 'file_path') ?? getString(input, 'path')
-  if (!filePath) throw new TypeError('Expected string for key "file_path", got undefined')
+  const filePath = getString(input, 'path') ?? getString(input, 'file_path')
+  if (!filePath) throw new TypeError('Expected string for key "path", got undefined')
   return filePath
 }
 
 export const FileReadTool = defineTool({
-  name: 'Read',
-  description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp) - images are sent as attachments when the model supports them. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files, and continue with offset until the whole file has been read.`,
+  name: 'read',
+  description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
   inputSchema: {
     type: 'object',
     properties: {
-      file_path: {
+      path: {
         type: 'string',
-        description: 'Path to the file to read (relative to the working directory, or absolute)',
+        description: 'Path to the file to read (relative or absolute)',
       },
       offset: {
         type: 'number',
@@ -56,7 +56,7 @@ export const FileReadTool = defineTool({
         description: 'Maximum number of lines to read',
       },
     },
-    required: ['file_path'],
+    required: ['path'],
   },
   isReadOnly: true,
   isConcurrencySafe: true,
@@ -78,7 +78,7 @@ export const FileReadTool = defineTool({
 
     if (fileStat.isDirectory()) {
       return {
-        data: `Error: ${absolutePath} is a directory, not a file. Use the Ls tool to list directory contents.`,
+        data: `Error: ${absolutePath} is a directory, not a file. Use the ls tool to list directory contents.`,
         is_error: true,
       }
     }
@@ -164,7 +164,7 @@ export const FileReadTool = defineTool({
     if (truncation.firstLineExceedsLimit) {
       const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine] ?? '', 'utf-8'))
       return {
-        data: `[Line ${startLineDisplay} is ${firstLineSize}, exceeding the ${formatSize(DEFAULT_MAX_BYTES)} limit. Read the file with a tool that can page by bytes, or use Grep to locate the relevant part.]`,
+        data: `[Line ${startLineDisplay} is ${firstLineSize}, exceeding the ${formatSize(DEFAULT_MAX_BYTES)} limit. Read the file with a tool that can page by bytes, or use grep to locate the relevant part.]`,
         details: { path: absolutePath, truncation: toTruncationDetails(truncation), firstLineExceedsLimit: true },
       }
     }

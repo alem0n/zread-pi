@@ -46,12 +46,12 @@ export function withStyleDiscipline(
  * polish Agent 的 Embedded mode 约定。
  *
  * humanizer skill 的 Embedded mode 定义是「只回最终文本」；这里把交付物替换为文件本身：
- * Agent 用 Read / Edit 就地润色，不输出解释或修改清单，最终回复只允许一行状态词，
+ * Agent 用 read / edit 就地润色，不输出解释或修改清单，最终回复只允许一行状态词，
  * 避免把「润色报告」当成文档内容写进页面（也避免调用方把它的输出误当产物）。
  */
 export const POLISH_EMBEDDED_MODE = `## Embedded mode（本 Agent 的输出约定）
 你在另一个任务内部运行，唯一的交付物是被润色的文件本身：
-1. 先用 Read 读取目标文件，再用 Edit 就地修改；不要新建文件，不要调用其它写工具。
+1. 先用 read 读取目标文件，再用 edit 就地修改；不要新建文件，不要调用其它写工具。
 2. 只改散文。代码块、行内代码、\`Sources:\` 溯源行、YAML frontmatter、Mermaid 语法
    与链接目标一律原样保留（见上文「绝对不许动」）。
 3. 不缩小信息量：不删事实、不删溯源、不删图表、不删章节。
@@ -75,5 +75,5 @@ export function buildPolishTaskPrompt(options: {
 - 文件路径：${options.filePath}
 - 页面 slug：${options.slug}${titleLine}
 
-按系统提示里的文风纪律执行：先 Read，再用 Edit 就地修改，最后只回一行状态词。`
+按系统提示里的文风纪律执行：先 read，再用 edit 就地修改，最后只回一行状态词。`
 }

@@ -6,38 +6,38 @@
  *  - 自动创建父目录；
  *  - 结果文本用「调用方给的路径」（相对路径更短、更贴近模型输入），绝对路径放 details。
  *
- * 参数名 `file_path` / `content` 保持不变（本仓库既有契约，测试与提示词都依赖它）。
+ * 参数对齐上游 pi：`path` / `content`；旧契约的 `file_path` 仍被接受（兼容历史调用方）。
  */
 
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { defineTool, getRequiredString } from './types.js'
+import { defineTool, getRequiredString, getString } from './types.js'
 import type { ToolCallReturn } from './types.js'
 import { withFileMutationQueue } from './file-mutation-queue.js'
 import { resolveToCwd } from './path-utils.js'
 
 export const FileWriteTool = defineTool({
-  name: 'Write',
+  name: 'write',
   description:
-    'Write content to a file. Creates the file if it does not exist, overwrites if it does. Automatically creates parent directories. Use Write only for new files or complete rewrites; use Edit for targeted changes.',
+    "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
   inputSchema: {
     type: 'object',
     properties: {
-      file_path: {
+      path: {
         type: 'string',
-        description: 'Path to the file to write (relative to the working directory, or absolute)',
+        description: 'Path to the file to write (relative or absolute)',
       },
       content: {
         type: 'string',
-        description: 'The full content to write to the file',
+        description: 'Content to write to the file',
       },
     },
-    required: ['file_path', 'content'],
+    required: ['path', 'content'],
   },
   isReadOnly: false,
   isConcurrencySafe: false,
   async call(input, context): Promise<ToolCallReturn | string> {
-    const requestedPath = getRequiredString(input, 'file_path')
+    const requestedPath = getString(input, 'path') ?? getRequiredString(input, 'file_path')
     const content = getRequiredString(input, 'content')
     const absolutePath = resolveToCwd(requestedPath, context.cwd)
     const directory = dirname(absolutePath)

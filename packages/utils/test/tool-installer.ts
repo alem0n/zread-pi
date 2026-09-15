@@ -200,7 +200,7 @@ console.log('\n▶ 1. 工具注册表（可扩展接口）')
 check('注册表登记了 rg 与 fd', toolIds().join(',') === 'rg,fd', toolIds().join(','))
 check('listTools 返回 2 个 spec 且顺序稳定', listTools().map((spec) => spec.id).join(',') === 'rg,fd')
 check('getToolSpec 命中与未命中', getToolSpec('rg')?.binaryName === 'rg' && getToolSpec('nope') === undefined)
-check('spec 声明了用途与驱动的 Agent 工具', RG_TOOL.usedBy.join() === 'Grep' && FD_TOOL.usedBy.join() === 'Glob')
+check('spec 声明了用途与驱动的 Agent 工具', RG_TOOL.usedBy.join() === 'grep' && FD_TOOL.usedBy.join() === 'find')
 check('spec 声明了环境变量覆盖名', RG_TOOL.envPathVar === 'ZREAD_PI_RG_PATH' && FD_TOOL.envPathVar === 'ZREAD_PI_FD_PATH')
 
 check(

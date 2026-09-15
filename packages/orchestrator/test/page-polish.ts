@@ -159,20 +159,18 @@ const server = Bun.serve({
 			if (hasToolResult) return sse(finalText("POLISHED"));
 			if (slug === "1-good") {
 				return sse(
-					toolCall("call_polish_good", "Edit", {
-						file_path: pagePath("1-good"),
-						old_string: originalProse,
-						new_string: polishedProse,
+					toolCall("call_polish_good", "edit", {
+						path: pagePath("1-good"),
+						edits: [{ oldText: originalProse, newText: polishedProse }],
 					}),
 				);
 			}
 			if (slug === "2-mermaid") {
 				// 故意把合法引号标签改成裸写（Edit 工具不做 Mermaid 校验，由 polish 后的复检兜底）
 				return sse(
-					toolCall("call_polish_mermaid", "Edit", {
-						file_path: pagePath("2-mermaid"),
-						old_string: 'A["用户(输入)"]',
-						new_string: "A[用户(输入)]",
+					toolCall("call_polish_mermaid", "edit", {
+						path: pagePath("2-mermaid"),
+						edits: [{ oldText: 'A["用户(输入)"]', newText: "A[用户(输入)]" }],
 					}),
 				);
 			}

@@ -88,7 +88,7 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 - `TokenUsage` 字段名、`BlueprintResult.durationMs / tokenUsage`；`result.usage` 自第十步起为 harness usage ledger 的**累计值**（单次响应用量在 `assistant` 事件上）
 - 第十四步起 `TokenUsage` 归并新增纯函数导出：`emptyTokenUsage / addTokenUsage / sumTokenUsage`（`packages/agent-runtime/src/usage.ts`，唯一归并口径；pi 的 `addUsage` 只作用于内部 `Usage` 形状且未从包根导出）；`CatalogEvent` / `ArticleEventPayload` 的 `usage` 语义补齐为「该 Agent 的累计快照」（**含失败事件**带上最后一次快照，见 §1.1 与 `MIGRATION.md` §16）
 - 首尾机制配置面：`budget.maxTokens / softRatio / forcedTurns / notices / outputTools`；`maxTurns` / `finalization` 保留为兼容字段（折算 token 预算，见 `MIGRATION.md` §12.5）
-- 工具名：`Read` / `Write` / `Edit` / `Glob` / `Grep` / `write_page` / `generate_blueprint`（提示词里写死了）；`Ls` 为新增工具名（见 §1.3）
+- 工具名（第二十一步起对齐上游 pi 的小写命名）：`read` / `write` / `edit` / `find`（原 `Glob`）/ `grep` / `ls`（原 `Ls`）/ `write_page` / `generate_blueprint`（提示词与测试依赖名字，不得改名）；参数风格同步对齐 pi：文件路径参数为 `path`（旧 `file_path` 仍被接受），`edit` 主参数为 `path` + `edits: [{ oldText, newText }]`（旧 `old_string` / `new_string` / `replace_all` 与顶层 `oldText` / `newText` 别名仍被接受）；工具 description 与 pi coding-agent 逐字一致
 - 蓝图三阶段输出工具：`submit_sections`（分类；sync 为 merge 模式）/ `submit_section_topics`（分主题）/ `refine_section_titles`（标题）；`generate_blueprint` / `generate_sync_blueprint` 仅归档
 - `WikiOutput.sections?: WikiSection[]`（新增可选；旧 wiki.json 无该字段时由 `sectionsFromBlueprint` 从 pages 推导）；`WikiSection` / `WikiTopic` 为新增类型
 - `BlueprintResult` 的 `pagesCount` 语义为「最终页面数」，新增可选 `sectionsCount?` / `failedSections?`（`{ section, stage: 'topics'|'titles', error }[]`）
@@ -121,12 +121,12 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 
 | 工具      | 状态     | 要点                                                                                                                                                                                    |
 | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Ls`    | **新增** | 目录列举：大小写不敏感排序、目录补 `/`、含 dotfile、条目/字节双上限；`Read` 的目录报错已改为点名 `Ls`                                                                                                                       |
-| `Glob`  | 替换     | 系统 `fd` 优先，无 fd 时纯 JS 遍历兜底；输出**相对搜索根的 POSIX 路径**并按字典序排序；尊重 `.gitignore`/`.ignore`/`.fdignore`（非 git 仓库内也生效）；跳过 `.git`/`node_modules`/`.zread-pi`；`limit` 可调                           |
-| `Grep`  | 替换     | rg `--json` **流式**解析 + 命中上限立刻 kill；无 rg 时纯 JS 兜底（同输出格式）；新增 `ignoreCase`/`literal`/`context`/`limit`；长行截断 500 字符；保留 `output_mode`（content / files_with_matches / count）                |
-| `Read`  | 替换     | 图片按 **magic number** 判型，模型支持图片时走**图片处理管线**回传 image 块（自动归一到内联格式、缩放到 2000×2000 / 4.5MB 以内、带坐标换算提示），否则文本说明；`offset` 1-based；2000 行 / 50KB 双上限 + `Use offset=N to continue.`；目录报错点名 `Ls`；非图片二进制不灌乱码                                             |
-| `Write` | 替换     | 同文件并发写串行化（`withFileMutationQueue`）；`details.created` 标记新建/覆盖；参数 `file_path`/`content` 不变                                                                                              |
-| `Edit`  | 替换     | BOM/CRLF 归一化 + fuzzy 兜底；支持 `edits[]` 多段不相邻替换；`replace_all` 保留；回传 diff / patch / 首行变更行号；同文件并发编辑串行化；`file_path`/`old_string`/`new_string` 仍可用（并接受上游 `path`/`edits`/`oldText`/`newText`） |
+| `ls`    | **新增** | 目录列举：大小写不敏感排序、目录补 `/`、含 dotfile、条目/字节双上限；`read` 的目录报错已改为点名 `ls`（名称对齐 pi 后原 `Ls`）                                                                                                                       |
+| `find`  | 替换     | 原 `Glob`，名称对齐 pi；系统 `fd` 优先，无 fd 时纯 JS 遍历兜底；输出**相对搜索根的 POSIX 路径**并按字典序排序；尊重 `.gitignore`/`.ignore`/`.fdignore`（非 git 仓库内也生效）；跳过 `.git`/`node_modules`/`.zread-pi`；`limit` 可调                           |
+| `grep`  | 替换     | 原 `Grep`，名称对齐 pi；rg `--json` **流式**解析 + 命中上限立刻 kill；无 rg 时纯 JS 兜底（同输出格式）；新增 `ignoreCase`/`literal`/`context`/`limit`；长行截断 500 字符；保留 `output_mode`（content / files_with_matches / count）                |
+| `read`  | 替换     | 原 `Read`，名称对齐 pi；图片按 **magic number** 判型，模型支持图片时走**图片处理管线**回传 image 块（自动归一到内联格式、缩放到 2000×2000 / 4.5MB 以内、带坐标换算提示），否则文本说明；`offset` 1-based；2000 行 / 50KB 双上限 + `Use offset=N to continue.`；目录报错点名 `ls`；非图片二进制不灌乱码                                             |
+| `write` | 替换     | 原 `Write`，名称对齐 pi；同文件并发写串行化（`withFileMutationQueue`）；`details.created` 标记新建/覆盖；参数 `path`/`content`（旧 `file_path` 仍被接受）                                                                                              |
+| `edit`  | 替换     | 原 `Edit`，名称对齐 pi；BOM/CRLF 归一化 + fuzzy 兜底；主参数 `path` + `edits[]` 多段不相邻替换（上游风格）；`old_string`/`new_string`/`replace_all` 与顶层 `oldText`/`newText` 仍被接受；回传 diff / patch / 首行变更行号；同文件并发编辑串行化 |
 | 输出截断    | 复用     | 直接用 vendor `@earendil-works/pi-agent-core` 已导出的 `truncateHead`/`truncateLine`/`formatSize` 等纯函数（`tools/truncate.ts` 薄封装 + 统一提示文案）                                                     |
 
 | 图片处理管线（`image/`） | 新增 | 移植自 pi coding-agent 的 `utils/image-*.ts`：`processImage()` 是唯一入口；Worker 线程跑 photon（Rust/WASM），失败回退进程内；上游差异与打包细节见 `MIGRATION.md` §14.2.1 / §14.3 |

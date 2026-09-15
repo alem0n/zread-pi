@@ -1540,3 +1540,44 @@ pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens
 - 覆盖值**不会反向写回 catalog**（`getZreadModel()` 仍返回目录原值），因此 Provider 详情页的
   模型列表展示的是目录元数据；只有请求与上下文记账用覆盖后的值。这是有意的：配置界面改的是
   「当前生效模型」的运行时行为，不是目录事实。
+
+---
+
+## 24. 工具名 / 参数 / 描述与 pi coding-agent 完全对齐
+
+### 24.1 背景
+
+第六步按上游 pi 重写工具层时，**工具名保留了旧 `agent-sdk` 时代的 PascalCase**（`Read` / `Write` / `Edit` / `Glob` / `Grep` / `Ls`），
+参数风格也保留了旧契约（`file_path` / `old_string` / `new_string` / `replace_all`），与 pi coding-agent 的小写命名
+（`read` / `write` / `edit` / `find` / `grep` / `ls`）和参数风格（`path`、`edits: [{ oldText, newText }]`）不一致。
+本步骤把三者（名称 / 参数 / description）全部对齐 pi coding-agent，消除「同源实现、两套命名」的漂移。
+
+### 24.2 改动清单
+
+| 动作 | 对象 |
+|---|---|
+| 工具改名（保持导出常量名不变） | `Read→read`、`Write→write`、`Edit→edit`、`Glob→find`、`Grep→grep`、`Ls→ls`（`packages/agent-runtime/src/tools/*.ts` 的 `name` 字段；`GlobTool` 等导出名不动，业务侧 import 零改动） |
+| 参数风格对齐 | `read` / `write`：主参数 `file_path` → `path`（旧名仍被接受）；`edit`：主参数 `path` + `edits[]`（`old_string` / `new_string` / `replace_all` 与顶层 `oldText` / `newText` 仍被接受）；`grep`：schema 移除 pi 没有的 `output_mode`（运行时仍接受，作为本仓库扩展） |
+| description 逐字一致 | 六个工具的 description 与 pi coding-agent `src/core/tools/*.ts` 逐字相同（含截断上限数字） |
+| 交叉引用文案 | `read` 目录报错点名 `ls`、长行截断提示点名 `read tool`、polish 提示词 `Read/Edit` → `read/edit`（`style-discipline.ts`） |
+| 外部工具注册表 | `usedBy`：`['Grep']→['grep']`、`['Glob']→['find']`（`packages/utils/src/tools/registry.ts`） |
+| i18n 文案 | `Grep/Glob` → `grep/find`（`apps/cli/src/i18n/translations/{en-US,zh-CN}.ts` 的 tools 段） |
+| 测试同步 | `tools-smoke` / `smoke-agent` / `openai-http-smoke` / `page-polish`（mock 工具调用改用新名新参数）/ `smoke-tui`（i18n 断言）/ `tool-installer`（usedBy 断言） |
+
+### 24.3 兼容性说明
+
+- **旧参数名仍被接受**：`file_path`（read/write/edit）、`old_string` / `new_string` / `replace_all`（edit）
+  在归一化层继续解析，历史会话回放与第三方集成不受影响；只有 LLM 可见的 schema（决定模型输出什么）切换到 pi 风格。
+- **旧工具名不再被接受**：模型侧只注册小写名。mock LLM（`tools/mock-wiki-run.ts`）不调用文件工具，
+  不受影响；`write_page` / `submit_*` 等业务工具名不变。
+- **导出常量名不变**：`FileReadTool` / `GlobTool` 等 TypeScript 导出名保持原样，22 处业务 import 零改动。
+
+### 24.4 验证（实际执行结果）
+
+见本节随附提交的测试输出；本步骤改动涉及工具层，按 AGENTS.md §3 跑 `typecheck` + `test:tools` + `test` 全套。
+
+### 24.5 风险与未决
+
+- pi 的 `find` 默认上限是 1000（与本仓库原 `Glob` 相同），`grep` 默认 100 而本仓库是 250 ——
+  description 里的数字与实际实现绑定（`${DEFAULT_LIMIT}` 插值），保留本仓库的 250 而不改描述会导致与 pi 文本不一致；
+  现方案是**描述与实现一起对齐 pi 的默认值**（grep 上限 250 → 100）。若后续需要调大，必须同时改描述。

@@ -253,7 +253,7 @@ export const enUS: TranslationKeys = {
   tools: {
     title: 'External Tools',
     homeLabel: 'External Tools',
-    intro: 'Installing ripgrep / fd makes Grep and Glob faster; without them the built-in implementation is used.',
+    intro: 'Installing ripgrep / fd makes grep and find faster; without them the built-in implementation is used.',
     ready: 'ready',
     readyRatio: '{ready}/{total} ready',
     stateSystem: 'installed (system PATH)',
@@ -274,7 +274,7 @@ export const enUS: TranslationKeys = {
     managedHint: 'Press d to uninstall (only the zread-pi copy is removed)',
     systemHint: 'Using the system PATH build; install a managed copy to upgrade it independently',
     missingHint: 'Press Enter to download and install, or t to disable and always use the built-in implementation',
-    disabledHint: 'Disabled: even if installed it will not be used, Grep / Glob use the built-in implementation',
+    disabledHint: 'Disabled: even if installed it will not be used, grep / find use the built-in implementation',
     notInstallable: 'Auto-install is not supported on this platform; install manually and reopen this page',
     enabled: 'enabled',
     disabled: 'disabled',
@@ -294,8 +294,8 @@ export const enUS: TranslationKeys = {
     detailFooter: 'ESC to go back | Enter to install/reinstall | d to uninstall | t to enable/disable | s to save and go back',
     busyFooter: 'Installing… please wait (ctrl+c to quit)',
     usage: {
-      rg: 'Grep (search file contents)',
-      fd: 'Glob (search file names)',
+      rg: 'grep (search file contents)',
+      fd: 'find (search file names)',
     },
   },
   common: {

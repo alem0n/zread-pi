@@ -1352,11 +1352,11 @@ console.log("▶ TUI 冒烟测试");
   );
   checkContains("工具列表页：rg 条目", listText, "rg (ripgrep)");
   checkContains("工具列表页：fd 条目", listText, "fd (fd)");
-  checkContains("工具列表页：rg 用途", listText, "Grep（文件内容搜索）");
-  checkContains("工具列表页：fd 用途", listText, "Glob（文件名搜索）");
+  checkContains("工具列表页：rg 用途", listText, "grep（文件内容搜索）");
+  checkContains("工具列表页：fd 用途", listText, "find（文件名搜索）");
   check(
     "工具列表页：用途文案不重复拼接 Agent 工具名",
-    !listText.includes("Grep · Grep") && !listText.includes("Glob · Glob"),
+    !listText.includes("grep · grep") && !listText.includes("find · find"),
     indent(listText.split("\n").find((line) => line.includes("搜索")) ?? ""),
   );
   checkContains("工具列表页 Footer", listText, "Enter 管理");
@@ -1371,7 +1371,7 @@ console.log("▶ TUI 冒烟测试");
   checkContains("工具详情页：状态字段", detailText, "状态: ");
   checkContains("工具详情页：版本字段", detailText, "版本: ");
   checkContains("工具详情页：路径字段", detailText, "路径: ");
-  checkContains("工具详情页：用途字段", detailText, "用于: Grep（文件内容搜索）");
+  checkContains("工具详情页：用途字段", detailText, "用于: grep（文件内容搜索）");
   checkContains("工具详情页：安装目录字段", detailText, "安装目录: ");
   checkContains("工具详情页：启用状态", detailText, "启用状态: 已启用");
   check(
