@@ -543,6 +543,113 @@ console.log("▶ TUI 冒烟测试");
   app.exit();
 }
 
+// --- 用例 4i：模型大小覆盖页（/config/model-size：上下文窗口 / 最大输出覆盖）---
+{
+  const { app, terminal } = createApp(["/config/model-size"]);
+  await app.start();
+  await settle();
+
+  check(
+    "模型大小页：初始未覆盖（llm.context_window/max_tokens 均为 null）",
+    app.config.getModelContextWindow() === null && app.config.getModelMaxTokens() === null,
+    `${app.config.getModelContextWindow()}/${app.config.getModelMaxTokens()}`,
+  );
+
+  const text = screenText(app);
+  checkContains("模型大小页：标题", text, "设置模型上下文窗口 / 最大输出");
+  checkContains("模型大小页：当前模型", text, "openai-compatible · gpt-4o-mini");
+  // 目录外的模型走 runtime 回退值（200000 / 8192）
+  checkContains(
+    "模型大小页：目录默认提示",
+    text,
+    "模型目录默认: 上下文 200000 · 最大输出 8192",
+  );
+  checkContains("模型大小页：上下文字段", text, "上下文窗口 (tokens)");
+  checkContains("模型大小页：最大输出字段", text, "最大输出 (tokens)");
+  checkContains("模型大小页：留空语义提示", text, "留空 = 跟随模型目录默认");
+  checkContains("模型大小页 Footer", text, "d 恢复模型默认");
+
+  // 在上下文字段输入 131072 并 Enter：写回内存配置并返回上一级（最大输出留空 = null）
+  terminal.send("131072");
+  terminal.send("\r");
+  await settle();
+  check(
+    "Enter 写回 llm.context_window=131072",
+    app.config.getModelContextWindow() === 131072,
+    String(app.config.getModelContextWindow()),
+  );
+  check(
+    "最大输出留空保持 null（跟随模型默认）",
+    app.config.getModelMaxTokens() === null,
+    String(app.config.getModelMaxTokens()),
+  );
+
+  // 重新进入，tab 切到最大输出字段并输入 65536
+  app.navigate("/config/model-size");
+  await settle();
+  terminal.send("\t");
+  await settle(20);
+  terminal.send("65536");
+  terminal.send("\r");
+  await settle();
+  check(
+    "tab 切换字段后 Enter 写回 llm.max_tokens=65536",
+    app.config.getModelMaxTokens() === 65536,
+    String(app.config.getModelMaxTokens()),
+  );
+  check(
+    "上下文覆盖值仍为 131072（字段独立写回）",
+    app.config.getModelContextWindow() === 131072,
+    String(app.config.getModelContextWindow()),
+  );
+
+  // 非法输入：Enter 不写回并展示错误（仍停留在本页）
+  app.navigate("/config/model-size");
+  await settle();
+  terminal.send("\t");
+  await settle(20);
+  for (let i = 0; i < 5; i++) terminal.send("\x7f");
+  terminal.send("abc");
+  terminal.send("\r");
+  await settle(40);
+  checkContains("非法输入展示错误提示", screenText(app), "请输入");
+  check(
+    "非法输入不改变 llm.max_tokens",
+    app.config.getModelMaxTokens() === 65536,
+    String(app.config.getModelMaxTokens()),
+  );
+
+  // d：恢复模型默认（两个字段都回 null）
+  terminal.send("d");
+  await settle(40);
+  check(
+    "d 恢复模型默认（两个覆盖值都回 null）",
+    app.config.getModelContextWindow() === null && app.config.getModelMaxTokens() === null,
+    `${app.config.getModelContextWindow()}/${app.config.getModelMaxTokens()}`,
+  );
+
+  // 重新输入两段值后 s 保存到 config.yaml（'d' 后焦点在最大输出字段，先 tab 回到上下文字段）
+  terminal.send("\t");
+  await settle(20);
+  terminal.send("200000");
+  terminal.send("\t");
+  await settle(20);
+  terminal.send("32000");
+  terminal.send("s");
+  await settle(120);
+  checkContains("模型大小页：s 保存后提示已保存", screenText(app), "配置已保存");
+  const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 llm.context_window: 200000", yaml, "context_window: 200000");
+  checkContains("config.yaml 写入 llm.max_tokens: 32000", yaml, "max_tokens: 32000");
+
+  // 返回配置首页：条目值展示两个覆盖值
+  app.navigate("/config");
+  await settle(60);
+  checkContains("配置首页：模型大小条目值", screenText(app), "200000 / 32000");
+
+  app.exit();
+}
+
 // --- 用例 4d：未选择模型时展示「全部等级可选」提示 ---
 {
   const bareHome = await mkdtemp(join(tmpdir(), "zread-pi-tui-bare-"));

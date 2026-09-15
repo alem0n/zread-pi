@@ -197,6 +197,8 @@ let mode: "ok" | "no-sections" | "section-skip" = "ok";
 /** 记录每次请求的 system 消息（验证上下文文件注入） */
 const seenSystemPrompts: string[] = [];
 const seenSections: string[] = [];
+/** 记录每次请求的输出上限（验证 llm.max_tokens 覆盖下发；openai-completions 依 compat 用 max_tokens 或 max_completion_tokens） */
+const seenMaxTokens: Array<number | undefined> = [];
 /** 记录工具结果内容（验证常驻数量反馈） */
 const seenToolResults: string[] = [];
 let requestCount = 0;
@@ -211,7 +213,10 @@ const server = Bun.serve({
 		const body = (await request.json()) as {
 			messages?: Array<{ role?: string; content?: unknown }>;
 			tools?: Array<{ function?: { name?: string } }>;
+			max_tokens?: number;
+			max_completion_tokens?: number;
 		};
+		seenMaxTokens.push(body.max_tokens ?? body.max_completion_tokens);
 		const messages = body.messages ?? [];
 		const promptText = messages
 			.map((message) => contentToText(message.content))
@@ -604,6 +609,49 @@ check(
 	typeof sectionsFailure === "string" && sectionsFailure.includes("wiki.json"),
 	sectionsFailure ?? "(未报错)",
 );
+
+// ---------------------------------------------------------------------------
+// 7) 模型大小覆盖：llm.context_window / llm.max_tokens 下发到运行时
+// ---------------------------------------------------------------------------
+
+mode = "ok";
+await rm(wikiJsonPath, { force: true });
+await writeFile(
+	join(home, ".zread-pi", "config.yaml"),
+	[
+		"language: en",
+		"doc_language: en",
+		"llm:",
+		"  provider: openai-compatible",
+		"  model: mock-model",
+		"  api_key: sk-mock",
+		`  base_url: http://127.0.0.1:${server.port}/v1`,
+		"  context_window: 99999",
+		"  max_tokens: 1234",
+		"concurrency:",
+		"  max_concurrent: 4",
+		"  max_retries: 0",
+		"",
+	].join("\n"),
+	"utf-8",
+);
+console.log("\n▶ generateWikiCatalog()（llm.context_window/max_tokens 覆盖）…");
+const overrideEvents: Array<{ contextWindow?: number }> = [];
+const overrideMaxTokensSeen = [...seenMaxTokens];
+await generateWikiCatalog((event) => {
+	if (event.contextWindow !== undefined) overrideEvents.push({ contextWindow: event.contextWindow });
+});
+check(
+	"llm.context_window 覆盖模型目录值（system/init 上报 99999）",
+	overrideEvents.some((event) => event.contextWindow === 99999),
+	JSON.stringify(overrideEvents.slice(0, 2)),
+);
+check(
+	"llm.max_tokens 作为请求输出上限下发（max_tokens=1234）",
+	seenMaxTokens.slice(overrideMaxTokensSeen.length).includes(1234),
+	JSON.stringify(seenMaxTokens.slice(overrideMaxTokensSeen.length).filter((value, index, array) => array.indexOf(value) === index)),
+);
+
 
 server.stop(true);
 
