@@ -61,6 +61,7 @@ const paths = [
   "/config/provider/anthropic/model-new",
   "/config/provider/anthropic/custom",
   "/config/provider/openai-compatible",
+  "/config/provider/openai-compatible/edit",
   "/config/concurrency",
   "/config/retry",
   "/config/thinking",
