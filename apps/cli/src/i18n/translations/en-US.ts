@@ -38,6 +38,7 @@ export const enUS: TranslationKeys = {
     docLanguage: 'Document Language',
     llmProvider: 'LLM Provider',
     thinkingLevel: 'Thinking Level',
+    modelSize: 'Model Context/Output',
     maxTurns: 'Max Turns',
     polish: 'Style Polishing',
     blueprintDetail: 'Blueprint Detail',
@@ -196,6 +197,20 @@ export const enUS: TranslationKeys = {
     invalid: 'Please enter an integer between 0-100',
     current: 'Current',
     footer: 'ESC to go back | Enter to confirm | s to save and go back',
+  },
+  modelSize: {
+    title: 'Set Model Context Window / Max Output',
+    modelUnset:
+      'No model selected yet: overrides still apply; defaults fall back to catalog values (200000 / 8192)',
+    defaults: 'Catalog defaults: context {context} · max output {maxTokens}',
+    hint: 'Empty = follow the catalog default; an explicit value overrides catalog metadata (request output limit and compaction threshold)',
+    contextWindow: 'Context window (tokens)',
+    maxTokens: 'Max output (tokens)',
+    invalidContext: 'Please enter a positive integer between {min}-{max}',
+    invalidMaxTokens: 'Please enter a positive integer between {min}-{max}',
+    followDefault: 'Catalog default',
+    asDefault: 'default',
+    footer: 'tab / arrows to switch | Enter to confirm and go back | d to reset to default | s to save | ESC to go back',
   },
   polish: {
     title: 'Writing discipline & page polishing',

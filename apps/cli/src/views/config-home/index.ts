@@ -66,6 +66,20 @@ const configItems: ConfigItem[] = [
     route: "/config/thinking",
   },
   {
+    // 当前模型的上下文窗口 / 最大输出 tokens 覆盖（null = 跟随模型目录默认）
+    key: "llm.model_size",
+    labelKey: "config.modelSize",
+    getValue: (config, t) => {
+      const context = config.llm.context_window;
+      const maxTokens = config.llm.max_tokens;
+      if (context === null && maxTokens === null) return t("modelSize.followDefault");
+      const format = (value: number | null | undefined): string =>
+        value ? String(value) : t("modelSize.asDefault");
+      return `${format(context)} / ${format(maxTokens)}`;
+    },
+    route: "/config/model-size",
+  },
+  {
     key: "agent.max_turns",
     labelKey: "config.maxTurns",
     getValue: (config, _t) => String(config.agent?.max_turns ?? DEFAULT_MAX_TURNS),

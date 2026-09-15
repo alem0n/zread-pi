@@ -58,6 +58,48 @@ export function normalizeMaxTurns(value: unknown): number {
 }
 
 /**
+ * 当前生效模型的上下文窗口 / 最大输出 tokens 覆盖（配置界面 /config/model-size 维护）
+ *
+ * 语义与 `CustomModelConfig.context_window` / `max_tokens` 一致，但作用在「当前生效模型」上：
+ * - `null` / 缺省 = 跟随模型目录（pi-ai 内置或用户自定义模型）自带的元数据；
+ * - 显式正值 = 覆盖目录值（请求输出上限与上下文压缩阈值都以此为准）。
+ *
+ * 与 `agent.token_budget` 的区别：max_tokens 是**单次请求**的输出上限，token_budget 是
+ * **整次 Agent 运行**的累计预算（首尾机制），两者互不影响。
+ */
+export const DEFAULT_MODEL_CONTEXT_WINDOW: number | null = null;
+export const DEFAULT_MODEL_MAX_TOKENS: number | null = null;
+
+export const MIN_MODEL_CONTEXT_WINDOW = 1;
+export const MAX_MODEL_CONTEXT_WINDOW = 10_000_000;
+export const MIN_MODEL_MAX_TOKENS = 1;
+export const MAX_MODEL_MAX_TOKENS = 1_000_000;
+
+/** 解析正整数：非正整数 / 非数字一律回退 null（= 跟随模型默认） */
+function parsePositiveIntOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+/** 归一化上下文窗口覆盖：正整数保留，其余回退 null（= 跟随模型目录默认） */
+export function normalizeModelContextWindow(value: unknown): number | null {
+  const parsed = parsePositiveIntOrNull(value);
+  if (parsed === null) return null;
+  return Math.min(Math.max(parsed, MIN_MODEL_CONTEXT_WINDOW), MAX_MODEL_CONTEXT_WINDOW);
+}
+
+/** 归一化最大输出 tokens 覆盖：正整数保留，其余回退 null（= 跟随模型目录默认） */
+export function normalizeModelMaxTokens(value: unknown): number | null {
+  const parsed = parsePositiveIntOrNull(value);
+  if (parsed === null) return null;
+  return Math.min(Math.max(parsed, MIN_MODEL_MAX_TOKENS), MAX_MODEL_MAX_TOKENS);
+}
+
+/**
  * 文风纪律 / 页面润色（humanizer）配置
  *
  * - enabled=false = 完全关闭（既不注入风格纪律，也不跑 polish Agent）；
@@ -176,6 +218,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     base_url: null,
     thinking_level: 'off',
     providers: {},
+    context_window: DEFAULT_MODEL_CONTEXT_WINDOW,
+    max_tokens: DEFAULT_MODEL_MAX_TOKENS,
   },
   agent: {
     max_turns: DEFAULT_MAX_TURNS,
@@ -346,6 +390,9 @@ export function validateConfig(raw: unknown): AppConfig {
       // 旧配置没有 thinking_level：归一化为 'off'，保证旧 config.yaml 可直接启动
       thinking_level: normalizeThinkingLevel(llm.thinking_level),
       providers: normalizeProviderConfigs(llm.providers),
+      // 旧配置没有这两个字段：归一化为 null（= 跟随模型目录默认，老用户零变化）
+      context_window: normalizeModelContextWindow(llm.context_window),
+      max_tokens: normalizeModelMaxTokens(llm.max_tokens),
     },
     agent: {
       max_turns: normalizeMaxTurns(agent.max_turns),

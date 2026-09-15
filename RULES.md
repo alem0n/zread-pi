@@ -52,7 +52,7 @@ vendor/pi/packages/*（pi 内核源码快照，上游零改动）
 ### 1. `@zread-pi/types`（packages/types）
 
 共享类型基础，零外部依赖：`manifest.ts`（扫描结果）、`symbols.ts`（AST 符号）、`wiki.ts`
-（Wiki 页面与输出）、`config.ts`（AppConfig，含 `llm.providers` / `agent.max_turns` / `tools.*`）、
+（Wiki 页面与输出）、`config.ts`（AppConfig，含 `llm.providers` / `llm.context_window` / `llm.max_tokens` / `agent.max_turns` / `tools.*`）、
 `cache.ts`、`repo-map.ts`（三层 Repo Map）。
 
 **修改要点**：这里动了就是契约面——旧 `config.yaml` 必须仍可直接启动（运行时自动迁移/补缺省值），
@@ -103,7 +103,7 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 ### 5. `@zread-pi/orchestrator`（packages/orchestrator）
 
 编排层：`orchestrator.ts`（`generateWikiCatalog`）、`wiki/generate-wiki.ts`（`generateWikiContent`）、
-`agents/create-agent.ts`（读配置下发 maxTurns / thinkingLevel）、`prompts/`（蓝图与页面 Agent 提示词，
+`agents/create-agent.ts`（读配置下发 maxTurns / thinkingLevel / contextWindow / maxTokens）、`prompts/`（蓝图与页面 Agent 提示词，
 **工具名写死在其中**）、`wiki/memory.ts`（全局记忆写入）。
 
 **修改要点**：
@@ -116,7 +116,7 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 
 pi-tui 全屏 TUI（**无 React/Ink 依赖**）：`src/index.ts`（commander 入口 + `-d/--dir`）、`src/tui/`
 （App / Layout / Router / Screen / 组件）、`src/state/`（ConfigStore / I18nStore / WikiStore）、
-`src/views/`（15 个页面：wiki-home / generate / sync / browse / 11 个 config 页）、`src/theme.ts`（色值）。
+`src/views/`（16 个页面：wiki-home / generate / sync / browse / 12 个 config 页）、`src/theme.ts`（色值）。
 
 **修改要点**：
 

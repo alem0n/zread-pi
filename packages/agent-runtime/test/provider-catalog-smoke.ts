@@ -45,8 +45,8 @@ delete process.env.OPENAI_API_KEY;
 const authPath = join(home, ".zread-pi", "auth.json");
 await mkdir(join(home, ".zread-pi"), { recursive: true });
 
-/** 重写 home 下的 config.yaml（用于验证 agent 段的归一化语义） */
-async function writeHomeConfig(agentLines: string[]): Promise<void> {
+/** 重写 home 下的 config.yaml（额外行拼在 llm 段之后，用于验证各段的归一化语义） */
+async function writeHomeConfig(extraLines: string[]): Promise<void> {
 	await writeFile(
 		join(home, ".zread-pi", "config.yaml"),
 		[
@@ -58,7 +58,7 @@ async function writeHomeConfig(agentLines: string[]): Promise<void> {
 			"  api_key: null",
 			"  base_url: null",
 			"  providers: {}",
-			...agentLines,
+			...extraLines,
 			"concurrency:",
 			"  max_concurrent: 1",
 			"  max_retries: 0",
@@ -136,6 +136,68 @@ try {
 		bogusDetailConfig.blueprint.detail === "high",
 		JSON.stringify(bogusDetailConfig.blueprint),
 	);
+
+	// llm.context_window / max_tokens 归一化（配置界面 /config/model-size）：
+	// 旧配置缺省 null（= 跟随模型目录默认）；合法正值保留；0 / 负数 / 非数字回退 null
+	check(
+		"旧 config.yaml（缺 llm.context_window/max_tokens）补默认 null",
+		defaultDetailConfig.llm.context_window === null && defaultDetailConfig.llm.max_tokens === null,
+		JSON.stringify({
+			context_window: defaultDetailConfig.llm.context_window,
+			max_tokens: defaultDetailConfig.llm.max_tokens,
+		}),
+	);
+
+	// 显式覆盖值保留（直接写完整 llm 段，避免与 writeHomeConfig 的 llm 段重复建键）
+	async function writeLlmField(key: string, value: string): Promise<void> {
+		await writeFile(
+			join(home, ".zread-pi", "config.yaml"),
+			[
+				"language: zh",
+				"doc_language: zh",
+				"llm:",
+				`  ${key}: ${value}`,
+				"concurrency:",
+				"  max_concurrent: 1",
+				"  max_retries: 0",
+				"",
+			].join("\n"),
+			"utf-8",
+		);
+	}
+
+	await writeLlmField("context_window", "1000000");
+	let modelSizeConfig = await loadConfig();
+	check(
+		"llm.context_window: 1000000 保留",
+		modelSizeConfig.llm.context_window === 1000000,
+		JSON.stringify({ context_window: modelSizeConfig.llm.context_window }),
+	);
+
+	await writeLlmField("max_tokens", "32768");
+	modelSizeConfig = await loadConfig();
+	check(
+		"llm.max_tokens: 32768 保留",
+		modelSizeConfig.llm.max_tokens === 32768,
+		JSON.stringify({ max_tokens: modelSizeConfig.llm.max_tokens }),
+	);
+
+	await writeLlmField("context_window", "0");
+	modelSizeConfig = await loadConfig();
+	check(
+		"llm.context_window: 0 回退 null（0 不是有效覆盖，= 跟随模型默认）",
+		modelSizeConfig.llm.context_window === null,
+		JSON.stringify({ context_window: modelSizeConfig.llm.context_window }),
+	);
+
+	await writeLlmField("max_tokens", "-5");
+	modelSizeConfig = await loadConfig();
+	check(
+		"llm.max_tokens: -5 回退 null（负数不是有效覆盖）",
+		modelSizeConfig.llm.max_tokens === null,
+		JSON.stringify({ max_tokens: modelSizeConfig.llm.max_tokens }),
+	);
+
 
 	const providers = await listZreadProviders();
 	const anthropic = providers.find((provider) => provider.id === "anthropic");

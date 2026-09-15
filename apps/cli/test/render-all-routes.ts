@@ -64,6 +64,7 @@ const paths = [
   "/config/concurrency",
   "/config/retry",
   "/config/thinking",
+  "/config/model-size",
   "/config/max-turns",
   "/config/polish",
   "/config/detail",

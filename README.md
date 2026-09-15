@@ -49,6 +49,7 @@
 - **token 预算 + 两段式提示** —— 预算按 harness 的 usage 事件/账本累计真实 tokens（不是数轮次）：用到约 70% 时注入软提示收敛，预算将尽时注入硬提示并给强制交卷轮，避免「探索不停、从不产出」。
 - **生成过程可见的用量账本** —— 生成页每个条目（目录展开为每个 Agent 一行：分类 / 每章节的主题、标题 / 缩编；文章列表每篇一行）右侧都实时显示输入 token、输出 token、缓存读占比与当前上下文占比（已用 / 窗口），完成后也继续显示；底部另有全部 Agent 的合计，口径来自 pi 的 usage 账本（输入侧含缓存读写），按 `r` 重新生成不会清空已消耗的用量，多页并发生成时合计也不会重复计数。
 - **思考深度可选** —— 7 档 thinking level（off → max），由模型能力自动 clamp，不支持的档位清楚标注。
+- **模型上下文/输出可覆盖** —— 目录外的模型或网关常不提供准确元数据：`/config/model-size` 可为当前模型显式覆盖上下文窗口与最大输出 tokens（留空 = 跟随目录默认），同时作用于请求输出上限、上下文压缩阈值与生成页的「上下文占比」分母。
 - **Provider 无关** —— 统一抽象 Anthropic Messages 与 OpenAI Chat Completions 协议；在 TUI 里选 Provider、贴 API Key、
   挑模型，三步完成，可同时配置多个 Provider。
 - **两层重试，尊重服务端语义** —— Agent 层指数退避（60s 封顶）只在「未产出内容」时重试，失败尝试不污染会话记录；Provider 层读取服务端 `Retry-After` 并按上限封顶，429 高峰期不会重试过早。
@@ -98,7 +99,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | ------------------------ | -------------------------------------------------------------------------- |
 | `zread-pi`               | 默认命令 —— 打开 Wiki TUI；检测已有文档时提供 生成 / 同步 / 浏览 选项      |
 | `zread-pi wiki`          | 显式 Wiki 生成入口（与默认命令同一 TUI）                                   |
-| `zread-pi config`        | 交互式配置编辑器 —— Provider、API Key、模型、思考深度、最大轮次（折算 token 预算）、蓝图细节档位、文风润色、外部工具  |
+| `zread-pi config`        | 交互式配置编辑器 —— Provider、API Key、模型、思考深度、模型上下文/输出覆盖、最大轮次（折算 token 预算）、蓝图细节档位、文风润色、外部工具  |
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
@@ -251,7 +252,8 @@ slug、文件编号与去重全部由代码统一分配（不依赖模型命名�
 配置归 zread-pi 自管理，全部可在 TUI 中维护，无需手写 YAML：
 
 - `~/.zread-pi/config.yaml` —— 非敏感配置：UI / 文档语言、`llm.provider/model`、每个 Provider 的
-  `base_url` 与自定义模型、思考深度（`llm.thinking_level`）、token 预算（`agent.token_budget`，0 = 按
+  `base_url` 与自定义模型、思考深度（`llm.thinking_level`）、模型上下文/输出覆盖（`llm.context_window` /
+  `llm.max_tokens`，留空 = 跟随模型目录默认；配置界面 `/config/model-size`）、token 预算（`agent.token_budget`，0 = 按
   `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、文风润色（`polish.enabled`，
   `polish.mode = prompt-only | full`）、蓝图细节档位（`blueprint.detail = minimal | low | medium | high | max`，默认
   `high`；配置界面 `/config/detail`）、外部工具开关（`tools.<id>.enabled`）。
