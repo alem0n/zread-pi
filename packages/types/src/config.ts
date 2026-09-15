@@ -54,6 +54,13 @@ export interface CustomModelConfig {
  * 落盘在 ~/.zread-pi/auth.json —— 因此可以同时登录多个 Provider。
  */
 export interface LlmProviderConfig {
+  /**
+   * 自定义 Provider 的显示名称（缺省用 provider id）。
+   *
+   * 由配置界面「新建/编辑自定义 Provider」维护；内置 Provider 的名称来自 pi-ai 目录，
+   * 写入本字段也不会生效（buildCatalog 优先使用目录名）。
+   */
+  name?: string | null;
   /** 最近一次成功使用的认证方式（仅用于展示与预选） */
   auth_type?: LlmAuthType | null;
   /** 覆盖 pi-ai 内置 baseUrl（自定义端点/代理） */
