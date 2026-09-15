@@ -78,7 +78,7 @@ export const RG_TOOL: ToolSpec = {
   repo: 'BurntSushi/ripgrep',
   tagPrefix: '',
   versionPattern: /ripgrep\s+(\d+(?:\.\d+)+(?:[-+][\w.]+)?)/i,
-  usedBy: ['Grep'],
+  usedBy: ['grep'],
   usageKey: 'rg',
   envPathVar: 'ZREAD_PI_RG_PATH',
   getAssetName: (version, platform, arch) => {
@@ -100,7 +100,7 @@ export const FD_TOOL: ToolSpec = {
   repo: 'sharkdp/fd',
   tagPrefix: 'v',
   versionPattern: /\bfd\s+(\d+(?:\.\d+)+(?:[-+][\w.]+)?)/i,
-  usedBy: ['Glob'],
+  usedBy: ['find'],
   usageKey: 'fd',
   envPathVar: 'ZREAD_PI_FD_PATH',
   // 注意：fd 的资产名带 v 前缀（fd-v10.5.0-x86_64-pc-windows-msvc.zip），

@@ -34,7 +34,7 @@ import {
   DEFAULT_MAX_BYTES,
 } from './truncate.js'
 
-const DEFAULT_LIMIT = 250
+const DEFAULT_LIMIT = 100
 /** 兜底实现读取文件的大小上限：超过就跳过（rg 默认也会跳过明显过大的文件）。 */
 const MAX_FALLBACK_FILE_BYTES = 10 * 1024 * 1024
 
@@ -365,18 +365,18 @@ function normalizeOutputMode(value: string | undefined): OutputMode {
 }
 
 export const GrepTool = defineTool({
-  name: 'Grep',
-  description: `Search file contents for a pattern. Returns matching lines with file paths and line numbers, relative to the search directory. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} matches or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Long lines are truncated to ${GREP_MAX_LINE_LENGTH} chars.`,
+  name: 'grep',
+  description: `Search file contents for a pattern. Returns matching lines with file paths and line numbers. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} matches or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Long lines are truncated to ${GREP_MAX_LINE_LENGTH} chars.`,
   inputSchema: {
     type: 'object',
     properties: {
       pattern: {
         type: 'string',
-        description: 'Search pattern (regex, or literal string when literal is true)',
+        description: 'Search pattern (regex or literal string)',
       },
       path: {
         type: 'string',
-        description: 'Directory or file to search (defaults to the working directory)',
+        description: 'Directory or file to search (default: current directory)',
       },
       glob: {
         type: 'string',
@@ -388,7 +388,7 @@ export const GrepTool = defineTool({
       },
       literal: {
         type: 'boolean',
-        description: 'Treat pattern as a literal string instead of a regex (default: false)',
+        description: 'Treat pattern as literal string instead of regex (default: false)',
       },
       context: {
         type: 'number',
@@ -396,13 +396,7 @@ export const GrepTool = defineTool({
       },
       limit: {
         type: 'number',
-        description: `Maximum number of results to return (default: ${DEFAULT_LIMIT})`,
-      },
-      output_mode: {
-        type: 'string',
-        enum: ['content', 'files_with_matches', 'count'],
-        description:
-          'Output mode (default: content). files_with_matches lists matching file paths, count lists per-file match counts.',
+        description: `Maximum number of matches to return (default: ${DEFAULT_LIMIT})`,
       },
     },
     required: ['pattern'],
@@ -418,7 +412,7 @@ export const GrepTool = defineTool({
     const literal = getBoolean(input, 'literal') ?? false
     const contextValue = Math.max(0, getNumber(input, 'context') ?? getNumber(input, '-C') ?? 0)
     const limit = Math.max(1, getNumber(input, 'limit') ?? getNumber(input, 'head_limit') ?? DEFAULT_LIMIT)
-    const outputMode = normalizeOutputMode(getString(input, 'output_mode'))
+    const outputMode = normalizeOutputMode(getString(input, 'output_mode') ?? getString(input, 'outputMode'))
 
     let isDirectory: boolean
     try {
@@ -491,7 +485,7 @@ export const GrepTool = defineTool({
       notices.push(byteLimitNotice())
     }
     if (linesTruncated) {
-      notices.push(`Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use Read to see full lines`)
+      notices.push(`Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read tool to see full lines`)
     }
     if (skippedLargeFiles > 0) {
       notices.push(`${skippedLargeFiles} file(s) larger than ${formatSize(MAX_FALLBACK_FILE_BYTES)} were skipped`)

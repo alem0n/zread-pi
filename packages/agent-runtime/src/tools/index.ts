@@ -1,8 +1,8 @@
 /**
  * 文件工具集
  *
- * Orchestrator 的三条工作流按名称引用这些工具（Read / Write / Edit / Glob / Grep），
- * 因此导出常量名保持不变；`Ls` 为本次新增（填补「目录列举」能力缺口）。
+ * Orchestrator 的三条工作流按名称引用这些工具（read / write / edit / find / grep / ls，
+ * 已对齐上游 pi 的小写命名），因此导出常量名保持不变。
  *
  * 实现说明（详见 MIGRATION.md §3）：
  *  - 搜索类（Glob / Grep / Ls）与写入类（Write / Edit）已按上游 pi 的实现重写，

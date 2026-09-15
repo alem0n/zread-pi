@@ -10,11 +10,10 @@
  *  4. **无并发保护**：与 Write 同理存在同文件读-改-写丢更新的风险。
  *  5. **无 diff 回传**：模型与 UI 都看不到改了什么。
  *
- * 参数兼容（AGENTS.md 硬约束：不重命名工具；参数保持向后可用）：
- *  - 主参数沿用本仓库既有的 `file_path` / `old_string` / `new_string` / `replace_all`
- *  - 同时接受上游形式 `path` + `edits: [{ oldText, newText }]`
- *  - 也接受上游的顶层 `oldText` / `newText` 别名
- *  - `edits` 传成 JSON 字符串（部分模型会这样发）也会被解析
+ * 参数对齐上游 pi：`path` + `edits: [{ oldText, newText }]`；
+ * 旧契约的 `file_path` / `old_string` / `new_string` / `replace_all` 与上游顶层
+ * `oldText` / `newText` 别名仍被接受（兼容历史调用方），`edits` 传成 JSON
+ * 字符串（部分模型会这样发）也会被解析。
  */
 
 import { constants } from 'node:fs'
@@ -109,49 +108,41 @@ export function normalizeEditInput(input: ToolInputParams): NormalizedEditInput 
   }
 
   if (edits.length === 0) {
-    throw new Error('Edit tool input is invalid. Provide old_string/new_string, or a non-empty edits array.')
+    throw new Error('Edit tool input is invalid. edits must contain at least one replacement.')
   }
   return { requestedPath, edits, replaceAll }
 }
 
 export const FileEditTool = defineTool({
-  name: 'Edit',
+  name: 'edit',
   description:
-    'Edit a single file using exact text replacement. old_string must match a unique, non-overlapping region of the original file (whitespace and line endings are normalized, so CRLF files work with LF input). Use replace_all to change every occurrence, or pass multiple disjoint edits via edits[].',
+    'Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.',
   inputSchema: {
     type: 'object',
     properties: {
-      file_path: {
+      path: {
         type: 'string',
-        description: 'Path to the file to edit (relative to the working directory, or absolute)',
-      },
-      old_string: {
-        type: 'string',
-        description: 'The exact text to find. Must be unique in the file unless replace_all is true.',
-      },
-      new_string: {
-        type: 'string',
-        description: 'The replacement text',
-      },
-      replace_all: {
-        type: 'boolean',
-        description: 'Replace every occurrence of old_string (exact match, default false).',
+        description: 'Path to the file to edit (relative or absolute)',
       },
       edits: {
         type: 'array',
         description:
-          'Alternative to old_string/new_string: one or more disjoint replacements. Each entry is matched against the original file, not incrementally. Do not emit overlapping edits; merge nearby changes into one.',
+          'One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.',
         items: {
           type: 'object',
           properties: {
-            oldText: { type: 'string', description: 'Exact text for one targeted replacement' },
-            newText: { type: 'string', description: 'Replacement text for this targeted edit' },
+            oldText: {
+              type: 'string',
+              description:
+                'Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.',
+            },
+            newText: { type: 'string', description: 'Replacement text for this targeted edit.' },
           },
           required: ['oldText', 'newText'],
         },
       },
     },
-    required: ['file_path'],
+    required: ['path', 'edits'],
   },
   isReadOnly: false,
   isConcurrencySafe: false,

@@ -443,41 +443,41 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ 6. Read（替换实现）')
   // -------------------------------------------------------------------------
-  const readReadme = textOf(await callTool(FileReadTool, { file_path: 'README.md' }, ctx))
+  const readReadme = textOf(await callTool(FileReadTool, { path: 'README.md' }, ctx))
   check('Read 返回原始文本（无行号前缀）', readReadme.startsWith('# Fixture') && !readReadme.includes('\t'))
   check('Read 接受上游的 path 参数别名', textOf(await callTool(FileReadTool, { path: 'README.md' }, ctx)).startsWith('# Fixture'))
 
-  const readOffset = textOf(await callTool(FileReadTool, { file_path: 'README.md', offset: 3 }, ctx))
+  const readOffset = textOf(await callTool(FileReadTool, { path: 'README.md', offset: 3 }, ctx))
   check('Read offset 是 1-based', readOffset.startsWith('Hello world'), readOffset.split('\n')[0])
 
-  const readLimit = textOf(await callTool(FileReadTool, { file_path: 'README.md', limit: 1 }, ctx))
+  const readLimit = textOf(await callTool(FileReadTool, { path: 'README.md', limit: 1 }, ctx))
   check('Read limit 后给出续读提示', readLimit.includes('Use offset=2 to continue.'), readLimit.replace(/\n/g, '\\n'))
 
-  const readTruncated = textOf(await callTool(FileReadTool, { file_path: 'many.txt' }, ctx))
+  const readTruncated = textOf(await callTool(FileReadTool, { path: 'many.txt' }, ctx))
   check(
     'Read 行数截断并给出 offset 续读提示',
     readTruncated.includes('[Showing lines 1-2000 of 4200. Use offset=2001 to continue.]'),
     readTruncated.split('\n').slice(-1)[0],
   )
 
-  const readDir = await callTool(FileReadTool, { file_path: 'src' }, ctx)
+  const readDir = await callTool(FileReadTool, { path: 'src' }, ctx)
   check(
     'Read 目录报错点名 Ls（不再引用不存在的 Bash）',
-    readDir.is_error === true && textOf(readDir).includes('Ls tool') && !textOf(readDir).includes('Bash'),
+    readDir.is_error === true && textOf(readDir).includes('ls tool') && !textOf(readDir).includes('Bash'),
     textOf(readDir),
   )
 
-  const readMissing = await callTool(FileReadTool, { file_path: 'nope.txt' }, ctx)
+  const readMissing = await callTool(FileReadTool, { path: 'nope.txt' }, ctx)
   check('Read 文件不存在时报错', readMissing.is_error === true && textOf(readMissing).includes('File not found'))
 
-  const readImageNote = await callTool(FileReadTool, { file_path: 'logo.png' }, ctx)
+  const readImageNote = await callTool(FileReadTool, { path: 'logo.png' }, ctx)
   check(
     'Read 按 magic number 识别 PNG；模型不支持图片时回退为文本说明',
     readImageNote.is_error !== true && textOf(readImageNote).includes('image/png') && textOf(readImageNote).includes('omitted'),
     textOf(readImageNote),
   )
 
-  const readImageBlock = await callTool(FileReadTool, { file_path: 'logo.png' }, context(fixture, { supportsImages: true }))
+  const readImageBlock = await callTool(FileReadTool, { path: 'logo.png' }, context(fixture, { supportsImages: true }))
   const imageBlocks = Array.isArray(readImageBlock.content) ? readImageBlock.content : []
   check(
     'Read 在支持图片的模型上回传 image 内容块',
@@ -485,13 +485,13 @@ try {
     JSON.stringify(imageBlocks.map((block) => block.type)),
   )
 
-  const readBinaryNote = await callTool(FileReadTool, { file_path: 'notes.pdf' }, ctx)
+  const readBinaryNote = await callTool(FileReadTool, { path: 'notes.pdf' }, ctx)
   check('Read 对非图片二进制给出说明而不是乱码', textOf(readBinaryNote).includes('Binary file'), textOf(readBinaryNote))
 
-  const readCrlf = textOf(await callTool(FileReadTool, { file_path: 'crlf.txt' }, ctx))
+  const readCrlf = textOf(await callTool(FileReadTool, { path: 'crlf.txt' }, ctx))
   check('Read 读取 CRLF 文件', readCrlf.startsWith('line one') && readCrlf.includes('line three'))
 
-  check('Read 空文件提示', textOf(await callTool(FileReadTool, { file_path: 'empty.txt' }, ctx)) === '(empty file)')
+  check('Read 空文件提示', textOf(await callTool(FileReadTool, { path: 'empty.txt' }, ctx)) === '(empty file)')
 
   // -------------------------------------------------------------------------
   console.log('\n▶ 6b. 图片处理管线（缩放 / 格式转换 / 降级）')
@@ -515,7 +515,7 @@ try {
   )
   if (bigProcessed.ok) {
     await writeFile(join(fixture, 'huge.png'), bigPngBytes)
-    const readHuge = await callTool(FileReadTool, { file_path: 'huge.png' }, context(fixture, { supportsImages: true }))
+    const readHuge = await callTool(FileReadTool, { path: 'huge.png' }, context(fixture, { supportsImages: true }))
     const hugeBlocks = Array.isArray(readHuge.content) ? readHuge.content : []
     const hugeText = hugeBlocks.find((block) => block.type === 'text') as { text?: string } | undefined
     check(
@@ -529,7 +529,7 @@ try {
 
   // BMP：magic number 认得出来，但不是 provider 内联格式 → 自动转 PNG
   await writeFile(join(fixture, 'logo.bmp'), buildBmp24(8, 6))
-  const readBmp = await callTool(FileReadTool, { file_path: 'logo.bmp' }, context(fixture, { supportsImages: true }))
+  const readBmp = await callTool(FileReadTool, { path: 'logo.bmp' }, context(fixture, { supportsImages: true }))
   const bmpBlocks = Array.isArray(readBmp.content) ? readBmp.content : []
   const bmpText = bmpBlocks.find((block) => block.type === 'text') as { text?: string } | undefined
   const bmpImage = bmpBlocks.find((block) => block.type === 'image') as { source?: { media_type?: string } } | undefined
@@ -564,7 +564,7 @@ try {
   await writeFile(join(fixture, 'broken.bmp'), truncatedBmp)
   const readBrokenBmp = await callTool(
     FileReadTool,
-    { file_path: 'broken.bmp' },
+    { path: 'broken.bmp' },
     context(fixture, { supportsImages: true }),
   )
   check(
@@ -576,12 +576,12 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ 7. Write（替换实现 + 写队列）')
   // -------------------------------------------------------------------------
-  const writeNew = await callTool(FileWriteTool, { file_path: 'generated/deep/out.md', content: '# out\nsecond\n' }, ctx)
+  const writeNew = await callTool(FileWriteTool, { path: 'generated/deep/out.md', content: '# out\nsecond\n' }, ctx)
   check('Write 自动创建父目录', (await readFile(join(fixture, 'generated', 'deep', 'out.md'), 'utf-8')) === '# out\nsecond\n')
   check('Write details 标记 created', (writeNew.details as { created?: boolean } | undefined)?.created === true)
   check('Write 结果文本用请求路径', textOf(writeNew) === 'Successfully wrote to generated/deep/out.md', textOf(writeNew))
 
-  const writeAgain = await callTool(FileWriteTool, { file_path: 'generated/deep/out.md', content: 'overwritten\n' }, ctx)
+  const writeAgain = await callTool(FileWriteTool, { path: 'generated/deep/out.md', content: 'overwritten\n' }, ctx)
   check(
     'Write 覆盖已有文件并标记 created=false',
     (writeAgain.details as { created?: boolean } | undefined)?.created === false &&
@@ -594,7 +594,7 @@ try {
     Array.from({ length: 8 }, (_, index) =>
       callTool(
         FileWriteTool,
-        { file_path: 'concurrency/writes.txt', content: `${'x'.repeat(2000)}#${index}\n` },
+        { path: 'concurrency/writes.txt', content: `${'x'.repeat(2000)}#${index}\n` },
         ctx,
       ),
     ),
@@ -612,7 +612,7 @@ try {
   await writeFile(join(fixture, 'edit-target.txt'), 'alpha\nbeta\ngamma\n', 'utf-8')
   const editBasic = await callTool(
     FileEditTool,
-    { file_path: 'edit-target.txt', old_string: 'beta', new_string: 'BETA' },
+    { path: 'edit-target.txt', old_string: 'beta', new_string: 'BETA' },
     ctx,
   )
   check('Edit old_string/new_string 生效', (await readFile(join(fixture, 'edit-target.txt'), 'utf-8')) === 'alpha\nBETA\ngamma\n')
@@ -629,7 +629,7 @@ try {
   await writeFile(crlfPath, 'one\r\ntwo\r\nthree\r\n', 'utf-8')
   const editCrlf = await callTool(
     FileEditTool,
-    { file_path: 'edit-crlf.txt', old_string: 'one\ntwo', new_string: 'one\nTWO' },
+    { path: 'edit-crlf.txt', old_string: 'one\ntwo', new_string: 'one\nTWO' },
     ctx,
   )
   const crlfResult = await readFile(crlfPath, 'utf-8')
@@ -642,7 +642,7 @@ try {
   // BOM：必须保留
   const bomPath = join(fixture, 'edit-bom.txt')
   await writeFile(bomPath, '\uFEFFalpha\nbeta\n', 'utf-8')
-  await callTool(FileEditTool, { file_path: 'edit-bom.txt', old_string: 'beta', new_string: 'BETA' }, ctx)
+  await callTool(FileEditTool, { path: 'edit-bom.txt', old_string: 'beta', new_string: 'BETA' }, ctx)
   const bomResult = await readFile(bomPath, 'utf-8')
   check('Edit 保留 BOM', bomResult.startsWith('\uFEFF') && bomResult.includes('BETA'), JSON.stringify(bomResult.slice(0, 8)))
 
@@ -650,7 +650,7 @@ try {
   await writeFile(join(fixture, 'edit-all.txt'), 'x-x-x\n', 'utf-8')
   await callTool(
     FileEditTool,
-    { file_path: 'edit-all.txt', old_string: 'x', new_string: 'y', replace_all: true },
+    { path: 'edit-all.txt', old_string: 'x', new_string: 'y', replace_all: true },
     ctx,
   )
   check('Edit replace_all 替换全部出现', (await readFile(join(fixture, 'edit-all.txt'), 'utf-8')) === 'y-y-y\n')
@@ -679,18 +679,18 @@ try {
   await writeFile(join(fixture, 'edit-json.txt'), 'a\nb\n', 'utf-8')
   const editJson = await callTool(
     FileEditTool,
-    { file_path: 'edit-json.txt', edits: JSON.stringify([{ oldText: 'a', newText: 'A' }]) as unknown as ToolInputParams[string] },
+    { path: 'edit-json.txt', edits: JSON.stringify([{ oldText: 'a', newText: 'A' }]) as unknown as ToolInputParams[string] },
     ctx,
   )
   check('Edit 解析 JSON 字符串形式的 edits', editJson.is_error !== true && (await readFile(join(fixture, 'edit-json.txt'), 'utf-8')) === 'A\nb\n')
 
-  const editDuplicate = await callTool(FileEditTool, { file_path: 'edit-multi.txt', old_string: 'F', new_string: 'Z' }, ctx)
+  const editDuplicate = await callTool(FileEditTool, { path: 'edit-multi.txt', old_string: 'F', new_string: 'Z' }, ctx)
   check('Edit 非唯一匹配时报错', editDuplicate.is_error === true && textOf(editDuplicate).includes('occurrences'), textOf(editDuplicate))
 
-  const editNotFound = await callTool(FileEditTool, { file_path: 'edit-multi.txt', old_string: 'absent', new_string: 'Z' }, ctx)
+  const editNotFound = await callTool(FileEditTool, { path: 'edit-multi.txt', old_string: 'absent', new_string: 'Z' }, ctx)
   check('Edit 找不到目标文本时报错', editNotFound.is_error === true && textOf(editNotFound).includes('Could not find the exact text'))
 
-  const editMissing = await callTool(FileEditTool, { file_path: 'nope.txt', old_string: 'a', new_string: 'b' }, ctx)
+  const editMissing = await callTool(FileEditTool, { path: 'nope.txt', old_string: 'a', new_string: 'b' }, ctx)
   check('Edit 文件不存在时报错', editMissing.is_error === true && textOf(editMissing).includes('Could not edit file'))
 
   // 并发编辑同一文件：没有队列时会丢更新
@@ -699,7 +699,7 @@ try {
   const parallelEdits = Array.from({ length: 16 }, (_, index) =>
     callTool(
       FileEditTool,
-      { file_path: 'concurrency/shared.txt', old_string: 'ANCHOR', new_string: `ANCHOR\nmarker-${index}` },
+      { path: 'concurrency/shared.txt', old_string: 'ANCHOR', new_string: `ANCHOR\nmarker-${index}` },
       ctx,
     ),
   )
@@ -723,7 +723,7 @@ try {
 
   const capturedContexts: PiContext[] = []
   faux.setResponses([
-    fauxAssistantMessage([fauxToolCall('Read', { file_path: 'logo.png' }, { id: 'call_img' })]),
+    fauxAssistantMessage([fauxToolCall('read', { path: 'logo.png' }, { id: 'call_img' })]),
     fauxAssistantMessage('已读取图片'),
   ])
 

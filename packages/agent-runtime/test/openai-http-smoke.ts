@@ -87,7 +87,7 @@ const server = Bun.serve({
 											index: 0,
 											id: "call_mock_1",
 											type: "function",
-											function: { name: "Write", arguments: '{"file_path":' },
+											function: { name: "write", arguments: '{"path":' },
 										},
 									],
 								},

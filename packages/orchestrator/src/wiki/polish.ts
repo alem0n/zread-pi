@@ -3,7 +3,7 @@
  *
  * 预防层（第 1 层）把文风纪律注入系统提示，零额外成本；
  * 本模块是兜底：页面 `write_page` 成功 + 落盘兜底**之后**，对该文件跑一个轻量 polish Agent
- * （同一模型换一套系统提示：纪律 + Embedded mode，工具只给 Read / Edit / Ls，不给 write_page，
+ * （同一模型换一套系统提示：纪律 + Embedded mode，工具只给 read / edit / ls，不给 write_page，
  * 并使用独立的较小 token 预算）。
  *
  * 失败语义：polish 失败**不判页失败**——页面产物已存在，polish 是增强不是必需

@@ -7,7 +7,7 @@
  * 模型照做只会连续失败。新增 `Ls` 后这类文案才有对应能力。
  *
  * 与上游的差异（有意为之）：
- *  - 工具名按本仓库既有 PascalCase 约定（与 Read / Write / Edit / Glob / Grep 一致）；
+ *  - 工具名对齐上游 pi 的小写约定（read / write / edit / find / grep / ls）；
  *  - 目录判定用 `stat`（跟随软链接，软链接指向目录时补 `/`），与上游一致；
  *  - 输出条目上限 + 字节上限双限制，提示文案与上游一致。
  */
@@ -22,18 +22,18 @@ import { appendToolNotices, byteLimitNotice, toTruncationDetails, truncateHead, 
 const DEFAULT_LIMIT = 500
 
 export const LsTool = defineTool({
-  name: 'Ls',
-  description: `List directory contents. Returns entries sorted alphabetically (case-insensitive), with a trailing "/" for directories. Includes dotfiles. Output is truncated to ${DEFAULT_LIMIT} entries or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
+  name: 'ls',
+  description: `List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to ${DEFAULT_LIMIT} entries or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
   inputSchema: {
     type: 'object',
     properties: {
       path: {
         type: 'string',
-        description: 'Directory to list (defaults to the working directory)',
+        description: 'Directory to list (default: current directory)',
       },
       limit: {
         type: 'number',
-        description: `Maximum number of entries to return (default: ${DEFAULT_LIMIT})`,
+        description: 'Maximum number of entries to return (default: 500)',
       },
     },
     required: [],

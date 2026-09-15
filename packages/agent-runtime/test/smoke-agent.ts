@@ -40,7 +40,7 @@ faux.setResponses([
 	// 第 1 次：可重试的 429 错误（无内容）→ 触发流级重试
 	fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit exceeded" }),
 	// 第 2 次：要求调用 Write 工具
-	fauxAssistantMessage([fauxToolCall("Write", { file_path: targetFile, content: "# hello pi\n" }, { id: "call_1" })]),
+	fauxAssistantMessage([fauxToolCall("write", { path: targetFile, content: "# hello pi\n" }, { id: "call_1" })]),
 	// 第 3 次：给最终答复
 	fauxAssistantMessage("已写入 out.md"),
 ]);
@@ -138,8 +138,8 @@ check(
 );
 check("收到 partial_message 流式事件", events.includes("partial_message"));
 check("收到 tool_result 事件", events.includes("tool_result"));
-check("PreToolUse 钩子被触发", hookLog.includes("pre:Write"), hookLog.join(","));
-check("PostToolUse 钩子被触发", hookLog.includes("post:Write"), hookLog.join(","));
+check("PreToolUse 钩子被触发", hookLog.includes("pre:write"), hookLog.join(","));
+check("PostToolUse 钩子被触发", hookLog.includes("post:write"), hookLog.join(","));
 check("流级重试被触发（429）", retryLog.length === 1, retryLog.join(","));
 check("最终结果为 success", resultSubtype === "success", String(resultSubtype));
 check("usage 已从 pi 映射回 TokenUsage", finalUsage !== undefined, JSON.stringify(finalUsage));

@@ -106,8 +106,8 @@ function sortPaths(paths: string[]): string[] {
 }
 
 export const GlobTool = defineTool({
-  name: 'Glob',
-  description: `Find files matching a glob pattern. Returns matching file paths relative to the search directory, sorted alphabetically. Respects .gitignore. Supports patterns like "**/*.ts" and "src/**/*.js"; patterns without "/" are matched against the file name (so "*.ts" matches nested files too). Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
+  name: 'find',
+  description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -117,11 +117,11 @@ export const GlobTool = defineTool({
       },
       path: {
         type: 'string',
-        description: 'Directory to search in (defaults to the working directory)',
+        description: 'Directory to search in (default: current directory)',
       },
       limit: {
         type: 'number',
-        description: `Maximum number of results (default: ${DEFAULT_LIMIT})`,
+        description: 'Maximum number of results (default: 1000)',
       },
     },
     required: ['pattern'],
