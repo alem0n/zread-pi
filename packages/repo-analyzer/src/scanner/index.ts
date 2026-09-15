@@ -3,8 +3,11 @@ import { join, extname, relative, resolve } from 'path';
 import Ignore, { type Ignore as IgnoreType } from 'ignore';
 import { createHash } from 'crypto';
 import type { FileManifest, FileInfo } from '@zread-pi/types';
-import { logger, getProjectRoot } from '@zread-pi/utils';
+import { createLogger, getProjectRoot } from '@zread-pi/utils';
 import { SCANNER_CONFIG, LANGUAGE_MAP } from './constants';
+
+/** 本模块的命名 logger（文件扫描）。 */
+const scannerLogger = createLogger('analyzer.scanner');
 
 function detectLanguage(filePath: string): string {
   const ext = extname(filePath).toLowerCase();
@@ -37,7 +40,7 @@ async function calculateHashes(filePaths: string[]): Promise<Map<string, string>
       results.set(filePath, hash);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`Failed to hash ${filePath}: ${message}`);
+      scannerLogger.warn(`Failed to hash ${filePath}: ${message}`);
     }
   }
 
@@ -67,7 +70,7 @@ async function collectFiles(
       const fileStat = await stat(fullPath);
 
       if (fileStat.size > SCANNER_CONFIG.max_file_size) {
-        logger.warn(`File too large, skipped: ${relativePath} (${fileStat.size} bytes)`);
+        scannerLogger.warn(`File too large, skipped: ${relativePath} (${fileStat.size} bytes)`);
         continue;
       }
 
@@ -90,7 +93,7 @@ async function collectFiles(
 
 export async function scanFiles(projectRoot?: string): Promise<FileManifest> {
   const root = projectRoot || getProjectRoot();
-  logger.progress('Scanning project', root);
+  scannerLogger.info(`[PROGRESS] Scanning project ${root}`);
 
   const ig = await createIgnoreFilter(root);
   const collectedFiles = await collectFiles(root, root, ig);
@@ -99,7 +102,7 @@ export async function scanFiles(projectRoot?: string): Promise<FileManifest> {
     return { files: [], totalFiles: 0, totalSize: 0 };
   }
 
-  logger.progress('Calculating file hash', `${collectedFiles.length} files`);
+  scannerLogger.info(`[PROGRESS] Calculating file hash: ${collectedFiles.length} files`);
 
   const projectRootResolved = resolve(root);
   const filePaths = collectedFiles.map(f => join(projectRootResolved, f.path));
@@ -115,7 +118,7 @@ export async function scanFiles(projectRoot?: string): Promise<FileManifest> {
 
   const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
-  logger.success(`Scanned ${files.length} files (${totalSize} bytes)`);
+  scannerLogger.info(`[OK] Scanned ${files.length} files (${totalSize} bytes)`);
 
   return {
     files,

@@ -13,7 +13,7 @@
 import pLimit from 'p-limit';
 import { copyFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, logger } from '@zread-pi/utils';
+import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, createLogger } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { getDetailSpec, MINIMAL_PANORAMA_REQUIREMENT, type BlueprintDetailSpec } from '../agents/blueprint-detail.js';
 import { createWritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
@@ -32,6 +32,9 @@ import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import type { BlueprintDetailLevel, WikiPage } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
+
+/** 本模块的命名 logger（页面生成管线）。 */
+const pagesLogger = createLogger('orchestrator.pages');
 
 /**
  * Build page-specific prompt
@@ -252,7 +255,7 @@ export async function rescuePageFile(
       return true;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn(`[${page.slug}] 兜底移动页面文件失败（${candidate} -> ${target}）：${message}`);
+      pagesLogger.warn(`[${page.slug}] 兜底移动页面文件失败（${candidate} -> ${target}）：${message}`);
       return false;
     }
   };
@@ -302,7 +305,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
     pages = blueprint.pages;
   }
 
-  logger.info(`开始生成 Wiki 内容：${pages.length} 个页面，并发数 ${maxConcurrent}`);
+  pagesLogger.info(`开始生成 Wiki 内容：${pages.length} 个页面，并发数 ${maxConcurrent}`);
 
   // 3. Create concurrency limiter
   const limit = pLimit(maxConcurrent);
@@ -451,7 +454,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
         if (!(await fileExists(outputFile))) {
           const rescuedFrom = wrotePage ? await rescuePageFile(page, writeAttempts, wikiDir, variant) : null;
           if (rescuedFrom) {
-            logger.warn(
+            pagesLogger.warn(
               `[${page.slug}] write_page 写入路径与 wiki.json 不一致，已兜底移动到约定位置：${rescuedFrom} -> ${outputFile}`,
             );
           } else {
@@ -472,9 +475,9 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           title: page.title,
         });
         if (polish.applied) {
-          logger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms）`);
+          pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms)`);
         } else if (polish.reason === 'mermaid-rollback') {
-          logger.warn(`[${page.slug}] polish 未保留：Mermaid 复检未通过，已回滚`);
+          pagesLogger.warn(`[${page.slug}] polish 未保留：Mermaid 复检未通过，已回滚`);
         }
 
         // Success
@@ -501,7 +504,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           contextWindow: result.contextWindow ?? lastContextWindow,
         });
 
-        logger.success(`[${page.slug}] 完成 (${pageResult.durationMs}ms)`);
+        pagesLogger.info(`[OK] [${page.slug}] 完成 (${pageResult.durationMs}ms)`);
 
         return pageResult;
 
@@ -531,7 +534,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           contextWindow: lastContextWindow,
         });
 
-        logger.error(`[${page.slug}] 失败: ${message}`);
+        pagesLogger.error(`[${page.slug}] 失败: ${message}`);
 
         return pageResult;
       }
@@ -543,7 +546,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
 
   const durationMs = Math.round(performance.now() - startTime);
 
-  logger.info(
+  pagesLogger.info(
     `Wiki 内容生成完成：${progress.completed}/${progress.total} 成功，${progress.failed} 失败 (${durationMs}ms)`
   );
 

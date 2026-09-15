@@ -1,5 +1,8 @@
 import Parser from 'web-tree-sitter';
-import { logger } from '@zread-pi/utils';
+import { createLogger } from '@zread-pi/utils';
+
+/** Vue 单文件组件的脚本提取（与 Tree-sitter 解析共用一个命名 logger）。 */
+const parserLogger = createLogger('analyzer.parser');
 
 export function extractVueScript(source: string): { scriptContent: string; scriptLang: string } | null {
   const scriptMatch = source.match(/<script[^>]*>([\s\S]*?)<\/script>/);
@@ -39,7 +42,7 @@ export async function parseVueSfc(
 
   const parser = scriptInfo.scriptLang === 'ts' ? tsParser : vueParser;
   if (!parser) {
-    logger.warn('Vue script parser not loaded');
+    parserLogger.warn('Vue script parser not loaded');
     vueTree.delete();
     return result;
   }

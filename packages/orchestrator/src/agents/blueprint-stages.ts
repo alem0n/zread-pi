@@ -32,7 +32,7 @@ import {
 } from '@zread-pi/agent-runtime';
 import {
   loadWikiBlueprint,
-  logger,
+  createLogger,
   mergeSectionTopics,
   mergeWikiSections,
   initWikiSkeleton,
@@ -71,6 +71,11 @@ import { renderClassifyPrompt } from '../prompts/classify';
 import { renderTopicsPrompt, SYNC_TOPICS_RULES } from '../prompts/topics';
 import TitlesPrompt from '../prompts/titles';
 import type { BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus, CatalogEvent, CatalogStage } from '../types.js';
+
+/** 三个阶段各自的命名 logger（对齐 cordis 日志总线；旧实现的 [classify]/[topics]/[titles] 前缀由名字取代）。 */
+const classifyLogger = createLogger('classify');
+const topicsLogger = createLogger('topics');
+const titlesLogger = createLogger('titles');
 
 /** 探索类工具（分类 / 主题阶段共用；与旧蓝图 Agent 的工具面保持一致） */
 const EXPLORE_TOOLS: ToolDefinition[] = [
@@ -445,8 +450,8 @@ export async function runClassifyStage(
   });
 
   const sections = sectionsFromBlueprint(blueprint);
-  logger.info(
-    `[classify] 分类完成：${sections.length} 个分类，档位 ${spec.level}（${Math.round(result.durationMs)}ms）`,
+  classifyLogger.info(
+    `分类完成：${sections.length} 个分类，档位 ${spec.level}（${Math.round(result.durationMs)}ms）`,
   );
   return sections;
 }
@@ -491,7 +496,7 @@ async function runSectionCondenseAgent(
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.warn(`[classify] 缩编 subagent 失败，降级为代码兜底：${message}`);
+    classifyLogger.warn(`缩编 subagent 失败，降级为代码兜底：${message}`);
     return null;
   }
   return captured.sections && captured.sections.length > 0 ? captured.sections : null;
@@ -545,8 +550,8 @@ async function persistSectionsAfterQuantityFailure(
   quantity.persisted = true;
   quantity.lastPayload = sections;
   quantity.lastCount = sections.length;
-  logger.warn(
-    `[classify] 数量越界 ${quantity.outOfRange} 次后由${via === 'condense' ? '缩编 subagent' : '代码兜底'}收尾：` +
+  classifyLogger.warn(
+    `数量越界 ${quantity.outOfRange} 次后由${via === 'condense' ? '缩编 subagent' : '代码兜底'}收尾：` +
       `${sections.length} 个分类 ${quantity.lastNote ?? ''}`,
   );
 }
@@ -635,7 +640,7 @@ export async function runTopicsStage(
               spec,
             });
             if (settled) {
-              logger.info(`[topics] 分类「${section.title}」完成（数量越界后收尾，${index + 1}/${sections.length}）`);
+              topicsLogger.info(`分类「${section.title}」完成（数量越界后收尾，${index + 1}/${sections.length}）`);
               return;
             }
           }
@@ -650,19 +655,19 @@ export async function runTopicsStage(
             section: section.title,
             error: state.error ?? '模型未调用 submit_section_topics',
           });
-          logger.warn(`[topics] 分类「${section.title}」失败：${state.error ?? '模型未调用工具'}`);
+          topicsLogger.warn(`分类「${section.title}」失败：${state.error ?? '模型未调用工具'}`);
         } else {
-          logger.info(`[topics] 分类「${section.title}」完成（${index + 1}/${sections.length}）`);
+          topicsLogger.info(`分类「${section.title}」完成（${index + 1}/${sections.length}）`);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         if (quantity.persisted) {
           // Agent 在落盘后失败（例如预算耗尽于收尾读秒）：产物已在，不算失败
-          logger.warn(`[topics] 分类「${section.title}」已落盘但 Agent 报错：${message}`);
+          topicsLogger.warn(`分类「${section.title}」已落盘但 Agent 报错：${message}`);
         } else {
           failed.push({ section: section.title, stage: 'topics', error: message });
           markAgentFailed(context, { key, stage: 'topics', section: section.title, error: message });
-          logger.warn(`[topics] 分类「${section.title}」失败：${message}`);
+          topicsLogger.warn(`分类「${section.title}」失败：${message}`);
         }
       } finally {
         completed += 1;
@@ -707,7 +712,7 @@ async function runTopicsCondenseAgent(
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.warn(`[topics] 分类「${section.title}」缩编 subagent 失败，降级为代码兜底：${message}`);
+    topicsLogger.warn(`分类「${section.title}」缩编 subagent 失败，降级为代码兜底：${message}`);
     return null;
   }
   return captured.topics && captured.topics.length > 0 ? captured.topics : null;
@@ -750,15 +755,15 @@ async function persistTopicsAfterQuantityFailure(
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.warn(`[topics] 分类「${section.title}」兜底落盘失败：${message}`);
+    topicsLogger.warn(`分类「${section.title}」兜底落盘失败：${message}`);
     return false;
   }
 
   quantity.persisted = true;
   quantity.lastPayload = topics;
   quantity.lastCount = topics.length;
-  logger.warn(
-    `[topics] 分类「${section.title}」数量越界 ${quantity.outOfRange} 次后由` +
+  topicsLogger.warn(
+    `分类「${section.title}」数量越界 ${quantity.outOfRange} 次后由` +
       `${via === 'condense' ? '缩编 subagent' : '代码兜底'}收尾：${topics.length} 篇 ${quantity.lastNote ?? ''}`,
   );
   return true;
@@ -778,7 +783,7 @@ export async function runTitlesStage(
   // low / minimal 档位跳过标题精修（最便宜但砍掉无质量风险）
   const spec = getDetailSpec(detailOf(context));
   if (!spec.refineTitles) {
-    logger.info(`[titles] 档位 ${spec.level}：跳过标题精修阶段`);
+    titlesLogger.info(`档位 ${spec.level}：跳过标题精修阶段`);
     return failed;
   }
 
@@ -849,13 +854,13 @@ export async function runTitlesStage(
             section: section.title,
             error: state.error ?? '模型未调用 refine_section_titles',
           });
-          logger.warn(`[titles] 分类「${section.title}」失败，保留原标题：${state.error ?? '模型未调用工具'}`);
+          titlesLogger.warn(`分类「${section.title}」失败，保留原标题：${state.error ?? '模型未调用工具'}`);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         failed.push({ section: section.title, stage: 'titles', error: message });
         markAgentFailed(context, { key, stage: 'titles', section: section.title, error: message });
-        logger.warn(`[titles] 分类「${section.title}」失败，保留原标题：${message}`);
+        titlesLogger.warn(`分类「${section.title}」失败，保留原标题：${message}`);
       } finally {
         completed += 1;
         emitStageEvent(context, 'titles', {

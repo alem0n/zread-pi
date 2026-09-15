@@ -21,11 +21,14 @@ import {
   type TokenUsage,
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
-import { loadConfig, logger, writeTextFile } from '@zread-pi/utils';
+import { loadConfig, createLogger, writeTextFile } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { buildPolishSystemPrompt, buildPolishTaskPrompt } from '../agents/style-discipline.js';
 import { formatMermaidValidationError, validateMermaidContent } from '../tools/page-tools.js';
 import type { PolishOutcome } from './types.js';
+
+/** 本模块的命名 logger（页面润色）。 */
+const polishLogger = createLogger('orchestrator.polish');
 
 /**
  * polish Agent 的独立小 token 预算：一次 Read + 少量 Edit 足够；
@@ -77,11 +80,11 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
 
   const original = await readIfExists(options.filePath);
   if (original === null) {
-    logger.warn(`[${options.slug}] polish 跳过：页面文件不可读（${options.filePath}）`);
+    polishLogger.warn(`[${options.slug}] polish 跳过：页面文件不可读（${options.filePath}）`);
     return { applied: false, reason: 'missing-file', durationMs: startedAt() };
   }
 
-  logger.info(`[${options.slug}] 开始 polish（${options.filePath}）`);
+  polishLogger.info(`[${options.slug}] 开始 polish（${options.filePath}）`);
   let agentError: string | undefined;
   let tokenUsage: TokenUsage | undefined;
   try {
@@ -99,7 +102,7 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
   } catch (err: unknown) {
     // 页面已存在，polish 失败不判页失败，仅告警
     agentError = err instanceof Error ? err.message : String(err);
-    logger.warn(`[${options.slug}] polish Agent 失败（不阻断页面）：${agentError}`);
+    polishLogger.warn(`[${options.slug}] polish Agent 失败（不阻断页面）：${agentError}`);
   }
 
   const current = await readIfExists(options.filePath);
@@ -122,7 +125,7 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
     const detail = formatMermaidValidationError(mermaidIssues);
     try {
       await writeTextFile(options.filePath, original);
-      logger.warn(`[${options.slug}] polish 改坏了 Mermaid，已回滚到润色前内容：\n${detail}`);
+      polishLogger.warn(`[${options.slug}] polish 改坏了 Mermaid，已回滚到润色前内容：\n${detail}`);
       return {
         applied: false,
         reason: 'mermaid-rollback',
@@ -133,7 +136,7 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
     } catch (err: unknown) {
       // 回滚也失败：保留被改坏的文件但明确告警（不掩盖问题）
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`[${options.slug}] polish 回滚失败：${message}\n${detail}`);
+      polishLogger.error(`[${options.slug}] polish 回滚失败：${message}\n${detail}`);
       return {
         applied: false,
         reason: 'mermaid-rollback',
@@ -144,6 +147,6 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
     }
   }
 
-  logger.success(`[${options.slug}] polish 完成（${startedAt()}ms）`);
+  polishLogger.info(`[OK] [${options.slug}] polish 完成（${startedAt()}ms）`);
   return { applied: true, error: agentError, durationMs: startedAt(), tokenUsage };
 }

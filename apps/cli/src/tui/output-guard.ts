@@ -19,9 +19,8 @@
  *     也不会让杂散日志冒充终端控制。
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { getLogFile } from "@zread-pi/utils";
+import { createLogger } from "@zread-pi/utils";
+import type { Logger } from "@zread-pi/utils";
 
 /** 杂散去处：写入回调 */
 export type StrayStdoutHandler = (text: string) => void;
@@ -85,12 +84,14 @@ async function writeRawStdoutChunk(text: string): Promise<void> {
   }
 }
 
-/** 把文本写进 TUI 日志文件（redirect: "log" 的实现；日志失败时静默） */
+/** 把杂散 stdout 送进日志总线（命名 tui.stdout，由 file exporter 统一落盘）。 */
+let strayLogger: Logger | undefined;
+
 function appendStrayToLog(text: string): void {
   try {
-    const logPath = getLogFile();
-    mkdirSync(dirname(logPath), { recursive: true });
-    appendFileSync(logPath, text, "utf-8");
+    if (!strayLogger) strayLogger = createLogger("tui.stdout");
+    // 用 %s 占位原样传递，避免文本里的 % 被 printf 误解析
+    strayLogger.info("%s", text);
   } catch {
     // 杂散输出写日志失败时静默：绝不能反过来污染终端
   }
