@@ -1473,3 +1473,70 @@ v1.5.2 的正文同样是它的说明文件。五个 Release 的正文都与各�
   正文编辑不动 tag / 产物，但仍属对外可见变更，本次由用户明确授权执行）。
 - 无说明文件时仍走 `generate_release_notes`，此时 `body_path` 为空值 —— 该输入会被 GitHub 过滤掉，
   等于没传（这正是预期的回落路径）。
+
+## 23. 模型上下文/输出覆盖（llm.context_window / llm.max_tokens，第二十一步）
+
+### 23.1 目标
+
+pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens`，但两类场景下目录值不可信：
+
+1. **目录外模型**：旧配置 / 第三方网关里的模型名不在内置目录里，运行时只能拿到回退默认值
+   （`runtime-model.ts` 的 200k / 8192），与真实能力无关；
+2. **网关代理**：很多 OpenAI 兼容网关实际提供的上下文/输出上限与它声称的模型不一致
+   （例如把 claude 包装成 openai 协议时窗口被打折）。
+
+因此把「上下文大小 / 最大输出 token」做成**用户可覆盖的配置项**，作用在**当前生效模型**上。
+
+### 23.2 语义与落点
+
+| 位置 | 内容 |
+| --- | --- |
+| `LLMConfig.context_window` / `LLMConfig.max_tokens` | 新增**可选**字段（`number \| null`）；`null` / 缺省 = 跟随模型目录自带元数据；显式正值覆盖。旧 config.yaml 缺省时由 `validateConfig` 归一化为 `null`（老用户零变化） |
+| `normalizeModelContextWindow` / `normalizeModelMaxTokens`（`@zread-pi/utils`） | 正整数保留（带 `MIN/MAX` 钳制）；`0` / 负数 / 非数字一律回退 `null`。与 `CustomModelConfig` 的同名字段语义一致，但作用在「当前生效模型」而非某个自定义模型定义上 |
+| `orchestrator/src/agents/create-agent.ts` | 读取配置并经 `createAgent({ contextWindow, maxTokens })` 下发；`logger.info` 追加覆盖日志 |
+| `agent-runtime` 的 `AgentOptions.contextWindow` / `maxTokens` | 已有字段（适配层早期为兼容旧 SDK 保留），经 `createRuntimeModel` **patch 到解析出的模型对象**上（catalog 命中与回退两条路径都生效） |
+| CLI `/config/model-size` | 两个输入框 + 模型目录默认值提示；`tab` / `↑↓` 切字段、`enter` 保存并返回、`s` 保存、`d` 恢复模型默认（两字段清空 = `null`）、`esc` 返回；非法输入不写回并提示范围 |
+| 配置首页 | 新增条目「模型上下文/输出」：未覆盖显示「跟随模型默认」，覆盖后显示 `上下文 / 输出`（单项未覆盖显示「默认」） |
+
+效果链路（已由 e2e-blueprint 场景 7 断言）：覆盖值 → 解析出的模型 →
+`system/init` 的 `context_window`（生成页「上下文占比」分母）+ 请求体输出上限
+（openai-completions 依 compat 走 `max_tokens` 或 `max_completion_tokens`）+
+上下文压缩阈值（harness 按 `model.contextWindow - reserveTokens` 判定）。
+
+注意：请求输出上限**不是** `model.maxTokens` 原值直送——pi-ai 的 `clampMaxTokensToContext`
+会按当前上下文用量把它钳制到 `contextWindow - 已用 - 4096`，因此把窗口改小可能连带把输出上限压低。
+
+### 23.3 与 `agent.token_budget` 的区别
+
+`llm.max_tokens` 是**单次请求**的输出上限（每次 LLM 调用）；`agent.token_budget` 是**整次 Agent 运行**
+的累计 token 预算（首尾机制：软/硬提示与强制交卷）。两者互不影响，配置界面也分属
+`/config/model-size` 与 `/config/max-turns`。
+
+### 23.4 兼容性
+
+- 旧 config.yaml 无这两个字段：`validateConfig` 补 `null`，行为与迁移前完全一致（用目录值）；
+- 字段是 `LLMConfig` 上的**新增可选**属性，`getProviderConfig` / `mergeBlueprintSections` 等既有
+  读-改-写路径不受影响；
+- `CustomModelConfig`（per-provider 自定义模型）的同名字段**保持独立**：自定义模型定义仍按
+  models.json 语义提供元数据，本覆盖在其之上再叠加（解析时 `contextWindow` 选项覆盖目录值）。
+
+### 23.5 验证（实际执行结果）
+
+- `bun run test:catalog`：`llm.context_window` / `llm.max_tokens` 的缺省 null / 合法值保留 /
+  0 与负数回退 null（42/42 全通过）；
+- `bun run packages/orchestrator/test/e2e-blueprint.ts` 场景 7：`llm.context_window: 99999` →
+  `system/init` 上报 99999；`llm.max_tokens: 1234` → 请求体输出上限 1234（38/38 全通过）；
+- `bun run apps/cli/test/smoke-tui.ts`：`/config/model-size` 渲染 / 字段切换 / Enter 写回 /
+  非法输入拦截 / `d` 恢复默认 / `s` 落盘（config.yaml 出现 `context_window: 200000` 与
+  `max_tokens: 32000`）/ 配置首页条目值（245 项全通过）；
+- `bun run test`（全部 13 个套件）与 `bun run mock:wiki`（completed=5 failed=0）均通过。
+
+### 23.6 风险与未决
+
+- 覆盖是**全局生效**的（跟随 `llm.provider/model`）：切换模型后旧覆盖仍会套到新模型上。
+  配置首页条目值会显示当前覆盖，用户切换模型后应手动复查（或按 `d` 恢复）。
+  没有做成 per-model 是因为目录外的模型连「模型身份」都不稳定（网关别名），
+  按 id 记忆覆盖反而更容易错配。
+- 覆盖值**不会反向写回 catalog**（`getZreadModel()` 仍返回目录原值），因此 Provider 详情页的
+  模型列表展示的是目录元数据；只有请求与上下文记账用覆盖后的值。这是有意的：配置界面改的是
+  「当前生效模型」的运行时行为，不是目录事实。
