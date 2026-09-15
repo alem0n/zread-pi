@@ -85,6 +85,22 @@ export interface LLMConfig {
    */
   thinking_level: ThinkingLevel;
   providers: Record<string, LlmProviderConfig>;
+  /**
+   * 当前生效模型的「上下文窗口」覆盖（tokens）。
+   *
+   * `null` / 缺省 = 跟随模型目录（pi-ai 内置或用户自定义模型）自带的 contextWindow；
+   * 显式正值会覆盖目录值，同时影响上下文压缩阈值与 UI「上下文占比」的分母。
+   * 由配置界面 /config/model-size 维护（旧 config.yaml 缺省时归一化为 null）。
+   */
+  context_window?: number | null;
+  /**
+   * 当前生效模型的「最大输出 tokens」覆盖。
+   *
+   * `null` / 缺省 = 跟随模型目录自带的 maxTokens；显式正值会覆盖请求时的输出上限
+   * （实际值仍会按上下文窗口钳制，见 pi-ai 的 `clampMaxTokensToContext`）。
+   * 由配置界面 /config/model-size 维护（旧 config.yaml 缺省时归一化为 null）。
+   */
+  max_tokens?: number | null;
 }
 
 /**
