@@ -474,20 +474,26 @@ async function readLog(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 {
-  // 9a) 默认关闭：不开 ZREAD_PI_LOG_JSONL 时服务里没有 JsonlExporter
+  // 9a) 默认开启：不设 ZREAD_PI_LOG_JSONL 时服务里有 JsonlExporter
   resetLoggerServiceForTesting();
   delete process.env[LOG_JSONL_ENV];
   const svc = getLoggerService();
   const names = svc.exporters.size;
-  createLogger('probe.default').info('jsonl-off-probe');
+  createLogger('probe.default').info('jsonl-on-probe');
   const jsonlPath = getJsonlLogFilePath();
-  const existsAfterOff = await readFile(jsonlPath, 'utf-8').then(() => true, () => false);
-  check('JSONL 默认关闭：不产出 .jsonl 文件', !existsAfterOff);
-  check('JSONL 默认关闭：exporter 数量不含 jsonl（2 = 缓冲 + 文本）', names === 2, `exporters=${names}`);
+  const existsAfterOn = await readFile(jsonlPath, 'utf-8').then(() => true, () => false);
+  check('JSONL 默认开启：产出 .jsonl 文件', existsAfterOn);
+  check('JSONL 默认开启：exporter 数量含 jsonl（3 = 缓冲 + 文本 + jsonl）', names === 3, `exporters=${names}`);
 
-  // 9b) 开启后：结构化行可解析、字段完整、与文本 sink 一一对应
+  // 9a-2) 显式关闭：ZREAD_PI_LOG_JSONL=0 时不注册 jsonl exporter
   resetLoggerServiceForTesting();
-  process.env[LOG_JSONL_ENV] = '1';
+  process.env[LOG_JSONL_ENV] = '0';
+  const offSvc = getLoggerService();
+  check('JSONL 显式关闭（=0）：exporter 数量 2（缓冲 + 文本）', offSvc.exporters.size === 2, `exporters=${offSvc.exporters.size}`);
+  resetLoggerServiceForTesting();
+  delete process.env[LOG_JSONL_ENV];
+
+  // 9b) 默认开启下：结构化行可解析、字段完整、printf 语义
   getLoggerService();
   const log = createLogger('jsonl.probe');
   log.info('hello %s', 'jsonl');
@@ -495,8 +501,10 @@ async function readLog(): Promise<string> {
   const raw = await readFile(jsonlPath, 'utf-8');
   const lines = raw.trim().split('\n');
   const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
-  check('JSONL 开启：每行可 JSON.parse', parsed.length >= 2);
-  const first = parsed[0]!;
+  // jsonl 文件从更早的段就在累积（默认开启），按名字过滤出本段的记录
+  const probe = parsed.filter((r) => r.name === 'jsonl.probe');
+  check('JSONL 开启：每行可 JSON.parse', probe.length >= 2);
+  const first = probe[0]!;
   check(
     'JSONL 字段完整',
     typeof first.sn === 'number' &&
@@ -504,7 +512,7 @@ async function readLog(): Promise<string> {
       typeof first.level === 'number' && first.msg === 'hello jsonl' && typeof first.time === 'string',
     JSON.stringify(first),
   );
-  check('JSONL 多条记录 sn 单调递增', (parsed[1]!.sn as number) > (parsed[0]!.sn as number));
+  check('JSONL 多条记录 sn 单调递增', (probe[1]!.sn as number) > (probe[0]!.sn as number));
 
   // 9c) 死循环修复回归：tui.stdout 不再回到 console
   const consoleExporter = new ConsoleExporter({ colors: false });

@@ -12,8 +12,8 @@
  *  2. 分配全局 `sn` / `ts`，广播给所有 exporter；
  *  3. 每个 exporter 用 `resolveExporterLevel` 判定是否发出（级别阈值）。
  *
- * 默认注册的 exporter：内置环形缓冲（1000 条，全级别）+ 文本文件 exporter；
- * JSONL exporter 默认关闭（`ZREAD_PI_LOG_JSONL=1` 开启，结构化机器可读 sink）。
+ * 默认注册的 exporter：内置环形缓冲（1000 条，全级别）+ 文本文件 exporter +
+ * JSONL exporter（结构化机器可读 sink，`ZREAD_PI_LOG_JSONL=0` 关闭）。
  * console exporter **默认不注册**（显式 `ZREAD_PI_LOG_CONSOLE=1` 才开），
  * 因为 TUI 期间 console-guard 会把 console 输出转回总线，两者同时开启会往
  * 日志文件里双写（详见 MIGRATION.md）。
@@ -159,7 +159,7 @@ export class LoggerService {
     // 文本文件 exporter（默认开启，日期按写入时刻取）
     this.addExporter(new FileExporter());
 
-    // JSONL exporter：默认关闭（ZREAD_PI_LOG_JSONL=1 开启），结构化机器可读 sink
+    // JSONL exporter：默认开启（ZREAD_PI_LOG_JSONL=0 关闭），结构化机器可读 sink
     if (isJsonlEnabled()) {
       this.addExporter(new JsonlExporter());
     }

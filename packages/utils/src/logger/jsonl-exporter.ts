@@ -6,7 +6,8 @@
  * 每行一条 JSON，字段直接取自结构化 Message，可被 jq / 脚本按 name/level/ts 过滤。
  *
  * - 落 `~/.zread-pi/logs/zread-pi-<yyyy-MM-dd>.jsonl`（与文本文件同目录同日期口径）；
- * - **默认关闭**：`ZREAD_PI_LOG_JSONL=1`（或 `true`/`yes`）开启，避免双文件常态浪费；
+ * - **默认开启**：`ZREAD_PI_LOG_JSONL=0`（或 `false`/`no`）显式关闭，
+ *   避免不想维护双文件的用户被动写两份；
  * - 保留期清理与文本文件共用 `sweepOldLogFiles`（两种后缀都扫）；
  * - 写失败静默：日志绝不能反过来打断业务或污染终端。
  */
@@ -33,10 +34,11 @@ export const LOG_JSONL_ENV = 'ZREAD_PI_LOG_JSONL';
 /** JSONL 单行最大字符数（与文本 sink 的 maxLength 缺省一致）。 */
 export const DEFAULT_JSONL_MAX_LENGTH = 10240;
 
-/** 是否由环境变量开启 JSONL sink。 */
+/** 是否由环境变量开启 JSONL sink（默认开启；`0`/`false`/`no` 显式关闭）。 */
 export function isJsonlEnabled(): boolean {
   const raw = process.env[LOG_JSONL_ENV];
-  return raw === '1' || raw === 'true' || raw === 'yes';
+  if (raw === undefined || raw === '') return true;
+  return !(raw === '0' || raw === 'false' || raw === 'no');
 }
 
 /** 取某一天（默认今天）的 JSONL 日志文件绝对路径（日期按本地时区，写入时刻计算）。 */

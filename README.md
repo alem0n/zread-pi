@@ -387,12 +387,13 @@ your-project/
   ZREAD_PI_LOG_RETENTION_DAYS=7 bun run cli
   ```
 
-- 开启结构化 JSONL 日志（机器分析用：jq / 脚本按 `name`/`level`/`ts` 过滤；默认关闭）：
+- 结构化 JSONL 日志（机器分析用：jq / 脚本按 `name`/`level`/`ts` 过滤；**默认开启**，`ZREAD_PI_LOG_JSONL=0` 可关闭）：
 
   ```bash
-  ZREAD_PI_LOG_JSONL=1 bun run cli
-  # 产出 ~/.zread-pi/logs/zread-pi-<日期>.jsonl，每行一条 JSON：
+  # 默认产出 ~/.zread-pi/logs/zread-pi-<日期>.jsonl，每行一条 JSON：
   jq -c 'select(.name=="orchestrator.pages")' ~/.zread-pi/logs/zread-pi-*.jsonl
+  # 不需要时关闭：
+  ZREAD_PI_LOG_JSONL=0 bun run cli
   ```
 </details>
 

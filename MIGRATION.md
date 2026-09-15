@@ -1719,7 +1719,8 @@ pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens
 - 落 `~/.zread-pi/logs/zread-pi-<yyyy-MM-dd>.jsonl`，与文本文件同目录同日期口径；
 - 每行一条 JSON：`{ sn, ts, time, name, type, level, msg }`——`msg` 走与文本 sink 相同的
   printf 渲染（`LoggerFormat.format`），语义完全一致；单行超过 10240 字符截断补 `...`；
-- **默认关闭**：`ZREAD_PI_LOG_JSONL=1`（或 `true` / `yes`）开启，避免双文件常态浪费；
+- **默认开启**：`ZREAD_PI_LOG_JSONL=0`（或 `false` / `no`）显式关闭，
+  避免不想维护双文件的用户被动写两份；
 - 级别与文本 file-exporter 同口径（排障 sink，默认记录含 debug 的全部级别，
   不受 `ZREAD_PI_LOG_LEVEL` 影响）；
 - 保留期清理与文本文件共用 `sweepOldLogFiles`（同时扫 `.log` 与 `.jsonl` 两种后缀，
