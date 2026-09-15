@@ -1581,3 +1581,131 @@ pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens
 - pi 的 `find` 默认上限是 1000（与本仓库原 `Glob` 相同），`grep` 默认 100 而本仓库是 250 ——
   description 里的数字与实际实现绑定（`${DEFAULT_LIMIT}` 插值），保留本仓库的 250 而不改描述会导致与 pi 文本不一致；
   现方案是**描述与实现一起对齐 pi 的默认值**（grep 上限 250 → 100）。若后续需要调大，必须同时改描述。
+
+---
+
+## 25. 日志系统对齐 cordis（LoggerService 总线 + 命名 logger）
+
+### 25.1 目标
+
+把 deepseek-harness 的日志体系（cordis `logger.ts` + cosmokit `time.ts` + logger-console 渲染器）
+完整移植进 `packages/utils/src/logger/`，zread-pi 从「全局单例拼字符串」升级为
+「结构化记录 + 多 exporter 总线 + 命名 logger」。既有调用点与测试零破坏。
+
+### 25.2 对齐清单（源 → 落点）
+
+| harness 源 | 内容 | zread-pi 落点 |
+| --- | --- | --- |
+| `vendor/cordis/src/logger.ts` | `Message{sn,ts,name,type,level,args}`、`LoggerLevel`（error=0/info=1/warn=2/debug=3）、Logger 门面（printf / Error 展开 / AggregateError 展开 / maxLength=10240 截断）、`Logger.code` 名字哈希着色（c16/c256）、`LoggerService`（命名工厂、exporter 广播、按 exporter/按名 levels 阈值、1000 条环形缓冲） | `logger/types.ts` + `logger/format.ts` + `logger/service.ts` |
+| `vendor/cosmokit/src/time.ts` | `Time.template`（yyyy/yy/MM/dd/hh/mm/ss/SSS）、`Time.format`（+1.2s 差值格式化） | `logger/time.ts`（最小子集） |
+| `vendor/logger-console/src/shared.ts` + `index.ts` | ConsoleExporter 渲染：`[I] name message` 前缀、showTime 模板、showDiff、label 宽度对齐、`util.inspect` 对象格式化（node 变体） | `logger/console-exporter.ts` |
+
+渲染结果与 harness **逐字一致**：`test:logger` 的黄金值直接取自 `vendor/cordis` 实跑
+（如 `code('app',3)=57`、`code('orchestrator.pages',1)=5`、
+`render([colors:0])` = `[I] app hello world`、`render([colors:3])` = `[I] \u001b[38;5;57;1mapp\u001b[0m hi`）。
+
+### 25.3 偏差项（有意不移植）
+
+| 偏差 | 理由 |
+| --- | --- |
+| cordis fiber / Context / DI 体系 | zread-pi 无插件架构；改为模块级单例（`getLoggerService()`）+ `createLogger(name)` 工厂 |
+| `Message.fiber`（WeakRef） | 无对应概念，字段省略 |
+| schemastery 配置 schema | 用 TS interface + `ZREAD_PI_LOG_LEVEL` 环境变量 |
+| `supports-color` 依赖 | 手写约 20 行探测（`NO_COLOR` / `FORCE_COLOR` / TTY + `COLORTERM` / `TERM`），零新依赖，不影响 standalone 二进制打包 |
+| browser 变体 / OTel 遥测 | 无场景 |
+| **console exporter 默认不注册** | harness 里 console exporter 由应用层插件加载；zread-pi 的 TUI 期间 `console-guard` 会把 console 输出转回总线，两者同时开启会往**日志文件双写**（console exporter → console.log → 被捕获 → file exporter 再写一次）。因此默认只注册缓冲 + 文件 exporter，`ZREAD_PI_LOG_CONSOLE=1` 才开 console（排障用）；console exporter 还会跳过名字为 `tui.console` 的记录，防止无限递归 |
+| file exporter（harness 无，本仓库新增） | 文本 sink 沿用 `~/.zread-pi/logs/zread-pi-<date>.log`，行内容为 `[本地时间] [级别] 名字 消息`（消息体复用 `LoggerFormat.format` 的 printf 渲染，无色） |
+| 级别阈值按名**前缀匹配** | cordis 只做精确名 + `default`；本仓库的 logger 名是点号分层（`orchestrator.pages`），因此 `ZREAD_PI_LOG_LEVEL=orchestrator=debug` 能覆盖下级名字。取最长匹配前缀（点号边界，`orchestrator` 不误命中 `orchestrator-lite`） |
+
+### 25.4 命名 logger 对照表（旧前缀 → 新名字）
+
+| 文件 | 旧写法 | 新名字 |
+| --- | --- | --- |
+| `agents/blueprint-stages.ts` | `[classify]` / `[topics]` / `[titles]` 前缀 | `classify` / `topics` / `titles`（三个 logger，前缀删除） |
+| `agents/create-agent.ts` | 全局 `logger` | `orchestrator.agent` |
+| `wiki/generate-wiki.ts` | 全局 `logger` | `orchestrator.pages` |
+| `wiki/polish.ts` | 全局 `logger` | `orchestrator.polish` |
+| `wiki/sync-wiki.ts` | 全局 `logger` | `orchestrator.sync` |
+| `wiki/memory.ts` | 全局 `logger` | `orchestrator.memory` |
+| `repo-analyzer/scanner` | 全局 `logger` | `analyzer.scanner` |
+| `repo-analyzer/parser`（index / vue-handler） | 全局 `logger` | `analyzer.parser` |
+| `repo-analyzer/parser/wasm-loader.ts` | 全局 `logger` | `analyzer.wasm` |
+| `repo-analyzer/repo-map` | 全局 `logger` | `analyzer.repo-map` |
+| `apps/cli/src/tui/console-guard.ts` | 手拼 `[iso] [LEVEL] args` | `tui.console`（按 console 方法映射 error/warn/info/debug） |
+| `apps/cli/src/tui/output-guard.ts` | 手拼 raw text | `tui.stdout`（杂散 stdout） |
+| `packages/utils/src/output/wiki-content.ts` | 全局 `logger` | 保留兼容层 `logger`（`app`），不在本次改造范围 |
+
+共 61 处调用点。`logger.progress` / `logger.success` 在兼容层保留，语义改为
+`info` + 消息标记 `[PROGRESS]` / `[OK]`（旧文件行的 `[PROGRESS]` / `[OK]` 标记因此仍在）。
+命名 logger 没有 `progress` / `success` 方法（cordis 只有 4 个严重程度），进度类消息直接用 `info`。
+
+### 25.5 行格式变化
+
+```text
+旧：[2026-09-15T13:00:00.000Z] [INFO] 开始生成 Wiki 内容：12 个页面，并发数 3
+新：[2026-09-15 21:00:00.000] [INFO] orchestrator.pages 开始生成 Wiki 内容：12 个页面，并发数 3
+```
+
+- 时间戳从 UTC ISO 改为**本地时间**（`yyyy-MM-dd hh:mm:ss.SSS`，与 console 渲染器同源）；
+- 行内多出 logger 名字（按模块过滤的依据）；
+- 级别仍是全词 `[INFO]` / `[WARN]` / `[ERROR]` / `[DEBUG]`（兼容层与外部 grep 习惯）。
+
+所有既有测试按 **needle** 断言（消息文本、`QUANTITY_FALLBACK_NOTE`、`代码兜底` 等），行格式变化不影响。
+
+### 25.6 修掉的旧实现 bug
+
+1. **日志路径在模块加载期定死日期**：旧 `logger.ts` 在模块顶层算 `LOG_FILE = ...new Date().toISOString().slice(0,10)`，
+   进程跨过午夜后仍然写昨天的文件。现在 `getLogFile()` 与 file exporter 都在**写入时刻**取日期。
+2. **无过期日志清理**：现在首次写入时清理超过保留期的旧日志（默认 30 天，`ZREAD_PI_LOG_RETENTION_DAYS` 覆盖，`<= 0` 不清理）。
+3. **写日志的 I/O 时机**：retention 清理放在首次写入而不是 import 期，避免 import 链对家目录做意外 I/O（测试隔离友好）。
+
+### 25.7 `ZREAD_PI_LOG_LEVEL` 用法
+
+形如 `default=info,orchestrator=debug`：
+
+- 条目可省略名字（`debug` → 设为 `default`）；未知级别名 / 负数忽略；整体非法或为空时回退 `{ default: INFO }`；
+- `warning` 是 `warn` 的别名；
+- **语义提醒**：cordis 的 level 数值是「啰嗦度」而非严重度 ——
+  `ERROR=0` 最不啰嗦、`DEBUG=3` 最啰嗦，阈值表示「允许发出的最大啰嗦度」。
+  因此 `default=warn` 会发出 `error` / `info` / `warn`，只丢弃 `debug`；
+- 只作用于 **console exporter**（且只在 `ZREAD_PI_LOG_CONSOLE=1` 注册时才存在）。
+  文件 exporter 固定记录全部级别（排障 sink），不受该变量影响。
+
+### 25.8 兼容性
+
+- `@zread-pi/utils` 的 `logger` / `getLogFile` 导出不变；新增导出 `createLogger` / `getLoggerService` /
+  `addExporter` / `LoggerLevel` / `Message` / `Exporter` / `LoggerFormat` / `ConsoleExporter` / `FileExporter` /
+  `getLogFilePath` / `sweepOldLogFiles` / `parseLogLevels` / `detectColorLevel` / `Time` 等（均为新增，旧调用点零改动）；
+- 旧 `config.yaml` 与日志无耦合（日志不进配置），启动路径不变；
+- `console-guard` / `output-guard` 对外接口不变，只是落盘实现改走总线。
+
+### 25.9 验证（实际执行结果）
+
+- `bun run typecheck`：0 错误；
+- `bun run test:logger`：103/103 通过；
+- `bun run test`（全套，含 test:logger）：全部绿
+  （test:blueprint 38+115+23+11+17 / test:pages 24+7+16 / test:tui 287+9+10+36+37+46+50 / test:context 45 等）；
+- `bun run mock:wiki`：`completed=5 failed=0`；
+- 真实日志文件抽样：
+
+```text
+[2026-09-15 21:59:37.784] [INFO] orchestrator.pages 页面生成开始
+[2026-09-15 21:59:37.785] [WARN] classify 数量越界，要求重提
+[2026-09-15 21:59:37.785] [ERROR] orchestrator.agent Error: demo error
+    at ...（Error stack 原样保留，续行不缩进）
+[2026-09-15 21:59:37.786] [INFO] app [PROGRESS] Scanning project 5 files
+[2026-09-15 21:59:37.786] [INFO] app [OK] 全部完成
+```
+
+### 25.10 风险与未决
+
+- **console exporter 与 TUI 的双写**：只有显式设 `ZREAD_PI_LOG_CONSOLE=1` 且同时运行 TUI 时，
+  日志文件里会出现同一条消息两次（一次原名、一次 `tui.console` 捕获）。这是排障场景的可接受代价；
+  默认（不设该变量）无双写。
+- **printf 语义**：命名 logger 的首参按 printf 解析，消息里含 `%s` / `%d` 会被消费。
+  兼容层与所有「消息体不可控」的位置（工具输入 / 工具输出 / 助手文本块 / 捕获的 console / 杂散 stdout）
+  已用 `%s` 占位包裹；新增日志点若消息含字面量 `%`，用 `%` 转义或同样用 `%s` 占位。
+- **LoggerLevel 用 `as const` 对象**：harness 用 `const enum`；本仓库的 bun/tsup 打包链不做隔离编译，
+  const enum 的运行时值会丢失，因此改用 `as const` 对象（类型与运行时两侧都可用）。
+- **日志文件不加跨进程锁**：多进程同时写同一天文件可能交错（与旧实现行为一致）；日志是尽力而为的排障数据，
+  不值得为此引入锁开销。
