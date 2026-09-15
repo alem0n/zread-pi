@@ -83,6 +83,9 @@ export namespace LoggerFormat {
       args.unshift('%o');
     }
 
+    // 无参调用（如 log.info()）：兜底为空串，绝不向业务方抛异常
+    if (args.length === 0) return '';
+
     let formatString: string = args.shift();
     formatString = formatString.replace(/%([a-zA-Z%])/g, (match, char) => {
       if (match === '%%') return '%';

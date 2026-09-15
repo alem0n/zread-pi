@@ -1701,7 +1701,9 @@ pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens
 
 - **console exporter 与 TUI 的双写**：只有显式设 `ZREAD_PI_LOG_CONSOLE=1` 且同时运行 TUI 时，
   日志文件里会出现同一条消息两次（一次原名、一次 `tui.console` 捕获）。这是排障场景的可接受代价；
-  默认（不设该变量）无双写。
+  默认（不设该变量）无双写。console exporter 同时跳过 `tui.console` 与 `tui.stdout`
+  两个捕获名——否则该组合会形成 console → stdout 接管 → 总线 → console 的**无限递归**
+  （每次迭代追加日志文件，饿死 TUI 事件循环）。
 - **printf 语义**：命名 logger 的首参按 printf 解析，消息里含 `%s` / `%d` 会被消费。
   兼容层与所有「消息体不可控」的位置（工具输入 / 工具输出 / 助手文本块 / 捕获的 console / 杂散 stdout）
   已用 `%s` 占位包裹；新增日志点若消息含字面量 `%`，用 `%` 转义或同样用 `%s` 占位。
@@ -1709,3 +1711,17 @@ pi-ai 的模型目录为内置模型提供准确的 `contextWindow` / `maxTokens
   const enum 的运行时值会丢失，因此改用 `as const` 对象（类型与运行时两侧都可用）。
 - **日志文件不加跨进程锁**：多进程同时写同一天文件可能交错（与旧实现行为一致）；日志是尽力而为的排障数据，
   不值得为此引入锁开销。
+
+### 25.11 JSONL exporter（机器可读 sink，本仓库新增）
+
+与 file-exporter 同一偏差族：harness 没有文件 sink，JSONL 是为「日志事后分析」新增的能力。
+
+- 落 `~/.zread-pi/logs/zread-pi-<yyyy-MM-dd>.jsonl`，与文本文件同目录同日期口径；
+- 每行一条 JSON：`{ sn, ts, time, name, type, level, msg }`——`msg` 走与文本 sink 相同的
+  printf 渲染（`LoggerFormat.format`），语义完全一致；单行超过 10240 字符截断补 `...`；
+- **默认关闭**：`ZREAD_PI_LOG_JSONL=1`（或 `true` / `yes`）开启，避免双文件常态浪费；
+- 级别与文本 file-exporter 同口径（排障 sink，默认记录含 debug 的全部级别，
+  不受 `ZREAD_PI_LOG_LEVEL` 影响）；
+- 保留期清理与文本文件共用 `sweepOldLogFiles`（同时扫 `.log` 与 `.jsonl` 两种后缀，
+  `ZREAD_PI_LOG_RETENTION_DAYS` 同一份配置）；
+- 写失败 / 序列化失败一律静默（与其它 exporter 相同的「日志绝不打断业务」契约）。

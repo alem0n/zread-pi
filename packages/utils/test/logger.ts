@@ -26,12 +26,15 @@ import {
   LoggerLevel,
   LoggerService,
   LOG_CONSOLE_ENV,
+  LOG_JSONL_ENV,
   LOG_LEVEL_ENV,
+  LOG_RETENTION_DAYS_ENV,
   Time,
   addExporter,
   createLogger,
   defaultFormatters,
   detectColorLevel,
+  getJsonlLogFilePath,
   getLogFile,
   getLogFilePath,
   getLoggerService,
@@ -464,6 +467,80 @@ async function readLog(): Promise<string> {
   );
   check('Time.format 负数档位', Time.format(-1500) === '-1s');
   check('Time.toDigits', Time.toDigits(3) === '03' && Time.toDigits(3, 3) === '003');
+}
+
+// ---------------------------------------------------------------------------
+// ⑨ JSONL exporter + 审查修复回归
+// ---------------------------------------------------------------------------
+
+{
+  // 9a) 默认关闭：不开 ZREAD_PI_LOG_JSONL 时服务里没有 JsonlExporter
+  resetLoggerServiceForTesting();
+  delete process.env[LOG_JSONL_ENV];
+  const svc = getLoggerService();
+  const names = svc.exporters.size;
+  createLogger('probe.default').info('jsonl-off-probe');
+  const jsonlPath = getJsonlLogFilePath();
+  const existsAfterOff = await readFile(jsonlPath, 'utf-8').then(() => true, () => false);
+  check('JSONL 默认关闭：不产出 .jsonl 文件', !existsAfterOff);
+  check('JSONL 默认关闭：exporter 数量不含 jsonl（2 = 缓冲 + 文本）', names === 2, `exporters=${names}`);
+
+  // 9b) 开启后：结构化行可解析、字段完整、与文本 sink 一一对应
+  resetLoggerServiceForTesting();
+  process.env[LOG_JSONL_ENV] = '1';
+  getLoggerService();
+  const log = createLogger('jsonl.probe');
+  log.info('hello %s', 'jsonl');
+  log.warn('warn-probe');
+  const raw = await readFile(jsonlPath, 'utf-8');
+  const lines = raw.trim().split('\n');
+  const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+  check('JSONL 开启：每行可 JSON.parse', parsed.length >= 2);
+  const first = parsed[0]!;
+  check(
+    'JSONL 字段完整',
+    typeof first.sn === 'number' &&
+      typeof first.ts === 'number' && first.name === 'jsonl.probe' && first.type === 'info' &&
+      typeof first.level === 'number' && first.msg === 'hello jsonl' && typeof first.time === 'string',
+    JSON.stringify(first),
+  );
+  check('JSONL 多条记录 sn 单调递增', (parsed[1]!.sn as number) > (parsed[0]!.sn as number));
+
+  // 9c) 死循环修复回归：tui.stdout 不再回到 console
+  const consoleExporter = new ConsoleExporter({ colors: false });
+  let consoleCalled = 0;
+  const originalLog = console.log;
+  console.log = () => { consoleCalled += 1; };
+  try {
+    consoleExporter.export({ sn: 1, ts: Date.now(), name: 'tui.stdout', type: 'info', level: 1, args: ['x'] });
+    consoleExporter.export({ sn: 2, ts: Date.now(), name: 'tui.console', type: 'info', level: 1, args: ['x'] });
+  } finally {
+    console.log = originalLog;
+  }
+  check('递归保护：tui.stdout / tui.console 都不回 console', consoleCalled === 0);
+
+  // 9d) 无参调用不抛异常 + 故障 exporter 隔离
+  const noop = createLogger('noop.probe');
+  noop.info();
+  check('无参 logger 调用不抛异常', true);
+  const explode: Exporter = { export: () => { throw new Error('boom'); } };
+  const done: Exporter = { export: () => { (done as any).called = true; } };
+  addExporter(explode);
+  addExporter(done);
+  noop.info('isolation-probe');
+  check('故障 exporter 不打断广播与业务', (done as any).called === true);
+
+  // 9e) 保留天数：负数 = 禁用清理（文档承诺），非数字回退默认
+  process.env[LOG_RETENTION_DAYS_ENV] = '-1';
+  const neg = new FileExporter();
+  check('保留天数 -1 = 禁用清理（不回退默认 30）', (neg as any).retentionDays === -1, `retentionDays=${(neg as any).retentionDays}`);
+  check('sweep(-1) 不删除任何文件', sweepOldLogFiles(-1) === 0);
+  process.env[LOG_RETENTION_DAYS_ENV] = 'abc';
+  const invalid = new FileExporter();
+  check('保留天数非法值回退默认 30', (invalid as any).retentionDays === DEFAULT_LOG_RETENTION_DAYS);
+  delete process.env[LOG_RETENTION_DAYS_ENV];
+  resetLoggerServiceForTesting();
+  delete process.env[LOG_JSONL_ENV];
 }
 
 // ---------------------------------------------------------------------------

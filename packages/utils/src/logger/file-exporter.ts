@@ -23,9 +23,10 @@ import { projectHomePath } from '../project-home.js';
 export const DEFAULT_LOG_RETENTION_DAYS = 30;
 export const LOG_RETENTION_DAYS_ENV = 'ZREAD_PI_LOG_RETENTION_DAYS';
 
-/** 日志文件名前缀与目录名（目录路径统一走 projectHomePath）。 */
+/** 日志文件名前缀与目录名（目录路径统一走 projectHomePath）；sweep 同时覆盖 .log 与 .jsonl。 */
 export const LOG_FILE_PREFIX = 'zread-pi-';
 export const LOG_FILE_SUFFIX = '.log';
+export const LOG_JSONL_SUFFIX = '.jsonl';
 export const LOG_DIR_NAME = 'logs';
 
 /** retention 只在进程内执行一次（首次写入日志时触发，不在 import 期做任何 I/O）。 */
@@ -58,7 +59,8 @@ export function sweepOldLogFiles(retentionDays: number): number {
   const maxAgeMs = retentionDays * 24 * 60 * 60 * 1000;
   let removed = 0;
   for (const entry of entries) {
-    if (!entry.startsWith(LOG_FILE_PREFIX) || !entry.endsWith(LOG_FILE_SUFFIX)) continue;
+    if (!entry.startsWith(LOG_FILE_PREFIX)) continue;
+    if (!entry.endsWith(LOG_FILE_SUFFIX) && !entry.endsWith(LOG_JSONL_SUFFIX)) continue;
     try {
       const stats = statSync(join(dir, entry));
       if (now - stats.mtimeMs > maxAgeMs) {
@@ -118,6 +120,7 @@ function readRetentionDaysFromEnv(): number {
   const raw = process.env[LOG_RETENTION_DAYS_ENV];
   if (raw === undefined || raw === '') return DEFAULT_LOG_RETENTION_DAYS;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_LOG_RETENTION_DAYS;
+  // 负数合法：<= 0 表示禁用清理（与文档承诺一致），只拒绝非数字
+  if (!Number.isFinite(parsed)) return DEFAULT_LOG_RETENTION_DAYS;
   return Math.trunc(parsed);
 }

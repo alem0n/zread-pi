@@ -19,7 +19,7 @@
  *     也不会让杂散日志冒充终端控制。
  */
 
-import { createLogger } from "@zread-pi/utils";
+import { STDOUT_CAPTURE_LOGGER_NAME, createLogger } from "@zread-pi/utils";
 import type { Logger } from "@zread-pi/utils";
 
 /** 杂散去处：写入回调 */
@@ -89,7 +89,7 @@ let strayLogger: Logger | undefined;
 
 function appendStrayToLog(text: string): void {
   try {
-    if (!strayLogger) strayLogger = createLogger("tui.stdout");
+    if (!strayLogger) strayLogger = createLogger(STDOUT_CAPTURE_LOGGER_NAME);
     // 用 %s 占位原样传递，避免文本里的 % 被 printf 误解析
     strayLogger.info("%s", text);
   } catch {

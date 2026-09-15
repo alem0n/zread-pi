@@ -12,7 +12,8 @@
  *  2. 分配全局 `sn` / `ts`，广播给所有 exporter；
  *  3. 每个 exporter 用 `resolveExporterLevel` 判定是否发出（级别阈值）。
  *
- * 默认注册的 exporter：内置环形缓冲（1000 条，全级别）+ 文本文件 exporter。
+ * 默认注册的 exporter：内置环形缓冲（1000 条，全级别）+ 文本文件 exporter；
+ * JSONL exporter 默认关闭（`ZREAD_PI_LOG_JSONL=1` 开启，结构化机器可读 sink）。
  * console exporter **默认不注册**（显式 `ZREAD_PI_LOG_CONSOLE=1` 才开），
  * 因为 TUI 期间 console-guard 会把 console 输出转回总线，两者同时开启会往
  * 日志文件里双写（详见 MIGRATION.md）。
@@ -25,6 +26,7 @@ import {
   LOG_LEVEL_ENV,
 } from './console-exporter.js';
 import { FileExporter } from './file-exporter.js';
+import { JsonlExporter, isJsonlEnabled } from './jsonl-exporter.js';
 import {
   LoggerLevel,
   type Exporter,
@@ -120,7 +122,13 @@ export class LoggerFacade implements Logger {
         const targetLevel = resolveExporterLevel(exporter, this.name, this.level);
         if (targetLevel < level) continue;
         const message: Message = { sn, ts, type, level, name: this.name, ...this.meta, args };
-        exporter.export(message);
+        // 异常隔离：单个故障 exporter 绝不能打断业务或影响其它 exporter
+        // （本模块的自述契约：日志写失败静默）。
+        try {
+          exporter.export(message);
+        } catch {
+          // 静默：渲染/落盘失败不向业务调用方传播
+        }
       }
     };
   }
@@ -150,6 +158,11 @@ export class LoggerService {
 
     // 文本文件 exporter（默认开启，日期按写入时刻取）
     this.addExporter(new FileExporter());
+
+    // JSONL exporter：默认关闭（ZREAD_PI_LOG_JSONL=1 开启），结构化机器可读 sink
+    if (isJsonlEnabled()) {
+      this.addExporter(new JsonlExporter());
+    }
 
     // console exporter：仅当显式要求时注册（避免与 TUI 的 console-guard 双写文件）
     if (isConsoleExporterEnabled()) {

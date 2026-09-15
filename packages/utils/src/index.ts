@@ -34,8 +34,19 @@ export {
 } from './logger/service.js';
 export { LoggerFacade, LoggerService } from './logger/service.js';
 export { FileExporter, getLogFilePath, sweepOldLogFiles, DEFAULT_LOG_RETENTION_DAYS, LOG_RETENTION_DAYS_ENV } from './logger/file-exporter.js';
-export { ConsoleExporter, detectColorLevel, LOG_CONSOLE_ENV, LOG_LEVEL_ENV } from './logger/console-exporter.js';
-export { LoggerLevel } from './logger/types.js';
+export { ConsoleExporter, STDOUT_CAPTURE_LOGGER_NAME, detectColorLevel, LOG_CONSOLE_ENV, LOG_LEVEL_ENV } from './logger/console-exporter.js';
+export {
+  JsonlExporter,
+  getJsonlLogFilePath,
+  isJsonlEnabled,
+  DEFAULT_JSONL_MAX_LENGTH,
+  LOG_JSONL_ENV,
+} from './logger/jsonl-exporter.js';
+export {
+  // LoggerLevel 是运行时常量（as const 对象），必须值导出；
+  // 类型形状随声明自动可见（同名的 type 声明一并导出）。
+  LoggerLevel,
+} from './logger/types.js';
 export type {
   LoggerType,
   LoggerMethod,

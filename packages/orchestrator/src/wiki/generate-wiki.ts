@@ -475,7 +475,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           title: page.title,
         });
         if (polish.applied) {
-          pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms)`);
+          pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms）`);
         } else if (polish.reason === 'mermaid-rollback') {
           pagesLogger.warn(`[${page.slug}] polish 未保留：Mermaid 复检未通过，已回滚`);
         }

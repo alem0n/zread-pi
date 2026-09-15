@@ -10,8 +10,10 @@
  * 与 harness 的偏差（见 MIGRATION.md）：
  *  - 不依赖 `supports-color`：色彩探测手写约 20 行（`NO_COLOR` / `FORCE_COLOR` /
  *    TTY + `COLORTERM` / `TERM`），零新依赖，不影响 standalone 二进制打包；
- *  - 递归保护：名为 `tui.console` 的记录是「已被 console-guard 捕获过的输出」，
- *    不再回到 console，否则会无限递归。
+ *  - 递归保护：名为 `tui.console`（console-guard 捕获的输出）与 `tui.stdout`
+ *    （output-guard 转存的杂散 stdout）的记录不再回到 console，否则
+ *    `ZREAD_PI_LOG_CONSOLE=1` + TUI 时会形成 console → stdout 接管 → 总线 →
+ *    console 的无限递归（每次迭代都追加日志文件）。
  */
 
 import { inspect } from 'node:util';
@@ -24,6 +26,9 @@ export type ColorSupportLevel = 0 | 1 | 2 | 3;
 
 /** console exporter 的名字（也是「已被捕获的 console 输出」的 logger 名）。 */
 export const CONSOLE_CAPTURE_LOGGER_NAME = 'tui.console';
+
+/** 杂散 stdout 的 logger 名（output-guard 的 redirect: "log" 路径）。 */
+export const STDOUT_CAPTURE_LOGGER_NAME = 'tui.stdout';
 
 /** 显式开启 console exporter 的环境变量（默认不注册，避免与 console-guard 双写日志文件）。 */
 export const LOG_CONSOLE_ENV = 'ZREAD_PI_LOG_CONSOLE';
@@ -48,7 +53,7 @@ export interface ConsoleExporterOptions {
 }
 
 /** 显式标记「不要把这条记录再送回 console」。 */
-const CAPTURED_NAMES = new Set<string>([CONSOLE_CAPTURE_LOGGER_NAME]);
+const CAPTURED_NAMES = new Set<string>([CONSOLE_CAPTURE_LOGGER_NAME, STDOUT_CAPTURE_LOGGER_NAME]);
 
 /**
  * 手写色彩探测（替代 supports-color，零依赖）。
