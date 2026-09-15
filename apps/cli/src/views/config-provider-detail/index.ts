@@ -45,6 +45,8 @@ type RefreshStatus = "idle" | "refreshing" | "done" | "unsupported" | "failed";
 export default class ConfigProviderDetailPage extends Screen {
   private providerId = "";
   private providerName = "";
+  /** 自定义 Provider（非内置）：允许编辑名称 / Base URL / 协议 */
+  private providerCustom = false;
   private models: readonly CatalogModel[] = [];
   private selectedIndex = 0;
   private loading = true;
@@ -155,6 +157,10 @@ export default class ConfigProviderDetailPage extends Screen {
       this.app.navigate(`/config/provider/${this.providerId}/model-new`);
       return true;
     }
+    if (data === "e" && this.providerCustom) {
+      this.app.navigate(`/config/provider/${this.providerId}/edit`);
+      return true;
+    }
     if (data === "r") {
       void this.refreshModels();
       return true;
@@ -250,7 +256,14 @@ export default class ConfigProviderDetailPage extends Screen {
     const items = this.displayItems;
     const post = [
       "",
-      style(this.focus === "apiKey" ? this.t("detail.keyFooter") : this.t("detail.footer"), { dim: true }),
+      style(
+        this.focus === "apiKey"
+          ? this.t("detail.keyFooter")
+          : this.providerCustom
+            ? this.t("detail.footerCustom")
+            : this.t("detail.footer"),
+        { dim: true },
+      ),
     ];
     const budget = Math.max(1, this.app.availableRows - lines.length - post.length);
 
@@ -358,6 +371,7 @@ export default class ConfigProviderDetailPage extends Screen {
         return;
       }
       this.providerName = provider.name;
+      this.providerCustom = !getZreadCatalog().builtinIds.has(this.providerId);
       this.hasApiKeyLogin = Boolean(provider.auth.apiKey?.login);
       this.hasOAuthOnly = !provider.auth.apiKey && Boolean(provider.auth.oauth?.login);
       this.reloadModels();

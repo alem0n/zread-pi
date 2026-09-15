@@ -126,6 +126,7 @@ export interface TranslationKeys {
     ambient: string;
     currentSet: string;
     footer: string;
+    footerCustom: string;
     keyFooter: string;
   };
   auth: {
@@ -151,13 +152,18 @@ export interface TranslationKeys {
     saved: string;
   };
   customProvider: {
-    title: string;
+    createTitle: string;
+    editTitle: string;
+    editingId: string;
+    name: string;
+    namePlaceholder: string;
+    nameRequired: string;
     baseUrl: string;
     baseUrlPlaceholder: string;
-    modelName: string;
-    modelNamePlaceholder: string;
-    apikey: string;
+    urlRequired: string;
     invalidUrl: string;
+    api: string;
+    apiHint: string;
     footer: string;
     step: string;
   };

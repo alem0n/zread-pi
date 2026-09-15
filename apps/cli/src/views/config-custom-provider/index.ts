@@ -1,82 +1,89 @@
 /**
- * Config Custom Provider Page - 自定义 Provider/模型配置（pi-tui 版）
+ * Config Custom Provider Page - 新建/编辑自定义 Provider（pi-tui 版）
  *
- * 两种流程：
- * 1. 完全自定义 Provider (providerId === 'custom'): Base URL → Model Name → API Key
- * 2. 已有 Provider 自定义模型 (providerId !== 'custom'): Model Name → API Key
+ * 路由：
+ *   /config/provider/custom              新建（步骤：名称 → Base URL → 协议）
+ *   /config/provider/:providerId/edit    编辑已有自定义 Provider（id 固定，只改名称/端点/协议）
  *
- * 凭据写入 ~/.zread-pi/auth.json（pi-ai login），模型与 base_url 写入
- * config.llm.providers[providerId]，由首页 s 键统一保存。
+ * 与内置 Provider 一样，自定义 Provider 拥有自己的显示名称，并可以在详情页里
+ * 添加**多个**模型（API Key 录入与模型列表都在详情页，本页只负责 Provider 身份信息）。
+ *
+ * 保存时写回 config.llm.providers[id]（name / base_url / api）并重建 catalog；
+ * 新建后直接进入该 Provider 的详情页（替换当前页，ESC 回到 Provider 列表）。
  */
 
 import { matchesKey } from "@earendil-works/pi-tui";
-import { getZreadProvider, loginZreadProvider, setZreadCatalogConfig } from "@zread-pi/agent-runtime";
+import {
+  CUSTOM_PROVIDER_APIS,
+  getZreadCatalog,
+  setZreadCatalogConfig,
+} from "@zread-pi/agent-runtime";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
 import { clampLine } from "../../tui/text-layout";
-import { migrateLegacyCredentials } from "../../utils/llm-config";
+import { uniqueProviderId } from "../../utils/provider-id";
 
-type Step = "baseUrl" | "modelName" | "apiKey";
+type Step = "name" | "baseUrl" | "api";
+
+const STEP_ORDER: Step[] = ["name", "baseUrl", "api"];
 
 export default class ConfigCustomProviderPage extends Screen {
+  /** 编辑模式的目标 provider id；新建模式为空 */
   private providerId: string | undefined;
-  private isFullCustom = true;
-  private step: Step = "baseUrl";
+  private step: Step = "name";
 
-  private providerBaseUrl = "";
+  private name = "";
   private baseUrl = "";
-  private modelName = "";
-  private apiKey = "";
-  private errors: Record<Step, string> = { baseUrl: "", modelName: "", apiKey: "" };
-  private saving = false;
+  private apiIndex = 0;
+  private errors: Record<Step, string> = { name: "", baseUrl: "", api: "" };
 
+  private nameField = new TextField();
   private baseUrlField = new TextField();
-  private modelNameField = new TextField();
-  private apiKeyField = new TextField();
 
   protected override init(): void {
-    this.providerId = this.app.location?.params.providerId;
-    this.isFullCustom = this.providerId === "custom" || !this.providerId;
-    this.step = this.isFullCustom ? "baseUrl" : "modelName";
+    const params = this.app.location?.params;
+    // /config/provider/:providerId/edit → 编辑模式；/config/provider/custom（无参数）→ 新建
+    const paramId = params?.providerId;
+    this.providerId = paramId && paramId !== "custom" ? paramId : undefined;
 
+    if (this.providerId) {
+      // 编辑模式只允许自定义 Provider：内置 Provider 的名称/端点不应被改写
+      if (getZreadCatalog().builtinIds.has(this.providerId)) {
+        this.app.navigate(`/config/provider/${encodeURIComponent(this.providerId)}`, {
+          replace: true,
+        });
+        return;
+      }
+      const existing = this.app.config.getProviderConfig(this.providerId);
+      this.name = existing.name ?? "";
+      this.baseUrl = existing.base_url ?? "";
+      const api = existing.api ?? CUSTOM_PROVIDER_APIS[0];
+      this.apiIndex = Math.max(
+        0,
+        CUSTOM_PROVIDER_APIS.indexOf(api as (typeof CUSTOM_PROVIDER_APIS)[number]),
+      );
+    }
+
+    this.nameField.onChange = (value) => {
+      this.name = value;
+    };
     this.baseUrlField.onChange = (value) => {
       this.baseUrl = value;
     };
-    this.modelNameField.onChange = (value) => {
-      this.modelName = value;
-    };
-    this.apiKeyField.onChange = (value) => {
-      this.apiKey = value;
-    };
+    this.nameField.onSubmit = () => this.handleNext();
+    this.baseUrlField.onSubmit = () => this.handleNext();
 
-    this.baseUrlField.onSubmit = () => this.handleBaseUrlSubmit();
-    this.modelNameField.onSubmit = () => this.handleModelNameSubmit();
-    this.apiKeyField.onSubmit = () => void this.handleApiKeySubmit();
-
-    // 预填充：config.llm.providers[id] 的 base_url / 最近模型
-    const id = this.providerId ?? "custom";
-    const providerConfig = this.app.config.getProviderConfig(id);
-    if (providerConfig.base_url) {
-      this.baseUrl = providerConfig.base_url;
-      this.baseUrlField.setValue(this.baseUrl);
-    }
-    if (providerConfig.model) {
-      this.modelName = providerConfig.model;
-      this.modelNameField.setValue(this.modelName);
-    }
-
+    this.nameField.setPlaceholder(this.t("customProvider.namePlaceholder"));
     this.baseUrlField.setPlaceholder(this.t("customProvider.baseUrlPlaceholder"));
-    this.modelNameField.setPlaceholder(this.t("customProvider.modelNamePlaceholder"));
-    this.apiKeyField.setPlaceholder(this.t("apikey.placeholder"));
+
+    // 预填充的值要同步到输入框
+    this.nameField.setValue(this.name);
+    this.baseUrlField.setValue(this.baseUrl);
 
     // 进入页面时声明 ESC 处理权（需要多步骤回退）
     this.app.claimEsc();
     this.updateFocus();
-
-    if (!this.isFullCustom && this.providerId) {
-      void this.loadProvider();
-    }
   }
 
   override handleKey(data: string): boolean {
@@ -85,9 +92,26 @@ export default class ConfigCustomProviderPage extends Screen {
       return true;
     }
 
-    if (this.step === "baseUrl") this.baseUrlField.handleKey(data);
-    else if (this.step === "modelName") this.modelNameField.handleKey(data);
-    else this.apiKeyField.handleKey(data);
+    if (this.step === "api") {
+      if (data === "t") {
+        this.apiIndex = (this.apiIndex + 1) % CUSTOM_PROVIDER_APIS.length;
+        this.errors = { ...this.errors, api: "" };
+        this.refresh();
+        return true;
+      }
+      if (matchesKey(data, "return")) {
+        this.handleNext();
+        return true;
+      }
+      return false;
+    }
+
+    const field = this.step === "name" ? this.nameField : this.baseUrlField;
+    if (matchesKey(data, "return")) {
+      this.handleNext();
+      return true;
+    }
+    field.handleKey(data);
     return false;
   }
 
@@ -96,79 +120,60 @@ export default class ConfigCustomProviderPage extends Screen {
   }
 
   render(width: number): string[] {
-    const stepNumber = this.isFullCustom
-      ? this.step === "baseUrl"
-        ? 1
-        : this.step === "modelName"
-          ? 2
-          : 3
-      : this.step === "modelName"
-        ? 1
-        : 2;
-    const totalSteps = this.isFullCustom ? 3 : 2;
+    const stepNumber = STEP_ORDER.indexOf(this.step) + 1;
+    const isEdit = Boolean(this.providerId);
 
     const lines: string[] = [];
-
-    // 步骤显示（marginTop={1}）
     lines.push(
       "",
-      style(this.t("customProvider.step", { current: stepNumber, total: totalSteps }), {
+      style(
+        isEdit
+          ? this.t("customProvider.editTitle")
+          : this.t("customProvider.createTitle"),
+        { bold: true, color: "cyan" },
+      ),
+    );
+    if (isEdit && this.providerId) {
+      lines.push(clampLine(style(`${this.t("customProvider.editingId")}: ${this.providerId}`, { dim: true }), width));
+    }
+    lines.push(
+      style(this.t("customProvider.step", { current: stepNumber, total: STEP_ORDER.length }), {
         dim: true,
       }),
     );
 
-    // 步骤: Base URL（仅完全自定义）
-    if (this.isFullCustom) {
+    // 步骤: Provider 名称
+    lines.push("", this.renderStepHeader("name", this.t("customProvider.name"), this.name, width));
+    if (this.step === "name") {
+      lines.push(this.renderStepInput(this.nameField, width));
+      if (this.errors.name) lines.push(this.renderStepError(this.errors.name, width));
+    }
+
+    // 步骤: Base URL
+    lines.push(
+      "",
+      this.renderStepHeader("baseUrl", this.t("customProvider.baseUrl"), this.baseUrl, width),
+    );
+    if (this.step === "baseUrl") {
+      lines.push(this.renderStepInput(this.baseUrlField, width));
+      if (this.errors.baseUrl) lines.push(this.renderStepError(this.errors.baseUrl, width));
+    }
+
+    // 步骤: API 协议（t 切换）
+    lines.push(
+      "",
+      this.renderStepHeader("api", this.t("customProvider.api"), CUSTOM_PROVIDER_APIS[this.apiIndex], width),
+    );
+    if (this.step === "api") {
       lines.push(
-        "",
-        this.renderStepHeader(
-          "baseUrl",
-          this.t("customProvider.baseUrl"),
-          this.baseUrl,
+        clampLine(
+          "  " + style(this.t("customProvider.apiHint", { api: CUSTOM_PROVIDER_APIS[this.apiIndex] }), { dim: true }),
           width,
         ),
       );
-      if (this.step === "baseUrl") {
-        lines.push(this.renderStepInput(this.baseUrlField, width));
-        if (this.errors.baseUrl) lines.push(this.renderStepError(this.errors.baseUrl, width));
-      }
+      if (this.errors.api) lines.push(this.renderStepError(this.errors.api, width));
     }
 
-    // 步骤: Model Name
-    lines.push(
-      "",
-      this.renderStepHeader(
-        "modelName",
-        this.t("customProvider.modelName"),
-        this.modelName,
-        width,
-      ),
-    );
-    if (this.step === "modelName") {
-      lines.push(this.renderStepInput(this.modelNameField, width));
-      if (this.errors.modelName) lines.push(this.renderStepError(this.errors.modelName, width));
-    }
-
-    // 步骤: API Key
-    lines.push(
-      "",
-      this.renderStepHeader("apiKey", this.t("customProvider.apikey"), this.apiKey, width, true),
-    );
-    if (this.step === "apiKey") {
-      lines.push(this.renderStepInput(this.apiKeyField, width));
-      if (this.errors.apiKey) lines.push(this.renderStepError(this.errors.apiKey, width));
-    }
-
-    // 已有 Provider 的 Base URL 提示
-    if (!this.isFullCustom && this.providerBaseUrl && this.step === "modelName") {
-      lines.push("", style(`Base URL: ${this.providerBaseUrl}`, { dim: true }));
-    }
-
-    if (this.saving) {
-      lines.push("", style(this.t("auth.loggingIn"), { color: "yellow" }));
-    }
-
-    // Footer（marginTop={1}）
     lines.push("", style(this.t("customProvider.footer"), { dim: true }));
 
     return lines;
@@ -177,9 +182,8 @@ export default class ConfigCustomProviderPage extends Screen {
   // ==================== 内部实现 ====================
 
   private updateFocus(): void {
+    this.nameField.setFocused(this.step === "name");
     this.baseUrlField.setFocused(this.step === "baseUrl");
-    this.modelNameField.setFocused(this.step === "modelName");
-    this.apiKeyField.setFocused(this.step === "apiKey");
   }
 
   private setStep(step: Step): void {
@@ -188,13 +192,7 @@ export default class ConfigCustomProviderPage extends Screen {
     this.refresh();
   }
 
-  private renderStepHeader(
-    step: Step,
-    label: string,
-    value: string,
-    width: number,
-    isSecret = false,
-  ): string {
+  private renderStepHeader(step: Step, label: string, value: string, width: number): string {
     const isCurrent = this.step === step;
     const indicator = style(isCurrent ? "> " : "  ", { color: isCurrent ? "cyan" : "gray" });
     const title = style(label, {
@@ -202,14 +200,11 @@ export default class ConfigCustomProviderPage extends Screen {
       color: isCurrent ? "white" : "gray",
     });
     const suffix =
-      !isCurrent && value
-        ? style(`: ${isSecret ? this.t("apikey.hidden") : value}`, { dim: true, color: "green" })
-        : "";
+      !isCurrent && value ? style(`: ${value}`, { dim: true, color: "green" }) : "";
     return clampLine(indicator + title + suffix, width);
   }
 
   private renderStepInput(field: TextField, width: number): string {
-    // <Box marginLeft={2}>
     const available = Math.max(1, width - 2);
     const line = field.render(available)[0] ?? "";
     return clampLine("  " + line, width);
@@ -217,19 +212,6 @@ export default class ConfigCustomProviderPage extends Screen {
 
   private renderStepError(message: string, width: number): string {
     return clampLine("  " + style(message, { color: "red" }), width);
-  }
-
-  private async loadProvider(): Promise<void> {
-    if (!this.providerId) return;
-    const provider = getZreadProvider(this.providerId);
-    if (provider) {
-      this.providerBaseUrl = provider.baseUrl ?? "";
-      if (provider.baseUrl) {
-        this.baseUrl = provider.baseUrl;
-        this.baseUrlField.setValue(provider.baseUrl);
-      }
-    }
-    this.refresh();
   }
 
   /** URL 格式验证 */
@@ -244,104 +226,89 @@ export default class ConfigCustomProviderPage extends Screen {
 
   /** 前一步（ESC 由此处理，App 不处理） */
   private handleBack(): void {
-    if (this.saving) return;
-    this.errors = { baseUrl: "", modelName: "", apiKey: "" };
+    this.errors = { name: "", baseUrl: "", api: "" };
     switch (this.step) {
-      case "baseUrl":
+      case "name":
         this.app.releaseEsc();
         this.app.navigate(-1);
         break;
-      case "modelName":
-        if (this.isFullCustom) {
-          this.setStep("baseUrl");
-        } else {
-          this.app.releaseEsc();
-          this.app.navigate(-1);
+      case "baseUrl":
+        this.setStep("name");
+        break;
+      case "api":
+        this.setStep("baseUrl");
+        break;
+    }
+  }
+
+  /** 下一步 / 提交 */
+  private handleNext(): void {
+    this.errors = { name: "", baseUrl: "", api: "" };
+    switch (this.step) {
+      case "name": {
+        if (!this.name.trim()) {
+          this.errors.name = this.t("customProvider.nameRequired");
+          this.refresh();
+          return;
         }
-        break;
-      case "apiKey":
-        this.setStep("modelName");
-        break;
+        this.setStep("baseUrl");
+        return;
+      }
+      case "baseUrl": {
+        if (!this.baseUrl.trim()) {
+          this.errors.baseUrl = this.t("customProvider.urlRequired");
+          this.refresh();
+          return;
+        }
+        if (!this.validateUrl(this.baseUrl)) {
+          this.errors.baseUrl = this.t("customProvider.invalidUrl");
+          this.refresh();
+          return;
+        }
+        this.setStep("api");
+        return;
+      }
+      case "api":
+        this.submit();
+        return;
     }
   }
 
-  /** Base URL 提交处理 */
-  private handleBaseUrlSubmit(): void {
-    this.errors = { ...this.errors, baseUrl: "" };
+  /** 保存：新建模式生成唯一 id 后进入详情页；编辑模式原地更新后返回详情页 */
+  private submit(): void {
+    const name = this.name.trim();
+    const baseUrl = this.baseUrl.trim();
+    const api = CUSTOM_PROVIDER_APIS[this.apiIndex];
 
-    if (!this.baseUrl.trim()) {
-      this.errors = { ...this.errors, baseUrl: "URL 不能为空" };
-      this.refresh();
-      return;
-    }
-    if (!this.validateUrl(this.baseUrl)) {
-      this.errors = { ...this.errors, baseUrl: this.t("customProvider.invalidUrl") };
-      this.refresh();
-      return;
-    }
-    this.setStep("modelName");
-  }
-
-  /** Model Name 提交处理 */
-  private handleModelNameSubmit(): void {
-    this.errors = { ...this.errors, modelName: "" };
-
-    if (!this.modelName.trim()) {
-      this.errors = { ...this.errors, modelName: "模型名称不能为空" };
-      this.refresh();
-      return;
-    }
-    this.setStep("apiKey");
-  }
-
-  /** API Key 提交处理：pi-ai login 写凭据 + 配置写模型，返回上一级 */
-  private async handleApiKeySubmit(): Promise<void> {
-    this.errors = { ...this.errors, apiKey: "" };
-
-    if (!this.apiKey.trim()) {
-      this.errors = { ...this.errors, apiKey: this.t("apikey.required") };
-      this.refresh();
-      return;
-    }
-
-    const providerId = this.providerId || "custom";
-    const modelId = this.modelName.trim();
-    const finalBaseUrl = (this.baseUrl.trim() || this.providerBaseUrl) || null;
-
-    // 1) 配置：provider + 自定义模型（先迁移旧扁平字段，再切当前模型）
-    this.app.config.setProviderConfig(providerId, {
-      base_url: finalBaseUrl,
-      api: this.app.config.getProviderConfig(providerId).api ?? "openai-completions",
-      auth_type: "api_key",
-    });
-    this.app.config.upsertCustomModel(providerId, { id: modelId, name: modelId });
-    await migrateLegacyCredentials(this.app.config);
-    this.app.config.setActiveModel(providerId, modelId);
-
-    // 2) 凭据：交给 pi-ai login 写入 ~/.zread-pi/auth.json
-    this.saving = true;
-    this.refresh();
-    try {
-      setZreadCatalogConfig(this.app.config.config);
-      await loginZreadProvider(providerId, "api_key", {
-        prompt: async () => this.apiKey.trim(),
-        notify: () => {
-          // 自定义 Provider 的 api_key 登录没有额外事件
-        },
+    if (this.providerId) {
+      this.app.config.setProviderConfig(this.providerId, {
+        name,
+        base_url: baseUrl || null,
+        api,
       });
-    } catch (err) {
-      this.errors = {
-        ...this.errors,
-        apiKey: err instanceof Error ? err.message : String(err),
-      };
-      this.saving = false;
-      this.refresh();
+      setZreadCatalogConfig(this.app.config.config);
+      this.app.releaseEsc();
+      this.app.navigate(-1);
       return;
     }
 
-    this.saving = false;
-    // 直接返回上一级（使用 -1 避免路由栈堆积）
+    // 新建：id 不能撞上内置 Provider 或已配置的自定义 Provider
+    const taken = new Set<string>([
+      ...Object.keys(this.app.config.config.llm.providers ?? {}),
+      ...getZreadCatalog().builtinIds,
+    ]);
+    const id = uniqueProviderId(name, taken);
+
+    this.app.config.setProviderConfig(id, {
+      name,
+      base_url: baseUrl || null,
+      api,
+    });
+    // 让 catalog 立即看到新 Provider（详情页/列表页未保存的修改也能预览）
+    setZreadCatalogConfig(this.app.config.config);
+
     this.app.releaseEsc();
-    this.app.navigate(-1);
+    // 替换当前创建页：ESC 从详情页回到 Provider 列表，而不是回到表单
+    this.app.navigate(`/config/provider/${encodeURIComponent(id)}`, { replace: true });
   }
 }
