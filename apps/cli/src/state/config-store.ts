@@ -59,6 +59,7 @@ export class ConfigStore {
   getProviderConfig(providerId: string): LlmProviderConfig {
     const existing = this.config.llm.providers?.[providerId];
     return {
+      name: existing?.name ?? null,
       auth_type: existing?.auth_type ?? null,
       base_url: existing?.base_url ?? null,
       api: existing?.api ?? null,

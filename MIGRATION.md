@@ -174,10 +174,10 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 | 新增 | `packages/agent-runtime/src/pi/provider-catalog.ts`：`builtinProviders()` + 配置叠加 + 自定义模型 + 刷新 + 登录（api_key）/登出 |
 | 新增 | `packages/agent-runtime/src/pi/auth-store.ts`（`~/.zread-pi/auth.json` 的 CredentialStore）、`models-store.ts`（`~/.zread-pi/models-store.json` 的 ModelsStore） |
 | 新增 | `packages/agent-runtime/test/provider-catalog-smoke.ts`（25 项，离线） |
-| 配置结构 | `LLMConfig` 新增 `providers: Record<string, LlmProviderConfig>`（base_url / api / auth_type / model / models）；`CustomModelConfig` 支持窗口/输出/推理/图片 |
+| 配置结构 | `LLMConfig` 新增 `providers: Record<string, LlmProviderConfig>`（name / base_url / api / auth_type / model / models）；`CustomModelConfig` 支持窗口/输出/推理/图片 |
 | 配置工具 | `packages/utils` 新增 `getZreadAuthPath()` / `getZreadModelsStorePath()` / `getProviderConfig()` / `normalizeProviderConfigs()`；`isFirstTimeConfig` 改为「provider+model 已选即已配置」 |
 | 运行时 | `createRuntimeModel()` 优先走 catalog（真实模型元数据 + OAuth 刷新 + 自定义模型），未命中回退单模型 Provider；`createAgent` 无 apiKey 时若 provider 在 catalog 中不再报错 |
-| CLI | `views/config-provider`、`views/config-provider-detail`（API Key + 模型并列，替换 config-model + config-auth）；新增 `views/config-custom-model`（自定义模型表单）；`ConfigStore` 新增 per-provider 与自定义模型写入；`utils/llm-config.ts` 负责旧字段迁移 |
+| CLI | `views/config-provider`、`views/config-provider-detail`（API Key + 模型并列，替换 config-model + config-auth）；新增 `views/config-custom-model`（自定义模型表单）；`ConfigStore` 新增 per-provider 与自定义模型写入；`utils/llm-config.ts` 负责旧字段迁移；`utils/provider-id.ts` 负责把自定义 Provider 的显示名 slug 化并去重（纯函数） |
 | 旧路由兼容 | `/config/provider/:id/custom` 仍可用（等价 model-new） |
 
 ### 8.3 与旧实现的行为差异
@@ -186,17 +186,17 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 |---|---|
 | Provider 列表来源 | 由 LiteLLM 在线目录（`~/.zread-pi/providers.json`，24h 缓存）改为 pi-ai 内置目录（离线可用、40 个 Provider），未内置的已配置端点仍会列在末尾 |
 | 登录方式 | 配置界面只提供 API Key（写入 `auth.json`，同一 Provider 只保留一份凭据）；Provider 详情页把「API Key 配置」与「模型选择」并列在同一页面（tab/Shift+Tab 或 ↑ 切换焦点，仅 `Models.login('api_key')`）；OAuth 订阅流程仍保留在 provider-catalog/运行时中（可手写 `auth.json` 使用），但界面不再提供 |
-| 多 Provider | `llm.providers.<id>` 保存每个 Provider 的端点/模型/自定义模型；`auth.json` 可同时保存多份凭据；provider 列表逐项显示登录状态 |
+| 多 Provider | `llm.providers.<id>` 保存每个 Provider 的名称（`name`，缺省用 id）/ 端点 / 模型 / 自定义模型；`auth.json` 可同时保存多份凭据；provider 列表逐项显示登录状态（自定义 Provider 带 `[自定义]` 徽标） |
 | 自定义模型 | 新增独立表单（id / 名称 / 上下文窗口 / 最大输出 / 思考 / 图片），按 pi models.json 语义覆盖或追加 |
 | 模型刷新 | 详情页 `r` 调用 pi-ai `Models.refresh()`（动态 Provider 请求远端目录并缓存到 `models-store.json`；静态目录提示「无需刷新」） |
 | 旧配置兼容 | 首次在新界面切换 Provider/模型时，`llm.api_key` → `auth.json`、`llm.base_url` → `llm.providers.<id>.base_url`，然后清空旧字段；未知 providerId 仍回退 OpenAI 兼容协议 |
-| 未内置 Provider | 仍可从零配置（自定义 Provider 流程：Base URL → 模型 → API Key），实现改为 pi `createProvider()` 动态注册 |
+| 未内置 Provider | 仍可从零配置，实现改为 pi `createProvider()` 动态注册。**自定义 Provider 流程已升级为「名称 → Base URL → 协议 → 详情页」**：新建时可填写显示名称（id 由名称自动 slug 化并与内置/已配置 id 去重）、Base URL 与 API 协议（`openai-completions` / `openai-responses` / `anthropic-messages` / `google-generative-ai`，`t` 切换）；保存后直接进入与内置 Provider 同一款的详情页，API Key 录入与**多个**自定义模型都在详情页完成。详情页对自定义 Provider 额外提供 `e` 编辑入口（`/config/provider/:id/edit`，改名称/端点/协议，id 与凭据/模型不变） |
 
 ### 8.4 验证
 
 ```bash
 bun run typecheck
-bun run test:catalog    # 32/32
+bun run test:catalog    # 45/45
 bun run test            # 全部套件（含 test:context 35/35、TUI 151 + 路由 16 + 真实终端 9 + mock 全链路 19）
 ```
 

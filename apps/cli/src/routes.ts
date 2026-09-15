@@ -35,6 +35,8 @@ export const routes: RouteDefinition[] = [
   // 注意：具体路径要在参数化路径之前，否则 'custom' 会被当作 providerId
   { pattern: "/config/provider/custom", create: () => new ConfigCustomProviderPage() },
   { pattern: "/config/provider/:providerId", create: () => new ConfigProviderDetailPage() },
+  // 编辑已有自定义 Provider 的名称 / Base URL / 协议（id 固定）
+  { pattern: "/config/provider/:providerId/edit", create: () => new ConfigCustomProviderPage() },
   { pattern: "/config/provider/:providerId/model-new", create: () => new ConfigCustomModelPage() },
   // 兼容旧路由：等同于「为该 Provider 添加自定义模型」
   { pattern: "/config/provider/:providerId/custom", create: () => new ConfigCustomModelPage() },

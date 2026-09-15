@@ -3,6 +3,7 @@
  */
 
 export * from './display';
+export * from './provider-id';
 export * from './target-dir';
 export * from './thinking';
 export * from './generated-docs';

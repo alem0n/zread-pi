@@ -198,6 +198,42 @@ try {
 		JSON.stringify({ max_tokens: modelSizeConfig.llm.max_tokens }),
 	);
 
+	// ---- 4b) 自定义 Provider 名称（name）的归一化与往返 ----
+	// 配置界面新建/编辑自定义 Provider 时写入 llm.providers[id].name；
+	// normalizeProviderConfig 保留非空字符串，空白/缺失回退 null（= 用 id 展示）
+	await writeFile(
+		join(home, ".zread-pi", "config.yaml"),
+		[
+			"language: zh",
+			"doc_language: zh",
+			"llm:",
+			"  provider: my-named-provider",
+			"  model: null",
+			"  api_key: null",
+			"  base_url: null",
+			"  providers:",
+			"    my-named-provider:",
+			"      name: 我的代理",
+			"      base_url: http://127.0.0.1:9/v1",
+			"      api: openai-completions",
+			"      models:",
+			"        - id: m0",
+			"          name: M Zero",
+			"concurrency:",
+			"  max_concurrent: 1",
+			"  max_retries: 0",
+			"",
+		].join("\n"),
+		"utf-8",
+	);
+	const namedConfig = await loadConfig();
+	const namedProvider = namedConfig.llm.providers["my-named-provider"];
+	check(
+		"自定义 Provider 名称（含中文）往返保留",
+		namedProvider?.name === "我的代理",
+		JSON.stringify(namedProvider),
+	);
+
 
 	const providers = await listZreadProviders();
 	const anthropic = providers.find((provider) => provider.id === "anthropic");
@@ -306,11 +342,18 @@ try {
 			providers: {
 				...baseConfig.llm.providers,
 				"my-endpoint": {
+					name: "My Endpoint",
 					auth_type: "api_key" as const,
 					base_url: "http://127.0.0.1:9/v1",
 					api: "openai-completions",
 					model: "m1",
 					models: [{ id: "m1", name: "M One", context_window: 8000, max_tokens: 1000 }],
+				},
+				"no-name-endpoint": {
+					auth_type: "api_key" as const,
+					base_url: "http://127.0.0.1:10/v1",
+					api: "openai-completions",
+					models: [{ id: "m2", name: "M Two", context_window: 8000, max_tokens: 1000 }],
 				},
 			},
 		},
@@ -323,6 +366,16 @@ try {
 	);
 	const endpointSummary = (await listZreadProviders()).find((provider) => provider.id === "my-endpoint");
 	check("未内置 Provider 标记为非内置", endpointSummary?.builtin === false, JSON.stringify(endpointSummary));
+	check(
+		"未内置 Provider 使用配置的显示名",
+		endpointSummary?.name === "My Endpoint",
+		JSON.stringify(endpointSummary?.name),
+	);
+	check(
+		"未配置名称的自定义 Provider 回退到 id",
+		(await listZreadProviders()).find((provider) => provider.id === "no-name-endpoint")?.name ===
+			"no-name-endpoint",
+	);
 
 	// ---- 6) runtime model 走 catalog ----
 	const runtime = createRuntimeModel({ providerId: "anthropic", modelId: "my-local-model" });

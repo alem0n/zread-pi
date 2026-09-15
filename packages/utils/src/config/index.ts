@@ -268,6 +268,7 @@ function normalizeProviderConfig(value: unknown): LlmProviderConfig | null {
     : [];
 
   return {
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : null,
     auth_type: authType,
     base_url: typeof raw.base_url === 'string' && raw.base_url.trim() ? raw.base_url.trim() : null,
     api: typeof raw.api === 'string' && raw.api.trim() ? raw.api.trim() : null,
@@ -295,6 +296,7 @@ export function normalizeProviderConfigs(value: unknown): Record<string, LlmProv
 export function getProviderConfig(config: AppConfig, providerId: string): LlmProviderConfig {
   const existing = config.llm.providers?.[providerId];
   return {
+    name: existing?.name ?? null,
     auth_type: existing?.auth_type ?? null,
     base_url: existing?.base_url ?? null,
     api: existing?.api ?? null,

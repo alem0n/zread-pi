@@ -206,7 +206,8 @@ function createConfiguredProvider(
 
   return createProvider({
     id: providerId,
-    name: providerId,
+    // 自定义 Provider 的显示名（缺省回退 id）；内置 Provider 不走这条路径
+    name: providerConfig.name || providerId,
     baseUrl: baseUrl || undefined,
     auth,
     models,
@@ -280,6 +281,7 @@ function buildCatalog(): ZreadCatalog {
   for (const providerId of configuredIds) {
     if (builtinIds.has(providerId)) continue;
     const providerConfig = config.llm.providers?.[providerId] ?? {
+      name: null,
       auth_type: null,
       base_url: null,
       api: null,

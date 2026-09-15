@@ -691,7 +691,7 @@ console.log("▶ TUI 冒烟测试");
   await rm(bareHome, { recursive: true, force: true });
 }
 
-// --- 用例 5：config provider 列表（pi-ai 内置目录 + 登录状态 + Enter 进入模型页）---
+// --- 用例 5：config provider 列表 + 新建自定义 Provider（名称/端点/协议/多模型/编辑）---
 {
   const { app, terminal } = createApp(["/config/provider"]);
   await app.start();
@@ -704,23 +704,217 @@ console.log("▶ TUI 冒烟测试");
   checkContains("Provider 页：已配置标记（旧扁平 api_key）", text, "已配置");
   checkContains("Provider 页 Footer", text, "↑↓ 导航 | enter 选择 | / 搜索 | r 刷新 | esc 返回");
 
-  // Home 回顶部：自定义选项固定第一位 + pi-ai 内置 provider
+  // Home 回顶部：新建入口固定第一位 + pi-ai 内置 provider
   terminal.send("\x1b[H");
   await settle(10);
   text = screenText(app);
-  checkContains("Provider 页：自定义选项固定第一位", text, "自定义 Provider...");
+  checkContains("Provider 页：新建自定义 Provider 入口固定第一位", text, "新建自定义 Provider...");
   checkContains("Provider 页：pi-ai 内置 provider", text, "Anthropic");
   checkContains("Provider 页：内置 provider 模型数", text, "个模型");
   checkContains("Provider 页：未配置标记", text, "未配置");
 
-  // 当前就在首项（自定义 Provider）→ Enter → /config/provider/custom
+  // Enter → /config/provider/custom（新建）
   terminal.send("\r");
   await settle();
-  const customText = screenText(app);
-  checkContains("进入自定义 Provider 页：步骤", customText, "步骤 1/3");
-  checkContains("自定义 Provider 页：Base URL 步骤", customText, "输入 Base URL");
-  checkContains("自定义 Provider 页 Footer", customText, "enter 下一步 | esc 返回上一步");
+  let customText = screenText(app);
+  checkContains("新建页标题", customText, "新建自定义 Provider");
+  checkContains("新建页：步骤 1/3（名称）", customText, "步骤 1/3");
+  checkContains("新建页：Provider 名称步骤", customText, "Provider 显示名称");
+  checkContains("新建页 Footer", customText, "enter 下一步 | esc 返回上一步");
 
+  // 空名称 → 报错且不前进
+  terminal.send("\r");
+  await settle();
+  customText = screenText(app);
+  checkContains("名称为空时报错", customText, "Provider 名称不能为空");
+  checkContains("名称为空时仍停留在步骤 1/3", customText, "步骤 1/3");
+
+  // 输入名称 → 下一步（名称里的空格会变成 id 的连字符）
+  terminal.send("My Custom Proxy");
+  await settle(10);
+  terminal.send("\r");
+  await settle();
+  customText = screenText(app);
+  checkContains("进入 Base URL 步骤", customText, "步骤 2/3");
+  checkContains("名称步骤回显已填名称", customText, "My Custom Proxy");
+
+  // 输入合法 URL → 下一步
+  terminal.send("http://127.0.0.1:9/v1");
+  await settle(10);
+  terminal.send("\r");
+  await settle();
+  customText = screenText(app);
+  checkContains("进入协议步骤", customText, "步骤 3/3");
+  checkContains("协议步骤默认 openai-completions", customText, "openai-completions");
+
+  // t 循环切换协议
+  terminal.send("t");
+  await settle();
+  checkContains("t 切换到 openai-responses", screenText(app), "openai-responses");
+  terminal.send("t");
+  await settle();
+  checkContains("t 切换到 anthropic-messages", screenText(app), "anthropic-messages");
+  // 切回默认协议再创建（再按两次 t，逐次发送）
+  terminal.send("t");
+  await settle();
+  terminal.send("t");
+  await settle();
+
+  // Enter 创建 → 进入详情页（与内置 Provider 同一套布局）
+  terminal.send("\r");
+  await settle(60);
+  text = screenText(app);
+  checkContains("新建后进入详情页：显示 Provider 名称", text, "My Custom Proxy");
+  checkContains("详情页：Provider id 行", text, "(my-custom-proxy)");
+  checkContains("详情页：API Key 配置区", text, "API Key 配置");
+  checkContains("详情页：未配置状态", text, "未配置");
+
+  // 未配置时默认聚焦 API Key；切到模型区后才显示自定义 Provider 的编辑入口
+  terminal.send("\t");
+  await settle(10);
+  checkContains("详情页 Footer（自定义 Provider 可编辑）", screenText(app), "e 编辑 Provider");
+
+  const created = app.config.getProviderConfig("my-custom-proxy");
+  check("config 写入 provider 名称", created.name === "My Custom Proxy", JSON.stringify(created));
+  check(
+    "config 写入 base_url",
+    created.base_url === "http://127.0.0.1:9/v1",
+    JSON.stringify(created.base_url),
+  );
+  check("config 写入 api", created.api === "openai-completions", JSON.stringify(created.api));
+
+  // 添加第一个模型（已在模型区，直接按 a）
+  terminal.send("a");
+  await settle();
+  checkContains("自定义模型页：步骤 1/5", screenText(app), "步骤 1/5");
+  terminal.send("alpha-model");
+  await settle(10);
+  terminal.send("\r"); // 模型 ID → 显示名称
+  await settle(15);
+  terminal.send("\r"); // 显示名称 → 上下文窗口
+  await settle(15);
+  terminal.send("\r"); // 上下文 → 最大输出
+  await settle(15);
+  terminal.send("\r"); // 最大输出 → 能力开关
+  await settle(15);
+  terminal.send("\r"); // 保存
+  await settle(40);
+  checkContains("返回详情页并显示第一个自定义模型", screenText(app), "alpha-model");
+
+  // 添加第二个模型（验证可添加多个）
+  terminal.send("\t");
+  await settle(10);
+  terminal.send("a");
+  await settle();
+  terminal.send("beta-model");
+  await settle(10);
+  terminal.send("\r");
+  await settle(15);
+  terminal.send("\r");
+  await settle(15);
+  terminal.send("\r");
+  await settle(15);
+  terminal.send("\r");
+  await settle(15);
+  terminal.send("\r");
+  await settle(40);
+  const providerModels = app.config.getProviderConfig("my-custom-proxy").models ?? [];
+  check(
+    "两个自定义模型都写入 config",
+    providerModels.map((model) => model.id).join(",") === "alpha-model,beta-model",
+    JSON.stringify(providerModels),
+  );
+  text = screenText(app);
+  checkContains("详情页显示第一个模型", text, "alpha-model");
+  checkContains("详情页显示第二个模型", text, "beta-model");
+
+  // 编辑：e 进入编辑页，名称/端点/协议已预填
+  terminal.send("\t");
+  await settle(10);
+  terminal.send("e");
+  await settle();
+  customText = screenText(app);
+  checkContains("编辑页标题", customText, "编辑自定义 Provider");
+  checkContains("编辑页：id 只读行", customText, "Provider ID（不可修改）");
+  checkContains("编辑页：预填名称", customText, "My Custom Proxy");
+  checkContains("编辑页：预填 Base URL", customText, "http://127.0.0.1:9/v1");
+
+  // 追加字符修改名称（不清空输入框），一路下一步保存
+  terminal.send(" v2");
+  await settle(10);
+  terminal.send("\r");
+  await settle();
+  terminal.send("\r");
+  await settle();
+  terminal.send("\r");
+  await settle(60);
+  const edited = app.config.getProviderConfig("my-custom-proxy");
+  check(
+    "编辑后名称更新、id 不变",
+    edited.name === "My Custom Proxy v2",
+    JSON.stringify({ id: "my-custom-proxy", name: edited.name }),
+  );
+  check("编辑后模型保留", (edited.models ?? []).length === 2, JSON.stringify(edited.models));
+  checkContains("返回详情页并显示新名称", screenText(app), "My Custom Proxy v2");
+
+  // ESC 返回 Provider 列表：新建的 Provider 出现在列表里
+  terminal.send("\x1b");
+  await settle(20);
+  terminal.send("\x1b");
+  await settle(60);
+  text = screenText(app);
+  checkContains("Provider 列表显示新建 Provider 的名称", text, "My Custom Proxy v2");
+  checkContains("Provider 列表显示自定义标记", text, "[自定义]");
+
+  app.exit();
+  // 本用例在内存里新建过 Provider：恢复 override，避免污染后续用例的目录
+  setZreadCatalogConfig(undefined);
+}
+
+// --- 用例 5b：自定义 Provider 的 id 生成（纯函数）---
+{
+  const { slugifyProviderId, uniqueProviderId } = await import("../src/utils/provider-id");
+  check("slug：英文名称", slugifyProviderId("My Custom Proxy") === "my-custom-proxy", slugifyProviderId("My Custom Proxy"));
+  check("slug：中文名称保留原文", slugifyProviderId("我的代理") === "我的代理", slugifyProviderId("我的代理"));
+  check("slug：空名称回退", slugifyProviderId("") === "custom-provider", slugifyProviderId(""));
+  check("slug：纯符号回退", slugifyProviderId("!!!") === "custom-provider", slugifyProviderId("!!!"));
+  check("slug：首尾符号被裁剪", slugifyProviderId("--OpenAI--") === "openai", slugifyProviderId("--OpenAI--"));
+  const taken = new Set(["openai", "anthropic", "my-proxy"]);
+  check("唯一 id：不冲突时直接使用", uniqueProviderId("DeepSeek", taken) === "deepseek", uniqueProviderId("DeepSeek", taken));
+  check(
+    "唯一 id：与内置 Provider 冲突时追加序号",
+    uniqueProviderId("OpenAI", taken) === "openai-2",
+    uniqueProviderId("OpenAI", taken),
+  );
+  check(
+    "唯一 id：多次同名冲突递增",
+    uniqueProviderId("my proxy", taken) === "my-proxy-2" && uniqueProviderId("My Proxy", new Set([...taken, "my-proxy-2"])) === "my-proxy-3",
+    "",
+  );
+}
+
+// --- 用例 5c：新建表单的 URL 校验（独立实例，不污染主流程）---
+{
+  const { app, terminal } = createApp(["/config/provider/custom"]);
+  await app.start();
+  await settle();
+
+  // 跳过名称步骤
+  terminal.send("Bad Url Provider");
+  await settle(10);
+  terminal.send("\r");
+  await settle();
+  // 空 URL
+  terminal.send("\r");
+  await settle();
+  checkContains("Base URL 为空时报错", screenText(app), "Base URL 不能为空");
+  // 非法 URL
+  terminal.send("not-a-url");
+  await settle(10);
+  terminal.send("\r");
+  await settle();
+  checkContains("非法 URL 报错", screenText(app), "URL 格式无效");
+  checkContains("仍停留在 Base URL 步骤", screenText(app), "步骤 2/3");
   app.exit();
 }
 
@@ -963,7 +1157,7 @@ console.log("▶ TUI 冒烟测试");
   // Home：首项
   terminal.send("\x1b[H");
   text = screenText(app);
-  checkContains("Home 跳到首项", text, "│ 自定义 Provider...");
+  checkContains("Home 跳到首项", text, "│ 新建自定义 Provider...");
   checkContains("首项位置指示", text, `(1/${total})`);
   check("Home 后远端项消失", !text.includes("│ openai-compatible"), indent(text));
 
