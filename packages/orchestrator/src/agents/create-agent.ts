@@ -145,6 +145,15 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   const providerId = config.llm.provider ?? undefined;
   // pi 的思考深度（旧配置缺省 off）；模型不支持时由 pi 在请求时自动调整
   const thinkingLevel = config.llm.thinking_level ?? 'off';
+  // 模型大小覆盖（/config/model-size）：null = 跟随模型目录自带的 contextWindow / maxTokens。
+  // 显式正值会同时影响请求输出上限（pi-ai 按上下文窗口钳制）与上下文压缩阈值，
+  // 并作为 UI「上下文占比」的分母（system/init 的 context_window 来自此处解析出的模型）。
+  const modelContextWindow = config.llm.context_window && config.llm.context_window > 0
+    ? config.llm.context_window
+    : undefined;
+  const modelMaxTokens = config.llm.max_tokens && config.llm.max_tokens > 0
+    ? config.llm.max_tokens
+    : undefined;
 
   // 验证必需配置：
   // - model 必须显式选择；
@@ -157,7 +166,9 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
 
   logger.info(
     `模型: ${model}, 思考深度: ${thinkingLevel}, token 预算: ${effectiveTokenBudget > 0 ? effectiveTokenBudget : '不限制'}` +
-      `${tokenBudget === undefined && maxTurns > 0 ? ` (由 max_turns=${maxTurns} 折算)` : ''}, baseURL: ${baseURL}`,
+      `${tokenBudget === undefined && maxTurns > 0 ? ` (由 max_turns=${maxTurns} 折算)` : ''}, baseURL: ${baseURL}` +
+      `${modelContextWindow ? `, 上下文窗口覆盖: ${modelContextWindow}` : ''}` +
+      `${modelMaxTokens ? `, 最大输出覆盖: ${modelMaxTokens}` : ''}`,
   );
 
   // Token 累积统计：assistant 事件带的是「该次响应」的用量（见 test:agent:http 断言），
@@ -267,6 +278,8 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     tools: options.tools,
     systemPrompt,
     maxTurns,
+    contextWindow: modelContextWindow,
+    maxTokens: modelMaxTokens,
     budget: {
       // 显式 token 预算（不传则由 maxTurns 折算，见 resolveBudgetOptions）
       ...(tokenBudget === undefined ? {} : { maxTokens: tokenBudget }),
