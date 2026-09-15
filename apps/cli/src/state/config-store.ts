@@ -132,6 +132,24 @@ export class ConfigStore {
     this.config.blueprint = { detail: level };
   }
 
+  // ==================== 模型大小覆盖（/config/model-size） ====================
+
+  /** 当前生效模型的上下文窗口覆盖（null = 跟随模型目录默认） */
+  getModelContextWindow(): number | null {
+    return this.config.llm.context_window ?? null;
+  }
+
+  /** 当前生效模型的最大输出 tokens 覆盖（null = 跟随模型目录默认） */
+  getModelMaxTokens(): number | null {
+    return this.config.llm.max_tokens ?? null;
+  }
+
+  /** 由 /config/model-size 维护：整体写回两个覆盖值（null = 跟随模型目录默认） */
+  setModelSize(contextWindow: number | null, maxTokens: number | null): void {
+    this.config.llm.context_window = contextWindow;
+    this.config.llm.max_tokens = maxTokens;
+  }
+
   // ==================== 外部工具（rg / fd …） ====================
 
   /** 读取某个外部工具的启用状态（旧配置缺少 tools 段时默认启用） */

@@ -13,6 +13,7 @@ import ConfigDetailPage from "./views/config-detail";
 import ConfigDocLanguagePage from "./views/config-doc-language";
 import ConfigHomePage from "./views/config-home";
 import ConfigLanguagePage from "./views/config-language";
+import ConfigModelSizePage from "./views/config-model-size";
 import ConfigMaxTurnsPage from "./views/config-max-turns";
 import ConfigPolishPage from "./views/config-polish";
 import ConfigProviderDetailPage from "./views/config-provider-detail";
@@ -40,6 +41,8 @@ export const routes: RouteDefinition[] = [
   { pattern: "/config/concurrency", create: () => new ConfigConcurrencyPage() },
   { pattern: "/config/retry", create: () => new ConfigRetryPage() },
   { pattern: "/config/thinking", create: () => new ConfigThinkingPage() },
+  // 当前模型的上下文窗口 / 最大输出 tokens 覆盖（llm.context_window / llm.max_tokens）
+  { pattern: "/config/model-size", create: () => new ConfigModelSizePage() },
   { pattern: "/config/max-turns", create: () => new ConfigMaxTurnsPage() },
   { pattern: "/config/polish", create: () => new ConfigPolishPage() },
   // 蓝图细节档位（blueprint.detail：minimal / low / medium / high / max）

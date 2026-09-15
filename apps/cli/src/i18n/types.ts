@@ -40,6 +40,7 @@ export interface TranslationKeys {
     docLanguage: string;
     llmProvider: string;
     thinkingLevel: string;
+    modelSize: string;
     maxTurns: string;
     polish: string;
     blueprintDetail: string;
@@ -197,6 +198,28 @@ export interface TranslationKeys {
     hint: string;
     invalid: string;
     current: string;
+    footer: string;
+  };
+  modelSize: {
+    /** 页面标题 */
+    title: string;
+    /** 未选择模型时的提示 */
+    modelUnset: string;
+    /** 模型目录默认值提示（占位参数：context / maxTokens） */
+    defaults: string;
+    /** 留空语义说明 */
+    hint: string;
+    /** 字段标签 */
+    contextWindow: string;
+    maxTokens: string;
+    /** 校验错误（占位参数：min / max） */
+    invalidContext: string;
+    invalidMaxTokens: string;
+    /** 配置首页条目值：未覆盖时显示 */
+    followDefault: string;
+    /** 配置首页条目值：单项未覆盖时显示 */
+    asDefault: string;
+    /** Footer */
     footer: string;
   };
   polish: {
