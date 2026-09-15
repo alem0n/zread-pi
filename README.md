@@ -348,6 +348,69 @@ your-project/
 外部工具解包为纯 JS 实现，不调用 tar/unzip/PowerShell。
 </details>
 
+<details>
+<summary><strong>日志在哪里？出问题怎么排查？</strong></summary>
+
+运行日志写在项目家目录下，按天滚动，默认是结构化 JSONL：
+
+```text
+~/.zread-pi/logs/zread-pi-<yyyy-MM-dd>.jsonl
+```
+
+每行一条 JSON（`{sn, ts, time, name, type, level, msg}`），`name` 是点号分层的模块名
+（如 `orchestrator.pages`、`analyzer.scanner`），便于按子系统过滤。默认保留 30 天。
+传统文本格式（`zread-pi-<日期>.log`，每行 `[本地时间] [级别] 模块名 消息`）默认关闭，
+`ZREAD_PI_LOG_TEXT=1` 开启。
+
+排障时可以：
+
+- 看最近的错误与告警（JSONL）：
+
+  ```bash
+  jq -c 'select(.type=="error" or .type=="warn")' ~/.zread-pi/logs/zread-pi-*.jsonl | tail -n 40
+  ```
+
+- 文本格式（开启 `ZREAD_PI_LOG_TEXT=1` 后）：
+
+  ```bash
+  grep -E '\[ERROR\]|\[WARN\]' ~/.zread-pi/logs/zread-pi-*.log | tail -n 40
+  ```
+
+- 把日志同时打到终端（调试专用，**不要在 TUI 里开**——TUI 期间终端输出会被转回日志总线造成双写）：
+
+  ```bash
+  ZREAD_PI_LOG_CONSOLE=1 bun run cli
+  ```
+
+- 调整某部分的详细程度（只作用于 console，文件侧始终记录全部级别）：
+
+  ```bash
+  # 形如 default=info,orchestrator=debug；级别是 error/info/warn/debug
+  ZREAD_PI_LOG_LEVEL="default=info,orchestrator=debug" ZREAD_PI_LOG_CONSOLE=1 bun run cli
+  ```
+
+- 改保留天数（`<= 0` 不自动清理）：
+
+  ```bash
+  ZREAD_PI_LOG_RETENTION_DAYS=7 bun run cli
+  ```
+
+- 结构化 JSONL 日志（机器分析用：jq / 脚本按 `name`/`level`/`ts` 过滤；**默认开启**，`ZREAD_PI_LOG_JSONL=0` 可关闭）：
+
+  ```bash
+  # 默认产出 ~/.zread-pi/logs/zread-pi-<日期>.jsonl，每行一条 JSON：
+  jq -c 'select(.name=="orchestrator.pages")' ~/.zread-pi/logs/zread-pi-*.jsonl
+  # 不需要时关闭：
+  ZREAD_PI_LOG_JSONL=0 bun run cli
+  ```
+
+- 传统文本日志（`zread-pi-<日期>.log`，**默认关闭**——内容与 JSONL 重复，人工翻阅 / needle 排查用）：
+
+  ```bash
+  ZREAD_PI_LOG_TEXT=1 bun run cli
+  ```
+</details>
+
 ## 贡献
 
 项目在快速迭代中。Issue、PR、新语言解析器与反馈都欢迎。

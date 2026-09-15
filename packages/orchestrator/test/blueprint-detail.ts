@@ -276,6 +276,8 @@ async function writeHomeConfig(detail?: "minimal" | "high"): Promise<void> {
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.ZREAD_PI_HOME = join(home, ".zread-pi");
+// C2 断言兜底注记写入文本日志——文本 sink 默认关闭，测试显式开启
+process.env.ZREAD_PI_LOG_TEXT = "1";
 process.chdir(repo);
 
 const {

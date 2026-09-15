@@ -20,7 +20,44 @@ export {
 export type { WikiVariantInfo } from './file-io.js';
 
 // Logger
+// 旧的兼容层（全局单例 logger / getLogFile）+ 对齐 cordis 的日志总线
+// （命名 logger / 多 exporter / 级别阈值 / 结构化记录）
 export { logger, getLogFile } from './logger.js';
+export {
+  createLogger,
+  getLoggerService,
+  addExporter,
+  resetLoggerServiceForTesting,
+  parseLogLevels,
+  DEFAULT_LOGGER_NAME,
+  DEFAULT_BUFFER_SIZE,
+} from './logger/service.js';
+export { LoggerFacade, LoggerService } from './logger/service.js';
+export { FileExporter, isTextLogEnabled, getLogFilePath, sweepOldLogFiles, DEFAULT_LOG_RETENTION_DAYS, LOG_RETENTION_DAYS_ENV, LOG_TEXT_ENV } from './logger/file-exporter.js';
+export { ConsoleExporter, STDOUT_CAPTURE_LOGGER_NAME, detectColorLevel, LOG_CONSOLE_ENV, LOG_LEVEL_ENV } from './logger/console-exporter.js';
+export {
+  JsonlExporter,
+  getJsonlLogFilePath,
+  isJsonlEnabled,
+  DEFAULT_JSONL_MAX_LENGTH,
+  LOG_JSONL_ENV,
+} from './logger/jsonl-exporter.js';
+export {
+  // LoggerLevel 是运行时常量（as const 对象），必须值导出；
+  // 类型形状随声明自动可见（同名的 type 声明一并导出）。
+  LoggerLevel,
+} from './logger/types.js';
+export type {
+  LoggerType,
+  LoggerMethod,
+  Formatter,
+  Message,
+  Exporter,
+  LoggerOptions,
+  Logger,
+} from './logger/types.js';
+export { LoggerFormat, resolveExporterLevel, defaultFormatters, c16, c256 } from './logger/format.js';
+export { Time } from './logger/time.js';
 
 // 项目家目录（~/.zread-pi）的唯一定义点
 // 配置 / 凭据 / 日志 / 解析器缓存 / 托管二进制 / 全局记忆 history 全部经由这里取路径

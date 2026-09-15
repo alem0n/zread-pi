@@ -8,7 +8,10 @@
  * 绝不阻断文档生成。真正的路径与二进制结构由 `@zread-pi/utils` 的 history 模块提供。
  */
 
-import { logger, rememberProject } from '@zread-pi/utils';
+import { createLogger, rememberProject } from '@zread-pi/utils';
+
+/** 本模块的命名 logger（全局记忆写入）。 */
+const memoryLogger = createLogger('orchestrator.memory');
 
 /** 记录当前工作目录为「最近生成过文档的项目」；失败只告警 */
 export async function rememberCurrentProject(): Promise<void> {
@@ -16,6 +19,6 @@ export async function rememberCurrentProject(): Promise<void> {
     await rememberProject();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`全局记忆写入失败（不影响文档生成）：${message}`);
+    memoryLogger.warn(`全局记忆写入失败（不影响文档生成）：${message}`);
   }
 }

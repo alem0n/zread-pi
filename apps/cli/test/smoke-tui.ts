@@ -1265,15 +1265,19 @@ console.log("▶ TUI 冒烟测试");
 // --- 用例 11：console 接管（TUI 期间不往终端写东西）---
 {
   const { captureConsoleToLog } = await import("../src/tui/console-guard");
-  const { getLogFile } = await import("@zread-pi/utils");
+  // needle 断言读文本日志文件——文本 sink 默认关闭，本用例显式开启；
+  // 服务单例可能在本用例之前已被构造（彼时文本 sink 未开），必须重置后重建
+  process.env.ZREAD_PI_LOG_TEXT = "1";
+  const { getLogFile, resetLoggerServiceForTesting } = await import("@zread-pi/utils");
   const { readFile } = await import("node:fs/promises");
 
+  resetLoggerServiceForTesting();
   const restore = captureConsoleToLog();
   console.error("guard-probe-error-31337");
   console.log("guard-probe-log-31338");
   restore();
 
-  const log = await readFile(getLogFile(), "utf-8");
+  const log = await readFile(getLogFile(), "utf-8").catch(() => "");
   checkContains("console.error 被转存到日志", log, "guard-probe-error-31337");
   checkContains("console.log 被转存到日志", log, "guard-probe-log-31338");
   check("接管后 console.error 不再直接可用（已还原）", typeof console.error === "function");

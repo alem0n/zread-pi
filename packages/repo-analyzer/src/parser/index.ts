@@ -1,10 +1,13 @@
 import Parser from 'web-tree-sitter';
 import { join } from 'path';
 import type { FileManifest, SymbolManifest, SymbolInfo } from '@zread-pi/types';
-import { logger, getProjectRoot, readTextFile } from '@zread-pi/utils';
+import { createLogger, getProjectRoot, readTextFile } from '@zread-pi/utils';
 import { isLanguageSupported } from './language-map';
 import { loadParsers } from './wasm-loader';
 import { parseVueSfc } from './vue-handler';
+
+/** 本模块的命名 logger（Tree-sitter 解析）。 */
+const parserLogger = createLogger('analyzer.parser');
 
 const SCM_QUERIES: Record<string, string> = {
   typescript: `
@@ -211,7 +214,7 @@ function extractWithQuery(
 
     return { imports, exports, functions };
   } catch {
-    logger.warn(`SCM Query failed, fallback to basic traversal: ${language}`);
+    parserLogger.warn(`SCM Query failed, fallback to basic traversal: ${language}`);
     return extractBasic(tree);
   }
 }
@@ -285,19 +288,19 @@ async function parseFile(
 }
 
 export async function parseFiles(manifest: FileManifest): Promise<SymbolManifest> {
-  logger.progress('Loading parsers');
+  parserLogger.info('[PROGRESS] Loading parsers');
 
   const languages = [...new Set(manifest.files.map(f => f.language))];
   const supportedLanguages = languages.filter(isLanguageSupported);
 
-  logger.info(`Parsers to load: ${supportedLanguages.join(', ')}`);
+  parserLogger.info(`Parsers to load: ${supportedLanguages.join(', ')}`);
 
   const parsers = await loadParsers(supportedLanguages);
   const loadedParsers = [...parsers.keys()];
 
-  logger.success(`Loaded ${loadedParsers.length} parsers`);
+  parserLogger.info(`[OK] Loaded ${loadedParsers.length} parsers`);
 
-  logger.progress('Extracting symbols');
+  parserLogger.info('[PROGRESS] Extracting symbols');
 
   const symbols: SymbolInfo[] = [];
   for (const file of manifest.files) {
@@ -311,11 +314,11 @@ export async function parseFiles(manifest: FileManifest): Promise<SymbolManifest
         symbols.push(symbolInfo);
       }
     } catch {
-      logger.warn(`Parse failed: ${file.path}`);
+      parserLogger.warn(`Parse failed: ${file.path}`);
     }
   }
 
-  logger.success(`Extracted symbols from ${symbols.length} files`);
+  parserLogger.info(`[OK] Extracted symbols from ${symbols.length} files`);
 
   return {
     symbols,

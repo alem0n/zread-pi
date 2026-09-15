@@ -10,11 +10,14 @@
  */
 
 import { createAgent as CreateAgentSdk, hasZreadProvider, DEFAULT_MAX_AGENT_RETRY_DELAY_MS, DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS, addTokenUsage, emptyTokenUsage, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
-import { getProjectHome, loadConfig, logger } from '@zread-pi/utils';
+import { getProjectHome, loadConfig, createLogger } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
 import { loadProjectContextFiles, withProjectContext } from './context-files.js';
 import { withStyleDiscipline } from './style-discipline.js';
+
+/** 本模块的命名 logger（Agent 的创建与事件流转）。 */
+const agentLogger = createLogger('orchestrator.agent');
 
 /**
  * 创建 Blueprint Agent 的选项
@@ -164,7 +167,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     throw new Error('LLM configuration incomplete. Please run `zread-pi config` to configure.');
   }
 
-  logger.info(
+  agentLogger.info(
     `模型: ${model}, 思考深度: ${thinkingLevel}, token 预算: ${effectiveTokenBudget > 0 ? effectiveTokenBudget : '不限制'}` +
       `${tokenBudget === undefined && maxTurns > 0 ? ` (由 max_turns=${maxTurns} 折算)` : ''}, baseURL: ${baseURL}` +
       `${modelContextWindow ? `, 上下文窗口覆盖: ${modelContextWindow}` : ''}` +
@@ -243,12 +246,12 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
           ...contextFields(),
         });
       }
-      logger.warn(`API 错误，${info.delayMs / 1000}秒后重试 (${info.attempt}/${info.maxRetries}): ${info.error}`);
+      agentLogger.warn(`API 错误，${info.delayMs / 1000}秒后重试 (${info.attempt}/${info.maxRetries}): ${info.error}`);
     },
   } : undefined;
 
   // 创建 Agent
-  logger.info(`System prompt doc_language: ${docLanguage} => "${SYSTEM_PROMPTS[docLanguage]}"`);
+  agentLogger.info(`System prompt doc_language: ${docLanguage} => "${SYSTEM_PROMPTS[docLanguage]}"`);
   // 目标仓库自述（AGENTS.md / CLAUDE.md …）注入系统提示：仓库若有架构说明/约定术语，
   // 让生成的 wiki 与仓库自述一致，减少纯靠读代码的猜测（见 context-files.ts）。
   // 文风纪律（humanizer）作为最后一段追加：排在 <project_context> 之后，蓝图与页面 Agent 同时生效。
@@ -260,14 +263,14 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   } else {
     const contextFiles = loadProjectContextFiles({ cwd: process.cwd(), agentDir: getProjectHome() });
     if (contextFiles.length > 0) {
-      logger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
+      agentLogger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
     }
     systemPrompt = withStyleDiscipline(
       withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
       docLanguage,
       styleEnabled,
     );
-    logger.info(`文风纪律（humanizer）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
+    agentLogger.info(`文风纪律（humanizer）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
   }
   const agent = CreateAgentSdk({
     model,
@@ -322,17 +325,18 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
         if (block.type === 'tool_use') {
           const toolName = block.name;
           const toolInput = JSON.stringify(block.input || {});
-          logger.progress(`[${toolName}]`, toolInput);
+          // 消息体可能含 % 字符，用 %s 占位原样传递，避免被 printf 误解析
+          agentLogger.info('%s', `[${toolName}] ${toolInput}`);
         }
         if (block.type === 'text' && block.text) {
-          logger.info(block.text);
+          agentLogger.info('%s', block.text);
         }
       }
     }
 
     if (isToolResultMessage(msg)) {
       const result = msg.result;
-      logger.info(`[Tool Result: ${result.tool_name}] ${result.output}`);
+      agentLogger.info('%s', `[Tool Result: ${result.tool_name}] ${result.output}`);
     }
 
     if (isResultMessage(msg)) {
@@ -365,7 +369,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
         });
         if (msg.errors) {
           for (const err of msg.errors) {
-            logger.error(err);
+            agentLogger.error(err);
           }
         }
         throw new Error(errors);

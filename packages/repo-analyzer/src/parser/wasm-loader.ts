@@ -4,7 +4,10 @@ import { fileURLToPath } from 'url';
 import Parser from 'web-tree-sitter';
 import { WASM_CDN_URL, WASM_FILE_MAP, PARSER_CACHE_DIR } from './constants';
 import { LANGUAGE_TO_PARSER } from './language-map';
-import { logger, projectHomePath } from '@zread-pi/utils';
+import { createLogger, projectHomePath } from '@zread-pi/utils';
+
+/** 本模块的命名 logger（WASM 解析器加载）。 */
+const wasmLogger = createLogger('analyzer.wasm');
 
 const languageCache = new Map<string, Parser.Language>();
 
@@ -29,7 +32,7 @@ async function downloadWasmToCache(parserName: string): Promise<Uint8Array> {
   }
 
   const url = `${WASM_CDN_URL}/${wasmFile}`;
-  logger.info(`Downloading WASM: ${url}`);
+  wasmLogger.info(`Downloading WASM: ${url}`);
 
   try {
     const response = await fetch(url);
@@ -43,7 +46,7 @@ async function downloadWasmToCache(parserName: string): Promise<Uint8Array> {
     const cacheDir = getLocalCachePath();
     const wasmPath = join(cacheDir, wasmFile);
     writeFileSync(wasmPath, Buffer.from(wasmBuffer));
-    logger.success(`WASM cached: ${parserName}`);
+    wasmLogger.info(`[OK] WASM cached: ${parserName}`);
 
     return wasmBuffer;
   } catch (error) {
@@ -57,7 +60,7 @@ function loadWasmFromCache(parserName: string): Uint8Array | null {
   const wasmPath = join(cacheDir, wasmFile);
 
   if (existsSync(wasmPath)) {
-    logger.info(`Using local cache: ${parserName}`);
+    wasmLogger.info(`Using local cache: ${parserName}`);
     const fileBuffer = readFileSync(wasmPath);
     return new Uint8Array(fileBuffer);
   }
@@ -156,7 +159,7 @@ export async function loadParsers(languages: string[]): Promise<Map<string, Pars
         const parser = await loadParser(parserName);
         parsers.set(lang, parser);
       } catch (error) {
-        logger.warn(`Parser load failed: ${lang} - ${error instanceof Error ? error.message : error}`);
+        wasmLogger.warn(`Parser load failed: ${lang} - ${error instanceof Error ? error.message : error}`);
       }
     }
   }

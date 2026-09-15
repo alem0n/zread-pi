@@ -5,13 +5,16 @@
  */
 
 import type { SymbolManifest, RepoMapOptions, RepoMapOutput, DirectoryTreeOutput, CoreSignaturesOutput, ModuleDetailsOutput, DirectoryTreeNode } from '@zread-pi/types';
-import { logger, getCacheDir, writeTextFile } from '@zread-pi/utils';
+import { createLogger, getCacheDir, writeTextFile } from '@zread-pi/utils';
 import { join } from 'path';
 import { countReferences } from './reference-counter.js';
 import { REPO_MAP_CONFIG } from './constants.js';
 import { calculateAllPriorities, selectByTokenBudget } from './prioritizer.js';
 import { buildDirectoryTree, formatRepoMap, buildRepoMapOutput, trimSignature } from './formatter.js';
 import { estimateTextTokens } from './token-counter.js';
+
+/** 本模块的命名 logger（Repo Map 构建）。 */
+const repoMapLogger = createLogger('analyzer.repo-map');
 
 /**
  * Build Repo Map from SymbolManifest
@@ -27,7 +30,7 @@ export async function buildRepoMap(
   symbols: SymbolManifest,
   options?: Partial<RepoMapOptions>
 ): Promise<RepoMapOutput> {
-  logger.progress('Building Repo Map');
+  repoMapLogger.info('[PROGRESS] Building Repo Map');
 
   // Merge options with defaults - no truncation by default
   const opts: RepoMapOptions = {
@@ -66,8 +69,8 @@ export async function buildRepoMap(
   const repoMapPath = join(cacheDir, 'repo-map.txt');
   await writeTextFile(repoMapPath, content);
 
-  logger.success(`Repo Map built: ${output.fileCount} files, ~${output.tokenCount} tokens`);
-  logger.success(`Repo Map saved to: ${repoMapPath}`);
+  repoMapLogger.info(`[OK] Repo Map built: ${output.fileCount} files, ~${output.tokenCount} tokens`);
+  repoMapLogger.info(`[OK] Repo Map saved to: ${repoMapPath}`);
 
   return output;
 }

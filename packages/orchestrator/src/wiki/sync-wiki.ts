@@ -10,7 +10,7 @@
  * - 页面状态（new / updated / archived / unchanged）由代码比较新旧页面机械判定，
  *   不再由模型输出 status；SyncDiff 的语义与旧实现一致。
  */
-import { loadConfig, logger, resolveWikiVariant, sectionsFromBlueprint, loadWikiBlueprint, writeWikiPages } from '@zread-pi/utils';
+import { loadConfig, createLogger, resolveWikiVariant, sectionsFromBlueprint, loadWikiBlueprint, writeWikiPages } from '@zread-pi/utils';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { scanFiles, parseFiles } from '@zread-pi/repo-analyzer';
@@ -31,6 +31,9 @@ import type { SyncDiff, WikiPage } from '@zread-pi/types';
 import type { BlueprintDetailLevel } from '@zread-pi/types';
 import type { BlueprintFailedSection, CatalogEvent } from '../types.js';
 import type { TokenUsage } from '@zread-pi/agent-runtime';
+
+/** 本模块的命名 logger（增量同步）。 */
+const syncLogger = createLogger('orchestrator.sync');
 
 export interface SyncResult {
   /** 变更分类结果 */
@@ -345,7 +348,7 @@ export async function syncWiki(
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn(`sync 分类阶段失败（新增文件无法归入新分类，已跳过）：${message}`);
+      syncLogger.warn(`sync 分类阶段失败（新增文件无法归入新分类，已跳过）：${message}`);
     }
   }
 
@@ -359,7 +362,7 @@ export async function syncWiki(
   const failedSections: BlueprintFailedSection[] = [];
 
   if (targetSections.length > 0) {
-    logger.info(`sync：${targetSections.length} 个分类需要增量修补（${targetSections.map((s) => s.title).join('、')}）`);
+    syncLogger.info(`sync：${targetSections.length} 个分类需要增量修补（${targetSections.map((s) => s.title).join('、')}）`);
 
     failedSections.push(
       ...(await runTopicsStage(context, targetSections, {
