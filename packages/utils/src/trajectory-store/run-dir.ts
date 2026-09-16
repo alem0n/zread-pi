@@ -87,7 +87,9 @@ export async function listRuns(projectRoot: string = process.cwd()): Promise<Run
     summaries.push(
       meta ?? {
         id: name,
-        startedAt: name.replace('T', ' ').replace(/-/g, '-'),
+        // 无 meta（损坏 / 正在创建）：用 runId 本身作 startedAt
+        // （与 ISO 同为 `T` 分隔，字典序可比）
+        startedAt: name,
         status: 'interrupted',
         kind: 'generate',
         pages: { total: 0, completed: 0, failed: 0 },

@@ -153,9 +153,6 @@ export class RunLogWriter {
     await ensureDir(getRunDir(runId, projectRoot));
     const startedAt = new Date();
 
-    await RunLogWriter.healInterruptedRuns(projectRoot, runId);
-    await RunLogWriter.enforceRetention(projectRoot);
-
     const meta: RunMeta = {
       id: runId,
       startedAt: startedAt.toISOString(),
@@ -172,7 +169,11 @@ export class RunLogWriter {
     };
 
     const writer = new RunLogWriter(projectRoot, runId, meta);
+    // 先写 run.json 再清理：清理按 startedAt（毫秒精度）排序，此时本 run 已有
+    // 真实开始时间，能被正确识别为「最新」，不会被自己触发的清理删掉
     await writer.writeMeta();
+    await RunLogWriter.healInterruptedRuns(projectRoot, runId);
+    await RunLogWriter.enforceRetention(projectRoot, runId);
     logger.info(`run 开始：${runId}（${options.kind}）→ ${runsDir}`);
     return writer;
   }
@@ -339,13 +340,25 @@ export class RunLogWriter {
     });
   }
 
-  /** 保留期清理：删除最旧的目录，只保留最近 N 个 */
-  private static async enforceRetention(projectRoot: string): Promise<void> {
+  /**
+   * 保留期清理：删除最早开始的 run，只保留最近 N 个。
+   * 用「含本 run」的完整集合判定是否超限（保证容量语义正确），
+   * 只在最后删除时排除 `currentRunId`（极小概率同毫秒时自己被排进删除区间的防御）。
+   * 调用点在本 run 的 run.json 已写入之后，因此本 run 有真实毫秒级 startedAt，
+   * 会被正确识别为最新。
+   */
+  private static async enforceRetention(projectRoot: string, currentRunId: string): Promise<void> {
     const retention = resolveRetention();
     if (retention <= 0) return;
     const runs = await listRuns(projectRoot).catch(() => []);
-    // listRuns 已按 id 降序（最新在前）
-    const stale = runs.slice(retention);
+    // 按真实开始时间排序：startedAt 是毫秒精度 ISO，比秒级 runId 更准
+    // （同秒内创建的 run，runId 的随机后缀不保证顺序 = 创建顺序）。
+    // 同 startedAt 时以 id 降序兜底。最新的 retention 个保留。
+    const ordered = [...runs].sort((left, right) => {
+      const byStarted = (right.startedAt ?? '').localeCompare(left.startedAt ?? '');
+      return byStarted !== 0 ? byStarted : right.id.localeCompare(left.id);
+    });
+    const stale = ordered.slice(retention).filter((run) => run.id !== currentRunId);
     for (const run of stale) {
       const dir = getRunDir(run.id, projectRoot);
       await rm(dir, { recursive: true, force: true }).catch(() => {});
