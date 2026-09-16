@@ -35,14 +35,24 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
   const [focusIndexes, setFocusIndexes] = useState<ReadonlySet<number> | null>(null);
   const [selectedCell, setSelectedCell] = useState<TrajectoryCellProps | null>(null);
   const [collapsedTurnSet, setCollapsedTurnSet] = useState<Set<number | null>>(new Set());
+  const [hiddenSessionIds, setHiddenSessionIds] = useState<Set<string>>(new Set());
   const [detailsWidth, setDetailsWidth] = useState(DETAILS_MIN_WIDTH);
 
   const events = useTrajectoryEvents(runId);
   const layout = useTrajectoryLayout(events.events, query);
 
+  // 按需隐藏 session：被隐藏的会话从台账与时间线中同时移除（时间线重新投影）
+  const visibleTurns = useMemo(
+    () =>
+      layout.turns.filter(
+        (turn) => turn.sessionId === undefined || !hiddenSessionIds.has(turn.sessionId),
+      ),
+    [layout.turns, hiddenSessionIds],
+  );
+
   const rows = useMemo(
     () =>
-      buildTrajectoryRows(layout.turns, {
+      buildTrajectoryRows(visibleTurns, {
         collapseTurns,
         collapsedTurnSet,
         collapseAssistant,
@@ -52,7 +62,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
         t,
       }),
     [
-      layout.turns,
+      visibleTurns,
       layout.matchSet,
       collapseTurns,
       collapsedTurnSet,
@@ -127,6 +137,21 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
       else next.add(turn);
       return next;
     });
+  }, []);
+
+  // 隐藏 / 恢复某个 session（turn 级粒度，一个 Agent 会话 = 一个 session）
+  const handleToggleSession = useCallback((sessionId: string | undefined) => {
+    if (sessionId === undefined) return;
+    setHiddenSessionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  }, []);
+
+  const handleShowAllSessions = useCallback(() => {
+    setHiddenSessionIds(new Set());
   }, []);
 
   const handleSelectSeq = useCallback(
@@ -215,10 +240,12 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
         onTimelineModeChange={setTimelineMode}
         runSummary={headerRun}
         runEnded={events.runEnded}
+        hiddenSessionCount={hiddenSessionIds.size}
+        onShowAllSessions={handleShowAllSessions}
       />
 
       <TrajectoryTimeline
-        turns={layout.turns as TrajectoryTurnModel[]}
+        turns={visibleTurns as TrajectoryTurnModel[]}
         mode={timelineMode}
         focusIndexes={focusIndexes}
         onFocusChange={setFocusIndexes}
@@ -240,6 +267,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
           collapsedTurns={collapseTurns}
           onToggleTurn={handleToggleTurn}
           onSelectCell={setSelectedCell}
+          onToggleSession={handleToggleSession}
           onLoadOlder={() => void events.loadOlder()}
           onScroll={virtual.onScroll}
           containerRef={virtual.containerRef}

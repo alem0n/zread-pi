@@ -3,7 +3,7 @@
  */
 
 import { memo } from 'react';
-import { Search, ChevronsDownUp, ChevronsUpDown, Clock, ListOrdered, AlignHorizontalDistributeCenter } from 'lucide-react';
+import { Search, ChevronsDownUp, ChevronsUpDown, Clock, ListOrdered, AlignHorizontalDistributeCenter, EyeOff } from 'lucide-react';
 import {
   formatDurationMs,
   formatTokens,
@@ -24,6 +24,10 @@ interface TrajectoryToolbarProps {
   onTimelineModeChange: (mode: TrajectoryTimelineMode) => void;
   runSummary: TrajectoryRunSummary | null;
   runEnded: boolean;
+  /** 已隐藏的会话数（按 session id 隐藏的 Agent 会话） */
+  hiddenSessionCount: number;
+  /** 恢复全部被隐藏的会话 */
+  onShowAllSessions: () => void;
 }
 
 const TIMELINE_MODES: Array<{ mode: TrajectoryTimelineMode; labelKey: string; icon: React.ReactNode }> = [
@@ -53,6 +57,8 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
   onTimelineModeChange,
   runSummary,
   runEnded,
+  hiddenSessionCount,
+  onShowAllSessions,
 }: TrajectoryToolbarProps) {
   const t = useT();
   const status = runSummary ? STATUS_ENTRIES[runSummary.status] : null;
@@ -123,6 +129,17 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
       </button>
 
       <div className="ml-auto flex items-center gap-3 text-xs text-[#615d59]">
+        {hiddenSessionCount > 0 ? (
+          <button
+            type="button"
+            onClick={onShowAllSessions}
+            title={t('trajectory.showAllSessions')}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-[#dd5b00]/40 text-[#dd5b00] hover:bg-[#dd5b00]/10"
+          >
+            <EyeOff size={12} />
+            <span>{t('trajectory.hiddenSessions', { count: hiddenSessionCount })}</span>
+          </button>
+        ) : null}
         {runSummary ? (
           <>
             <span className={status?.className}>

@@ -7,6 +7,7 @@
  */
 
 import { memo, useCallback, useMemo } from 'react';
+import { Eye } from 'lucide-react';
 import {
   formatDurationMs,
   formatPercent,
@@ -181,6 +182,7 @@ interface TrajectoryTableProps {
   matchSet: ReadonlySet<string> | null;
   collapsedTurns: boolean;
   onToggleTurn: (turn: number | null) => void;
+  onToggleSession?: (sessionId: string | undefined) => void;
   onSelectCell: (cell: TrajectoryCellProps) => void;
   onLoadOlder: () => void;
   onScroll: (event: React.UIEvent<HTMLDivElement>) => void;
@@ -212,6 +214,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
   matchSet,
   collapsedTurns,
   onToggleTurn,
+  onToggleSession,
   onSelectCell,
   onLoadOlder,
   onScroll,
@@ -256,6 +259,21 @@ export const TrajectoryTable = memo(function TrajectoryTable({
             <span className="text-[10px] text-[#a39e98]">
               {t('trajectory.recordsCount', { count: cells.length })}
             </span>
+            {/* 隐藏此会话：从台账与时间线移除（点击表头本身是折叠 / 展开 turn） */}
+            {turn.turn !== null ? (
+              <button
+                type="button"
+                title={t('trajectory.hideSession')}
+                aria-label={t('trajectory.hideSession')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleSession?.(turn.sessionId);
+                }}
+                className="ml-auto p-0.5 rounded text-[#a39e98] hover:text-[#0075de] hover:bg-white"
+              >
+                <Eye size={12} />
+              </button>
+            ) : null}
           </div>
         );
       }
@@ -333,7 +351,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
         </div>
       );
     },
-    [collapsedTurns, matchSet, onLoadOlder, onSelectCell, onToggleTurn, selectedIndex, t],
+    [collapsedTurns, matchSet, onLoadOlder, onSelectCell, onToggleTurn, onToggleSession, selectedIndex, t],
   );
 
   if (totalHeight === 0) {
@@ -379,6 +397,20 @@ export const TrajectoryTable = memo(function TrajectoryTable({
               count: stickyMeta.turn.groups.reduce((total, group) => total + group.cells.length, 0),
             })}
           </span>
+          {stickyMeta.turn.turn !== null ? (
+            <button
+              type="button"
+              title={t('trajectory.hideSession')}
+              aria-label={t('trajectory.hideSession')}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleSession?.(stickyMeta.turn.sessionId);
+              }}
+              className="ml-auto p-0.5 rounded text-[#a39e98] hover:text-[#0075de] hover:bg-white"
+            >
+              <Eye size={12} />
+            </button>
+          ) : null}
         </div>
       ) : null}
       {visible.map((row, offset) => renderRow(row, startIndex + offset))}

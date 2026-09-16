@@ -57,6 +57,12 @@ export interface TrajectoryTranslation {
   modeTitle: string;
   /** 时间线「重置缩放」 */
   resetZoom: string;
+  /** 表头「隐藏此会话」按钮 title（从台账与时间线移除该 Agent 会话） */
+  hideSession: string;
+  /** 工具栏「已隐藏 N 个会话」徽标（占位参数：count） */
+  hiddenSessions: string;
+  /** 工具栏「恢复全部被隐藏的会话」按钮 title */
+  showAllSessions: string;
   /** 检查器错误标记 */
   error: string;
   /** 检查器「上一个 / 下一个请求」按钮 title */
