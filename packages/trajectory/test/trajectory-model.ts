@@ -58,9 +58,14 @@ function event(base: Omit<RunEvent, 'seq' | 'ts'>): RunEvent {
   return { ...base, seq: nextSeq, ts: nextSeq * 1_000 } as RunEvent;
 }
 
-const CLASSIFY_AGENT = { key: 'classify', role: 'classify' as const };
-const TOPICS_A = { key: 'topics:A', role: 'topics' as const, section: 'A' };
-const PAGE_X = { key: 'page:x', role: 'page' as const, pageSlug: 'x' };
+const CLASSIFY_AGENT = { key: 'classify', role: 'classify' as const, sessionId: 'session-classify' };
+const TOPICS_A = {
+  key: 'topics:A',
+  role: 'topics' as const,
+  section: 'A',
+  sessionId: 'session-topics-a',
+};
+const PAGE_X = { key: 'page:x', role: 'page' as const, pageSlug: 'x', sessionId: 'session-page-x' };
 
 const USAGE: RunTokenUsage = { input_tokens: 100, output_tokens: 20 };
 
@@ -424,23 +429,13 @@ const badConcurrentRequests = concurrentSnapshot.requests.filter((request) => {
 checkEqual('并发 run 的请求归属全部正确', badConcurrentRequests.length, 0);
 
 // ---------------------------------------------------------------------------
-// 10) 旧日志兼容：无 sessionId 时回退 key（顺序执行语义不变）
-// ---------------------------------------------------------------------------
-
-console.log('▶ 旧日志兼容（无 sessionId）');
-
-const legacySnapshot = replayRunEvents(events); // events 是第 1 节构造的、无 sessionId
-check('旧日志的 turn 无 sessionId（回退 key 归属）', legacySnapshot.turns.every((turn) => turn.sessionId === turn.key));
-checkEqual('旧日志仍能折叠出 3 个 turn', legacySnapshot.turns.length, 3);
-
-// ---------------------------------------------------------------------------
-// 11) session 隐藏：过滤 turn 后时间线重新投影
+// 10) session 隐藏：过滤 turn 后时间线重新投影
 // ---------------------------------------------------------------------------
 
 console.log('▶ session 隐藏');
 
 const hidden = new Set([concurrentSnapshot.turns[0]!.sessionId]);
-const visibleTurns = concurrentLayout.filter((turn) => !hidden.has(turn.sessionId ?? ''));
+const visibleTurns = concurrentLayout.filter((turn) => turn.sessionId === undefined || !hidden.has(turn.sessionId));
 check('page:alpha 已被隐藏', !visibleTurns.some((turn) => turn.label.includes('alpha')));
 check('page:beta 仍可见', visibleTurns.some((turn) => turn.label.includes('beta')));
 // turn=null 的独立段（run 收尾）无 sessionId，不受隐藏影响

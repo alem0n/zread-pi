@@ -20,8 +20,8 @@ export interface WikiOutput {
   generated_at: string;
   language: string;
   pages: WikiPage[];
-  /** 生成时使用的档位（遗留 wiki.json 无该字段） */
-  detail?: BlueprintDetailLevel;
+  /** 生成时使用的档位 */
+  detail: BlueprintDetailLevel;
 }
 
 /** 一个可浏览的 wiki 变体（档位子目录） */
@@ -67,8 +67,8 @@ export interface WikiState {
   expandedNodes: Set<string>;
   sourceModalOpen: boolean;
   sourceModalRef: CodeReference | null;
-  /** 全部可浏览的档位变体（遗留目录的 detail 为 null） */
+  /** 全部可浏览的档位变体 */
   variants: WikiVariant[];
-  /** 当前浏览的档位；null = 遗留目录（「默认」） */
+  /** 当前浏览的档位；null = 尚未加载 */
   detail: BlueprintDetailLevel | null;
 }

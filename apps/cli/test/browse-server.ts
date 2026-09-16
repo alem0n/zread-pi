@@ -203,7 +203,7 @@ await writeConfig("zh");
 checkEqual("恢复 language: zh 后 locale 回到 zh-CN", await fetchLocale(), "zh-CN");
 
 // ---------------------------------------------------------------------------
-// 1b) 多档共存：variants API + ?detail= 解析 + 遗留回退
+// 1b) 多档共存：variants API + ?detail= 解析
 // ---------------------------------------------------------------------------
 
 const HIGH_PAGE = {

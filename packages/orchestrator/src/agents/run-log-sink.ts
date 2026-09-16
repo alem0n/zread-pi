@@ -39,7 +39,7 @@ export function generateSessionId(now: Date = new Date()): string {
  */
 export function createRunLogSink(
   runLog: RunLogWriter | undefined,
-  agent: RunEventAgentMeta,
+  agent: Omit<RunEventAgentMeta, 'sessionId'>,
 ): RunLogSink | undefined {
   if (runLog === undefined) return undefined;
   const sessionId = generateSessionId();

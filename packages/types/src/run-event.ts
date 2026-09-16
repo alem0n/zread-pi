@@ -38,14 +38,14 @@ export interface RunEventAgentMeta {
    * 折叠（replay）按它把事件归属到对应的 turn / 活跃会话：并发 Agent 的
    * 事件在日志里交错，单凭 key 与「最近 agent_start」指针会互相吞掉，
    * session id 是每个事件自带的、全局唯一的归属键。
-   *
-   * 旧日志没有该字段时，回退按 key 归属（顺序执行的旧行为不变）。
    */
-  sessionId?: string;
+  sessionId: string;
 }
 
-/** run 级事件的占位元信息（复用对象，避免每条事件重复构造） */
-export const RUN_LEVEL_AGENT: RunEventAgentMeta = { key: 'run', role: 'run' };
+/** run 级事件的占位元信息（复用对象，避免每条事件重复构造）。
+ *  sessionId 为恒定占位值：run 级事件不归属任何 Agent turn，replay 里
+ *  不会与真实 session（`zread-pi-<时间戳>-<随机>`）撞车。 */
+export const RUN_LEVEL_AGENT: RunEventAgentMeta = { key: 'run', role: 'run', sessionId: 'run' };
 
 /** JSON 值（工具参数 / details 的载荷类型） */
 export type RunJsonValue = string | number | boolean | null | { [key: string]: RunJsonValue } | RunJsonValue[];

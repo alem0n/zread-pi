@@ -704,7 +704,7 @@ export async function startWikiBrowseServer(
   };
 }
 
-/** 检查是否存在任一 wiki 变体（档位子目录或遗留目录） */
+/** 检查是否存在任一 wiki 变体（档位子目录） */
 export function hasWikiCatalog(projectPath: string): boolean {
   const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
   return listWikiVariants(wikiRoot).length > 0;

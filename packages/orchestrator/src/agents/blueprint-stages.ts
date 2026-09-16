@@ -121,7 +121,7 @@ export interface BlueprintStageContext {
 /** 把 Agent 身份绑定到 runLog 的 append 上（生成全局唯一 sessionId；缺省 runLog 时返回 undefined） */
 function bindRunLog(
   runLog: RunLogWriter | undefined,
-  agent: RunEventAgentMeta,
+  agent: Omit<RunEventAgentMeta, 'sessionId'>,
 ): RunLogSink | undefined {
   return createRunLogSink(runLog, agent);
 }

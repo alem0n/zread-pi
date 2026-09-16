@@ -72,7 +72,7 @@ export class WikiGenerateController {
   get hasWikiCatalog(): boolean {
     // 三阶段流程会先落盘「只有 sections、pages 为空」的骨架；
     // 空骨架不算已有目录（否则会跳过生成、卡在 0 页）。
-    // 只看**写盘目标档位**（配置档位）：遗留目录 / 其他档位不算，避免把它们的页面写进新变体。
+    // 只看**写盘目标档位**（配置档位）：其他档位不算，避免把它们的页面写进新变体。
     return (
       !this.options.forceRegenerate &&
       (this.options.wiki.targetCatalog?.pages?.length ?? 0) > 0
@@ -96,7 +96,7 @@ export class WikiGenerateController {
     return this.options.wiki.targetCatalog?.pages ?? [];
   }
 
-  /** 写盘目标档位（配置档位；遗留目录不会被写入） */
+  /** 写盘目标档位（配置档位） */
   private get targetDetail() {
     return this.options.wiki.targetDetail;
   }
@@ -220,7 +220,7 @@ export class WikiGenerateController {
     if (this.isGeneratingCatalog) return;
     this.isGeneratingCatalog = true;
 
-    // 强制重新生成时清理旧数据（只清理目标档位变体；遗留目录 / 其他档位不动）
+    // 强制重新生成时清理旧数据（只清理目标档位变体；其他档位不动）
     if (this.options.forceRegenerate) {
       try {
         await removeDir(getWikiDir(this.targetDetail));

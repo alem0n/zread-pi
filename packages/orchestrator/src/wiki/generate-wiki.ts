@@ -156,7 +156,7 @@ function collectPageCandidates(
   page: WikiPage,
   attempts: PageWriteAttempt[],
   wikiDir: string,
-  variant?: BlueprintDetailLevel | null,
+  variant: BlueprintDetailLevel,
 ): string[] {
   const candidates: string[] = [];
   const push = (value: string | undefined): void => {
@@ -347,7 +347,7 @@ async function generatePages(
       const pageStartTime = performance.now();
 
       // 页面边界事件（轨迹日志）
-      const pageAgent: RunEventAgentMeta = {
+      const pageAgent: Omit<RunEventAgentMeta, 'sessionId'> = {
         key: `page:${page.slug}`,
         role: 'page',
         pageSlug: page.slug,
