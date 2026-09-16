@@ -14,9 +14,8 @@ const DETAIL_LABELS: Record<BlueprintDetailLevel, string> = {
   max: '最详尽',
 };
 
-/** 变体展示名：遗留目录 = 「默认」 */
-function variantLabel(detail: BlueprintDetailLevel | null): string {
-  if (detail === null) return '默认';
+/** 变体展示名 */
+function variantLabel(detail: BlueprintDetailLevel): string {
   return DETAIL_LABELS[detail] ?? detail;
 }
 
@@ -182,7 +181,7 @@ export function WikiSidebar() {
                 const isCurrent = variant.detail === detail;
                 return (
                   <button
-                    key={variant.legacy ? 'legacy' : variant.detail}
+                    key={variant.detail}
                     onClick={() => void handleSelectVariant(variant.detail)}
                     className={`
                       w-full flex items-center justify-between px-3 py-2 text-left text-sm
@@ -203,7 +202,7 @@ export function WikiSidebar() {
           >
             <span className="flex items-center gap-2">
               <Layers size={14} className="text-gray-400" />
-              <span>{variantLabel(detail)}</span>
+              <span>{detail ? variantLabel(detail) : ''}</span>
             </span>
             <ChevronUp
               size={14}

@@ -2,7 +2,7 @@
  * 「文档是否已生成」判据（单一来源）。
  *
  * 页面落盘路径规则：`<wikiDir>/<section>/<file>`（与 wiki.json 契约一致）。
- * `detail` 指定档位变体（`wiki/<detail>/`）；缺省 / null = 遗留 `wiki/`（只读兼容）。
+ * `detail` 指定档位变体（`wiki/<detail>/`）。
  * Wiki 首页的进度展示与「老旧项目自动登记」（`app.ts` 的 adoptExistingProject）
  * 共用本模块，确保两处对「已经生成了文档」的理解永远一致。
  */
@@ -20,7 +20,7 @@ export interface GeneratedDocsProgress {
 /** 统计页面里已经落盘的数量（`generated === total && total > 0` 即「文档已生成」） */
 export async function countGeneratedPages(
   pages: WikiPage[],
-  detail?: BlueprintDetailLevel | null,
+  detail: BlueprintDetailLevel,
 ): Promise<GeneratedDocsProgress> {
   const wikiDir = getWikiDir(detail);
   const results = await Promise.all(

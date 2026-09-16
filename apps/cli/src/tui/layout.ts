@@ -107,7 +107,10 @@ export class Layout implements Component {
         detail;
 
     // 第 3 行：文档状态（已生成的变体列表，活动档位在前）
-    const docsLine = this.buildDocsLine(t, wiki.variants, wiki.detail, wiki.targetDetail);
+    const docsLine =
+      wiki.detail === null
+        ? style(`${t("layout.docs")}: `, { dim: true }) + t("layout.docsNone")
+        : this.buildDocsLine(t, wiki.variants, wiki.detail, wiki.targetDetail);
 
     return [title, modelLine, docsLine];
   }
@@ -121,8 +124,7 @@ export class Layout implements Component {
   ): string {
     // 只有已生成内容的变体才进入列表（骨架 pages 为空不算）
     const generated = variants.filter((variant) => variant.pagesCount > 0);
-    const label = (variant: WikiVariantInfo): string =>
-      variant.legacy ? t("layout.docsLegacy") : String(variant.detail);
+    const label = (variant: WikiVariantInfo): string => String(variant.detail);
     const badge = (variant: WikiVariantInfo): string =>
       `[${label(variant)} - ${variant.pagesCount} ${t("layout.docsUnit")}]`;
 
@@ -130,7 +132,7 @@ export class Layout implements Component {
       return style(`${t("layout.docs")}: `, { dim: true }) + t("layout.docsNone");
     }
 
-    // 活动档位排到最前，其余保持 listWikiVariants 的既有顺序（档位序 + 遗留最后）
+    // 活动档位排到最前，其余保持 listWikiVariants 的既有顺序（档位序）
     const ordered = [...generated].sort((a, b) => {
       const aActive = a.detail === activeDetail;
       const bActive = b.detail === activeDetail;
@@ -144,7 +146,7 @@ export class Layout implements Component {
       " · " +
       ordered.map(badge).join(" ");
 
-    // 写盘目标档位尚无已生成变体时才提示（遗留变体的 detail 为 null，不会匹配）
+    // 写盘目标档位尚无已生成变体时才提示
     if (!generated.some((variant) => variant.detail === targetDetail)) {
       line += style(`  ${t("layout.docsTarget")}: ${targetDetail}`, { dim: true });
     }

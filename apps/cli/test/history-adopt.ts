@@ -91,13 +91,17 @@ const PAGES: ProjectPage[] = [
 
 /** 生成一个「已经生成好文档」的老旧项目目录 */
 async function makeProject(root: string, options: { complete: boolean }): Promise<void> {
-  const wikiDir = join(root, ".zread-pi", "wiki");
+  const wikiDir = join(root, ".zread-pi", "wiki", "high");
   for (const page of PAGES) {
     await mkdir(join(wikiDir, page.section), { recursive: true });
   }
   await writeFile(
     join(wikiDir, "wiki.json"),
-    JSON.stringify({ pages: PAGES }, null, 2),
+    JSON.stringify(
+      { detail: "high", sections: [{ title: "入门" }, { title: "参考" }], pages: PAGES },
+      null,
+      2,
+    ),
     "utf-8",
   );
   const written = options.complete ? PAGES : PAGES.slice(0, 1);

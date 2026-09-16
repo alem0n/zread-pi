@@ -28,7 +28,7 @@ function buildFirstTimeSelectItems(t: Translate): SelectItem[] {
 // 注意：三阶段流程会先落盘「只有 sections、pages 为空」的骨架；空骨架不算已有目录，
 // 否则会出现「文档已生成 (0 篇)」且没有任何继续生成入口的卡死状态。
 // 多档共存下菜单按「写盘目标档位（targetCatalog）」组织：生成/继续/同步/强制重新生成
-// 都作用于配置档位；浏览入口在任一档位（含遗留目录）完整时都可用（浏览页内置档位切换）。
+// 都作用于配置档位；浏览入口在任一档位完整时都可用（浏览页内置档位切换）。
 function buildNormalSelectItems(
   targetCatalog: WikiOutput | null,
   targetProgress: { total: number; generated: number } | null,
@@ -57,7 +57,7 @@ function buildNormalSelectItems(
     });
   }
 
-  // 3. 浏览文档（当前档位已完成；或其他档位 / 遗留目录已有完整文档）
+  // 3. 浏览文档（当前档位已完成；或其他档位已有完整文档）
   if (targetComplete || (!targetHasCatalog && anyComplete)) {
     items.push({ label: t("wiki.browse"), value: "browse" });
   }
@@ -88,7 +88,7 @@ function buildNormalSelectItems(
 
 export default class WikiHomePage extends Screen {
   private select!: Select<SelectItem>;
-  /** 活动变体（任一档位 / 遗留目录）的进度：用于状态标题 */
+  /** 活动变体（任一档位）的进度：用于状态标题 */
   private statusProgress: { total: number; generated: number } | null = null;
   /** 写盘目标档位（配置档位）的进度：用于菜单项判定 */
   private targetProgress: { total: number; generated: number } | null = null;
@@ -125,7 +125,7 @@ export default class WikiHomePage extends Screen {
     // 空骨架（只有 sections、pages 为空）视同「尚无目录」
     const hasCatalog = wikiCatalog !== null && (wikiCatalog.pages?.length ?? 0) > 0;
 
-    // 状态标题（用于 Divider）：按活动变体（任一档位 / 遗留目录）显示
+    // 状态标题（用于 Divider）：按活动变体（任一档位）显示
     const statusTitle = isFirstTime
       ? this.t("wiki.dividerFirstTime")
       : hasCatalog
@@ -176,10 +176,10 @@ export default class WikiHomePage extends Screen {
     // 每次进入都重新解析变体（配置档位切换后立即生效）
     await this.app.wiki.reload();
 
-    // 活动变体（任一档位 / 遗留目录）：状态标题与浏览入口
+    // 活动变体（任一档位）：状态标题与浏览入口
     const activePages = this.app.wiki.catalog?.pages;
     this.statusProgress =
-      activePages && activePages.length > 0
+      activePages && activePages.length > 0 && this.app.wiki.detail
         ? await countGeneratedPages(activePages, this.app.wiki.detail)
         : null;
 

@@ -17,7 +17,7 @@
  *  4. 旧实现 offset 是 0-based 且会给每行加 `行号\t` 前缀（与 Edit 的精确匹配语义无关，
  *     纯属浪费 token）。现在与上游一致：offset 1-based，输出原始文本。
  *
- * 参数对齐上游 pi：主参数 `path`；旧契约的 `file_path` 仍被接受（兼容历史调用方）。
+ * 参数对齐上游 pi：主参数 `path`。
  */
 
 import { readFile, stat } from 'node:fs/promises'
@@ -32,7 +32,7 @@ import { resolveReadPathAsync } from './path-utils.js'
 import { toTruncationDetails, truncateHead, formatSize, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from './truncate.js'
 
 function resolveFilePath(input: ToolInputParams): string {
-  const filePath = getString(input, 'path') ?? getString(input, 'file_path')
+  const filePath = getString(input, 'path')
   if (!filePath) throw new TypeError('Expected string for key "path", got undefined')
   return filePath
 }

@@ -12,8 +12,7 @@
  * 的事件在日志里交错，**每条事件自带 `agent.sessionId`**（全局唯一，
  * 同时是 pi 会话 id）。replay 以它为键把事件归进对应的 turn / 进行中消息，
  * 与事件到达顺序无关。`agent_end` 只结束自己那一份，不会影响仍在跑的其他
- * Agent（旧实现用单一 `current` 指针，会互相吞记录）。旧日志没有 sessionId
- * 时回退 `agent.key`，顺序执行的语义不变。
+ * Agent（旧实现用单一 `current` 指针，会互相吞记录）。
  */
 
 import type {
@@ -81,14 +80,14 @@ function usageOf(usage: RunTokenUsage | undefined): TrajectoryUsage | undefined 
   };
 }
 
-/** 事件的归属键：session id 优先（全局唯一），回退 agent.key（兼容旧日志） */
+/** 事件的归属键：session id（全局唯一） */
 function identityOf(agent: RunEventAgentMeta | undefined): string | undefined {
   if (agent === undefined) return undefined;
-  return agent.sessionId ?? agent.key;
+  return agent.sessionId;
 }
 
 /** turn 标签：角色 + 分类 / 页面 */
-function turnLabel(meta: RunEventAgentMeta): string {
+function turnLabel(meta: Omit<RunEventAgentMeta, 'sessionId'>): string {
   const parts: string[] = [meta.role];
   if (meta.section) parts.push(meta.section);
   if (meta.pageSlug) parts.push(meta.pageSlug);
@@ -97,7 +96,7 @@ function turnLabel(meta: RunEventAgentMeta): string {
 
 /** turn 标签（来自 TurnState） */
 function labelOfTurn(turn: TurnState): string {
-  const meta: RunEventAgentMeta = {
+  const meta: Omit<RunEventAgentMeta, 'sessionId'> = {
     key: turn.key,
     role: turn.role ?? 'run',
     ...(turn.section ? { section: turn.section } : {}),
@@ -127,7 +126,7 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
   const ordered = [...events].sort((left, right) => left.seq - right.seq);
 
   const records: ReplayRecord[] = [];
-  /** identity → turn（一个 Agent 一个 turn；键 = agent.sessionId ?? key） */
+  /** identity → turn（一个 Agent 一个 turn；键 = agent.sessionId） */
   const turns = new Map<string, TurnState>();
   /** agent.key → identity（旧 record 的 turnKey 回查 turns 用） */
   const keyToIdentity = new Map<string, string>();
@@ -551,7 +550,7 @@ function indexRequests(
 
   for (const record of records) {
     if (record.kind !== 'message' && record.kind !== 'compacted') continue;
-    // record.turnKey 是 Agent key；turns 以 identity（sessionId ?? key）为键
+    // record.turnKey 是 Agent key；turns 以 identity（sessionId）为键
     const turn =
       record.turnKey !== null
         ? (turns.get(keyToIdentity.get(record.turnKey) ?? record.turnKey) as TurnState | undefined)

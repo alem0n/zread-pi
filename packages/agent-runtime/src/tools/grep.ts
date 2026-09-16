@@ -398,6 +398,10 @@ export const GrepTool = defineTool({
         type: 'number',
         description: `Maximum number of matches to return (default: ${DEFAULT_LIMIT})`,
       },
+      output_mode: {
+        type: 'string',
+        description: "Output format: 'content' (default), 'files_with_matches', or 'count'",
+      },
     },
     required: ['pattern'],
   },
@@ -408,11 +412,11 @@ export const GrepTool = defineTool({
     const pathValue = getString(input, 'path')
     const searchPath = resolveToCwd(pathValue && pathValue.length > 0 ? pathValue : '.', context.cwd)
     const glob = getString(input, 'glob')
-    const ignoreCase = getBoolean(input, 'ignoreCase') ?? getBoolean(input, '-i') ?? false
+    const ignoreCase = getBoolean(input, 'ignoreCase') ?? false
     const literal = getBoolean(input, 'literal') ?? false
-    const contextValue = Math.max(0, getNumber(input, 'context') ?? getNumber(input, '-C') ?? 0)
-    const limit = Math.max(1, getNumber(input, 'limit') ?? getNumber(input, 'head_limit') ?? DEFAULT_LIMIT)
-    const outputMode = normalizeOutputMode(getString(input, 'output_mode') ?? getString(input, 'outputMode'))
+    const contextValue = Math.max(0, getNumber(input, 'context') ?? 0)
+    const limit = Math.max(1, getNumber(input, 'limit') ?? DEFAULT_LIMIT)
+    const outputMode = normalizeOutputMode(getString(input, 'output_mode'))
 
     let isDirectory: boolean
     try {

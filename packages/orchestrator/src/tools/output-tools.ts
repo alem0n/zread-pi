@@ -28,7 +28,6 @@ import {
   mergeWikiSections,
   normalizeBlueprintSections,
   normalizeSectionList,
-  sectionsFromBlueprint,
 } from '@zread-pi/utils'
 import type { BlueprintDetailLevel, WikiPage, WikiSection, WikiTopic } from '@zread-pi/types'
 import {
@@ -162,8 +161,8 @@ function outOfRangeResult(
 export function createSubmitSectionsTool(options: {
   merge?: boolean
   detail?: BlueprintDetailLevel
-  /** 写盘变体（缺省 = detail；`null` = 遗留目录） */
-  variant?: BlueprintDetailLevel | null
+  /** 写盘变体（缺省 = detail） */
+  variant?: BlueprintDetailLevel
   state?: QuantityToolState<WikiSection[]>
 } = {}): ToolDefinition {
   const merge = options.merge === true
@@ -238,9 +237,8 @@ export function createSubmitSectionsTool(options: {
 
         if (merge) {
           const current = await loadWikiBlueprint(undefined, variant)
-          const existing = current.sections ?? sectionsFromBlueprint(current)
           const mergedCount = mergeBlueprintSections(
-            existing,
+            current.sections,
             rawSections,
             config.doc_language,
             Number.MAX_SAFE_INTEGER,
@@ -324,8 +322,8 @@ export function createSubmitSectionTopicsTool(
   options: {
     reuseExisting?: boolean
     detail?: BlueprintDetailLevel
-    /** 写盘变体（缺省 = detail；`null` = 遗留目录） */
-    variant?: BlueprintDetailLevel | null
+    /** 写盘变体（缺省 = detail） */
+    variant?: BlueprintDetailLevel
     state?: QuantityToolState<WikiTopic[]>
   } = {},
 ): ToolDefinition {
@@ -505,9 +503,9 @@ export function createSubmitCondensedTopicsTool(
 export function createRefineSectionTitlesTool(
   section: WikiSection,
   options: {
-    /** 写盘变体（缺省 = 遗留目录） */
-    variant?: BlueprintDetailLevel | null
-  } = {},
+    /** 写盘变体 */
+    variant: BlueprintDetailLevel
+  },
 ): ToolDefinition {
   return {
     name: 'refine_section_titles',
@@ -638,7 +636,7 @@ export const GenerateBlueprintTool: ToolDefinition = {
       }
 
       // Generate and save wiki.json
-      const outputPath = await generateWikiJson(pages, config, techStackSummary)
+      const outputPath = await generateWikiJson(pages, config, techStackSummary, config.blueprint.detail)
 
       // Build result summary
       const groups = [...new Set(pages.map(p => p.group).filter(Boolean))]
@@ -881,7 +879,7 @@ export const GenerateSyncBlueprintTool: ToolDefinition = {
       }
 
       const config = await loadConfig()
-      const outputPath = await generateWikiJson(pages as WikiPage[], config, techStackSummary)
+      const outputPath = await generateWikiJson(pages as WikiPage[], config, techStackSummary, config.blueprint.detail)
 
       return {
         type: 'tool_result',

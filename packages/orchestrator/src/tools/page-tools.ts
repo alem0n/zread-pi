@@ -120,7 +120,6 @@ export function formatMermaidValidationError(issues: MermaidValidationIssue[]): 
  * 按 write_page 的路径规则解析页面输出路径（与工具内拼接规则保持一致）。
  *
  * - 传 `variant`（档位）时基准目录为 `.zread-pi/wiki/<variant>`（多档共存）；
- * - 不传 / null = 遗留 `.zread-pi/wiki`（只读兼容）；
  * - `file` 含路径分隔符 → 相对基准目录解析（忽略 `section`）
  * - `file` + `section` → `<基准>/<section>/<file>`
  * - 只有 `file` → `<基准>/<file>`
@@ -131,11 +130,9 @@ export function formatMermaidValidationError(issues: MermaidValidationIssue[]): 
 export function resolvePageOutputPath(
   cwd: string,
   params: { file?: string; section?: string; slug: string },
-  options: { variant?: BlueprintDetailLevel | null } = {},
+  options: { variant: BlueprintDetailLevel },
 ): string {
-  const wikiDir = options.variant
-    ? resolve(cwd, '.zread-pi/wiki', options.variant)
-    : resolve(cwd, '.zread-pi/wiki');
+  const wikiDir = resolve(cwd, '.zread-pi/wiki', options.variant);
   const { file, section, slug } = params;
 
   if (file) {
@@ -157,14 +154,14 @@ export function resolvePageOutputPath(
  * Write Wiki page content to the specified file path.
  * Uses WikiPage.file field for path, organized by section.
  *
- * 路径结构（`variant` = 蓝图细节档位；不传 = 遗留布局）：
- * `.zread-pi/wiki[ /<variant>]/{section}/{file}`
+ * 路径结构（`variant` = 蓝图细节档位）：
+ * `.zread-pi/wiki/<variant>/{section}/{file}`
  */
-export function createWritePageTool(variant?: BlueprintDetailLevel | null): ToolDefinition {
+export function createWritePageTool(variant: BlueprintDetailLevel): ToolDefinition {
   return defineTool({
     name: 'write_page',
     description: `将 Wiki 页面内容写入指定文件路径。按照章节组织目录结构。
-输出路径: .zread-pi/wiki/{file}`,
+输出路径: .zread-pi/wiki/${variant}/{file}`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -246,6 +243,3 @@ export function createWritePageTool(variant?: BlueprintDetailLevel | null): Tool
     },
   });
 }
-
-/** 遗留布局（`wiki/<section>/<file>`）的 write_page 实例 */
-export const WritePageTool: ToolDefinition = createWritePageTool();

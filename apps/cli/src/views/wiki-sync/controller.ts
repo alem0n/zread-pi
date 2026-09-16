@@ -94,8 +94,8 @@ export class WikiSyncController {
   // ==================== 内部实现 ====================
 
   /**
-   * 同步读写的档位变体：优先活动变体；活动变体是遗留目录（null）时用配置档位，
-   * 但**遗留目录本身不会被写入**（若目标档位尚无 wiki.json，syncWiki 会报可读错误）。
+   * 同步读写的档位变体：优先活动变体，否则用配置档位
+   * （若目标档位尚无 wiki.json，syncWiki 会报可读错误）。
    */
   private get syncDetail(): BlueprintDetailLevel {
     return this.options.wiki.detail ?? this.options.wiki.targetDetail;

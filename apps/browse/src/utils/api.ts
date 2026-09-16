@@ -13,13 +13,12 @@ export const API_TIMEOUT_MS = 30000;
 
 /**
  * `?detail=` 参数的编码：
- * - undefined → 不带参数（服务端按配置档位 / 遗留回退解析）
- * - null → `default`（遗留无档位目录）
+ * - undefined / null → 不带参数（服务端按配置档位解析；null = 尚未加载）
  * - 档位名 → 原值
  */
 function detailParams(detail?: BlueprintDetailLevel | null): Record<string, string> | undefined {
-  if (detail === undefined) return undefined;
-  return { detail: detail === null ? 'default' : detail };
+  if (!detail) return undefined;
+  return { detail };
 }
 
 export interface WikiContentResponse {
@@ -36,7 +35,7 @@ export const api = axios.create({
 });
 
 export const wikiApi = {
-  /** 可浏览的档位变体清单（含「默认」= 遗留目录） */
+  /** 可浏览的档位变体清单 */
   getVariants: async () => {
     const response = await api.get<WikiVariantsResponse>('/wiki/variants');
     return response.data;

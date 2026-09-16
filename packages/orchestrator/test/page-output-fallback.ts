@@ -23,7 +23,8 @@ function check(name: string, ok: boolean, detail?: string): void {
 }
 
 const repo = await mkdtemp(join(tmpdir(), "zread-pi-page-fallback-"));
-const wikiDir = join(repo, ".zread-pi", "wiki");
+const variant = "high";
+const wikiDir = join(repo, ".zread-pi", "wiki", variant);
 await mkdir(wikiDir, { recursive: true });
 
 const { rescuePageFile } = await import("../src/wiki/generate-wiki.js");
@@ -48,6 +49,7 @@ const rescuedFrom1 = await rescuePageFile(
 	page1,
 	[{ cwd: repo, slug: page1.slug, outputPath: wrong1 }],
 	wikiDir,
+	variant,
 );
 
 check(
@@ -72,6 +74,7 @@ const rescuedFrom2 = await rescuePageFile(
 	page2,
 	[{ cwd: repo, slug: page2.slug, file: page2.file, section: "错误章节" }],
 	wikiDir,
+	variant,
 );
 
 check(
@@ -92,7 +95,7 @@ const target3 = join(wikiDir, "指南", "3-scan.md");
 await mkdir(join(wikiDir, "深层", "嵌套"), { recursive: true });
 await writeFile(wrong3, "# scan\n", "utf-8");
 
-const rescuedFrom3 = await rescuePageFile(page3, [{ cwd: repo, slug: page3.slug }], wikiDir);
+const rescuedFrom3 = await rescuePageFile(page3, [{ cwd: repo, slug: page3.slug }], wikiDir, variant);
 
 check(
 	"缺参数时按文件名扫描并移动到约定位置",
@@ -107,7 +110,7 @@ check(
 // ---------------------------------------------------------------------------
 
 const page4 = makePage("4-none", "4-none.md", "指南");
-const rescuedFrom4 = await rescuePageFile(page4, [{ cwd: repo, slug: page4.slug }], wikiDir);
+const rescuedFrom4 = await rescuePageFile(page4, [{ cwd: repo, slug: page4.slug }], wikiDir, variant);
 
 check(
 	"找不到候选文件时返回 null 且不产生目标文件",
@@ -124,7 +127,7 @@ const archived5 = join(wikiDir, "archived", "20260901", "5-arch.md");
 await mkdir(join(wikiDir, "archived", "20260901"), { recursive: true });
 await writeFile(archived5, "# archived\n", "utf-8");
 
-const rescuedFrom5 = await rescuePageFile(page5, [{ cwd: repo, slug: page5.slug }], wikiDir);
+const rescuedFrom5 = await rescuePageFile(page5, [{ cwd: repo, slug: page5.slug }], wikiDir, variant);
 
 check(
 	"扫描跳过 archived/ 历史快照（返回 null 且快照原位保留）",
@@ -138,12 +141,13 @@ check(
 
 check(
 	"路径解析：file 含分隔符时忽略 section",
-	resolvePageOutputPath(repo, { file: "a/b.md", section: "s", slug: "x" }) ===
-		join(repo, ".zread-pi", "wiki", "a", "b.md"),
+	resolvePageOutputPath(repo, { file: "a/b.md", section: "s", slug: "x" }, { variant }) ===
+		join(repo, ".zread-pi", "wiki", variant, "a", "b.md"),
 );
 check(
 	"路径解析：缺 file 时退回 <slug>.md",
-	resolvePageOutputPath(repo, { slug: "x" }) === join(repo, ".zread-pi", "wiki", "x.md"),
+	resolvePageOutputPath(repo, { slug: "x" }, { variant }) ===
+		join(repo, ".zread-pi", "wiki", variant, "x.md"),
 );
 
 // ---------------------------------------------------------------------------

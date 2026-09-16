@@ -253,9 +253,6 @@ function readCodeSnippet(
   return lines.slice(start, end).join("\n");
 }
 
-/** 遗留（无档位）变体的 API 标识（与前端「默认」条目对应） */
-const LEGACY_VARIANT_PARAM = "default";
-
 /** events 接口的默认每页条数（与 reader 的 DEFAULT_READ_LIMIT 对齐） */
 const DEFAULT_EVENTS_LIMIT = 2000;
 
@@ -275,11 +272,10 @@ function resolveBrowseLocale(): LanguageCode {
   }
 }
 
-/** 解析后的请求变体（档位子目录或遗留目录） */
+/** 解析后的请求变体（档位子目录） */
 interface ResolvedWikiVariant {
-  /** 档位名；null = 遗留目录 */
-  detail: BlueprintDetailLevel | null;
-  legacy: boolean;
+  /** 档位名 */
+  detail: BlueprintDetailLevel;
   wikiDir: string;
   wikiJsonPath: string;
 }
@@ -289,12 +285,11 @@ type VariantResolution =
   | { ok: false; status: number; message: string };
 
 /** 构造某个变体的路径（相对目标项目，不依赖进程 cwd） */
-function makeVariant(projectPath: string, detail: BlueprintDetailLevel | null): ResolvedWikiVariant {
+function makeVariant(projectPath: string, detail: BlueprintDetailLevel): ResolvedWikiVariant {
   const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
-  const dir = detail ? path.join(wikiRoot, detail) : wikiRoot;
+  const dir = path.join(wikiRoot, detail);
   return {
     detail,
-    legacy: detail === null,
     wikiDir: dir,
     wikiJsonPath: path.join(dir, "wiki.json"),
   };
@@ -302,8 +297,8 @@ function makeVariant(projectPath: string, detail: BlueprintDetailLevel | null): 
 
 /**
  * 解析请求的档位变体（`?detail=`）：
- * - 显式：档位名 → 对应子目录；`default` → 遗留目录；非法值 / 目录不存在 → 404；
- * - 缺省：配置档位 → 遗留目录 → 第一个存在的档位；一个都没有 → 404。
+ * - 显式：档位名 → 对应子目录；非法值 / 目录不存在 → 404；
+ * - 缺省：配置档位 → 第一个存在的档位；一个都没有 → 404。
  */
 function resolveRequestVariant(projectPath: string, detailParam: unknown): VariantResolution {
   const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
@@ -311,11 +306,6 @@ function resolveRequestVariant(projectPath: string, detailParam: unknown): Varia
 
   if (typeof detailParam === "string" && detailParam.trim().length > 0) {
     const requested = detailParam.trim();
-    if (requested === LEGACY_VARIANT_PARAM) {
-      const variant = makeVariant(projectPath, null);
-      if (!existsSync(variant.wikiJsonPath)) return notFound("Wiki variant not found: default");
-      return { ok: true, variant };
-    }
     if (!isBlueprintDetailLevel(requested)) return notFound(`Unknown wiki variant: ${requested}`);
     const variant = makeVariant(projectPath, requested);
     if (!existsSync(variant.wikiJsonPath)) {
@@ -355,8 +345,7 @@ function createWikiApp(projectPath: string) {
       const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
       const variants = listWikiVariants(wikiRoot).map((variant) => ({
         detail: variant.detail,
-        name: variant.legacy ? "默认" : variant.detail,
-        legacy: variant.legacy,
+        name: variant.detail,
         generatedAt: variant.generatedAt ?? null,
         pagesCount: variant.pagesCount,
         sectionsCount: variant.sectionsCount ?? null,
@@ -372,7 +361,7 @@ function createWikiApp(projectPath: string) {
     }
   });
 
-  // 1. Get wiki catalog (selected variant via ?detail=; default = config detail → legacy → first)
+  // 1. Get wiki catalog (selected variant via ?detail=; default = config detail → first)
   app.get("/api/wiki/catalog", (req: Request, res: Response) => {
     const resolution = resolveRequestVariant(projectPath, req.query.detail);
     if (!resolution.ok) {
@@ -715,7 +704,7 @@ export async function startWikiBrowseServer(
   };
 }
 
-/** 检查是否存在任一 wiki 变体（档位子目录或遗留目录） */
+/** 检查是否存在任一 wiki 变体（档位子目录） */
 export function hasWikiCatalog(projectPath: string): boolean {
   const wikiRoot = path.join(projectPath, ".zread-pi", "wiki");
   return listWikiVariants(wikiRoot).length > 0;

@@ -20,16 +20,15 @@ export interface WikiOutput {
   generated_at: string;
   language: string;
   pages: WikiPage[];
-  /** 生成时使用的档位（遗留 wiki.json 无该字段） */
-  detail?: BlueprintDetailLevel;
+  /** 生成时使用的档位 */
+  detail: BlueprintDetailLevel;
 }
 
-/** 一个可浏览的 wiki 变体（档位子目录或遗留目录） */
+/** 一个可浏览的 wiki 变体（档位子目录） */
 export interface WikiVariant {
-  /** 档位名；null = 遗留目录（界面显示为「默认」） */
-  detail: BlueprintDetailLevel | null;
+  /** 档位名 */
+  detail: BlueprintDetailLevel;
   name: string;
-  legacy: boolean;
   generatedAt: string | null;
   pagesCount: number;
   sectionsCount: number | null;
@@ -38,7 +37,7 @@ export interface WikiVariant {
 /** GET /api/wiki/variants 的响应 */
 export interface WikiVariantsResponse {
   variants: WikiVariant[];
-  /** 缺省档位（未传 ?detail= 时服务端会解析到的档位；null = 遗留目录） */
+  /** 缺省档位（未传 ?detail= 时服务端会解析到的档位；无任何变体时为 null） */
   active: BlueprintDetailLevel | null;
 }
 
@@ -68,8 +67,8 @@ export interface WikiState {
   expandedNodes: Set<string>;
   sourceModalOpen: boolean;
   sourceModalRef: CodeReference | null;
-  /** 全部可浏览的档位变体（遗留目录的 detail 为 null） */
+  /** 全部可浏览的档位变体 */
   variants: WikiVariant[];
-  /** 当前浏览的档位；null = 遗留目录（「默认」） */
+  /** 当前浏览的档位；null = 尚未加载 */
   detail: BlueprintDetailLevel | null;
 }

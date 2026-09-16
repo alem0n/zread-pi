@@ -231,11 +231,24 @@ function buildSyncTopicsRules(
 }
 
 /**
+ * 解析 sync 的目标变体：显式指定 > 活动变体（配置档位 → 第一个存在档位） > 配置档位。
+ *
+ * 变体必非空：遗留目录布局已移除，任何 wiki.json 都在档位子目录下。
+ */
+function resolveSyncVariant(
+  detail: BlueprintDetailLevel | null | undefined,
+  configDetail: BlueprintDetailLevel,
+): BlueprintDetailLevel {
+  if (detail) return detail;
+  return resolveWikiVariant(configDetail) ?? configDetail;
+}
+
+/**
  * Sync Wiki
  *
  * @param onEvent - 进度回调（与 generateWikiCatalog 兼容的 CatalogEvent）
  * @param options.detail - 要同步的档位变体；缺省 = 解析「当前活动变体」
- *   （配置档位 → 遗留目录 → 第一个存在的档位）；`null` = 遗留目录。
+ *   （配置档位 → 第一个存在的档位）；必为档位名（遗留目录布局已移除）。
  *   sync 只读写这一个变体，不触碰并存的其他档位产物。
  * @param options.runLog - 轨迹日志（缺省 = 自动创建单次 run）
  * @returns SyncDiff containing new/updated/archived pages
@@ -245,16 +258,13 @@ export async function syncWiki(
   options: { detail?: BlueprintDetailLevel | null; runLog?: RunLogWriter } = {},
 ): Promise<SyncResult> {
   const config = await loadConfig();
-  const variant =
-    options.detail !== undefined
-      ? options.detail
-      : (resolveWikiVariant(config.blueprint.detail) ?? null);
+  const variant = resolveSyncVariant(options.detail, config.blueprint.detail);
   // 未传 runLog 时自动创建单次 run（保证日志从不缺失）；传入时复用
   return withRunLog(
     options.runLog,
     {
       kind: 'sync',
-      detail: variant ?? undefined,
+      detail: variant,
       model: config.llm.model ?? undefined,
       provider: config.llm.provider ?? undefined,
     },
@@ -269,12 +279,9 @@ async function syncWikiInternal(
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const config = await loadConfig();
-  // 要同步的变体：显式指定 > 活动变体（配置档位 → 遗留 → 第一个存在的档位）
-  const variant =
-    options.detail !== undefined
-      ? options.detail
-      : (resolveWikiVariant(config.blueprint.detail) ?? null);
-  const detail = variant ?? config.blueprint.detail;
+  // 要同步的变体：显式指定 > 活动变体（配置档位 → 第一个存在的档位）
+  const variant = resolveSyncVariant(options.detail, config.blueprint.detail);
+  const detail = variant;
 
   // ——— 阶段1: 检测 ———
   onEvent?.({ type: 'scanning' });
