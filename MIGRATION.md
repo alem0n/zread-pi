@@ -1807,8 +1807,8 @@ apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完�
 
 - `bun run test:trajectory`：74/74 通过（replay / layout / timeline 四模式 /
   搜索 / 虚拟窗口 / 格式化）；
-- `bun run test:browse`：70/70 通过（新增 `/api/runs` 列表 / 详情 / 事件分页 /
-  beforeSeq / afterSeq / 404 断言）；
+- `bun run test:browse`：77/77 通过（新增 `/api/runs` 列表 / 详情 / 事件分页 /
+  beforeSeq / afterSeq / 404 / **缺省窗口=从头 + afterSeq 续页** 断言）；
 - `bun run render-all-routes.ts`：25 个路由全部渲染正常（含 `/logview` 与
   `/logview/:runId`）；
 - `bun run mock:wiki`：`completed=5 failed=0`，产出**单个 run**（目录 + 页面共享），
@@ -1818,7 +1818,23 @@ apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完�
 - `cd apps/browse && bun run build`：通过（trajectory 纯模型层被 Vite 打包，无 node 依赖）；
 - `bun run typecheck` + `bun run test`：全绿（14 个套件）。
 
-### 26.6 风险与未决
+### 26.6 浏览器实测（真实渲染排错）
+
+用无头 Chrome 实际渲染轨迹页（合成 962 事件的 run）定位并修掉了三个肉眼可见的缺陷：
+
+| 缺陷 | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 表格文字模糊 | 滚动时像多次渲染重叠 | 窗口化列表里所有 turn 头都是 `sticky top-0` 的**平级兄弟**，各自的 sticky 约束块都是整个滚动容器，滚动后多个 turn 头同时钉在 `top:0` 互相重叠（实测 3 个 turn 头全在 `top:0`） | 行内表头去掉 sticky；改为在表格顶渲染**唯一一条**「当前 turn」sticky 条，由 `activeTurnHeader(rows, scrollTop)` 按累计行高算出，且仅当该表头已完全滚出视口时显示 |
+| 页面左右震动 | body 出现横向滚动条（1266 > 1264） | 时序条末端的泳道块 `left = width` 且最小宽度 2px，超出容器右缘 2px | 时序条容器加 `overflow-hidden`；泳道块宽度再夹到 `width - left`；边界刻度判据改 `left >= width` |
+| 小 run 表格空白 | 显示「No records yet」 | `useVirtualList` 在行数 < 100（不开启窗口化）时把 `totalHeight` 算成 0，表格误判为无记录 | 未窗口化时 `totalHeight` 改为真实行高之和 |
+| 大 run 首屏错位 | 打开时在 run 中途、turn 编号从 1 重算 | 事件读取的缺省窗口是「最新 limit 条（尾部）」，与检查器自上而下的布局相反 | 缺省改为从 run 开头返回；前端用 `afterSeq` 自动续完剩余页（`hasNewer` 驱动），续完前不启动实时轮询 |
+| 滚动卡顿 | 每次滚动都重渲染 561 个时序块 | 时间条 / 工具栏 / 检查器未 memo，随父级 scrollTop 重渲染 | 三个组件包 `React.memo`（props 在滚动期间引用稳定） |
+| 悬停提示被裁切 | tooltip 底部切掉 | 容器加了 `overflow-hidden` 后 tooltip 的 `top` 超出 64px 容器 | `top` 夹到 `HEIGHT_PX - 24` |
+
+同时修掉一个潜伏缺陷：`buildAgentStartEvent` 静默丢弃 `agent` 元信息（生产链路由
+`bindRunLog` 注入，未受影响；补为显式传入）。
+
+### 26.7 风险与未决
 
 - **尚未用真实 API Key 跑过轨迹视图**：全部验证基于 mock LLM 的事件流。
   首次真机验证重点看长上下文下的 compact / retry 事件与消息块的完整性；
