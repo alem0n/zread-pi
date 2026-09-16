@@ -1,6 +1,6 @@
 {
   "name": "zread-pi",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
@@ -13,13 +13,14 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:tools && bun run test:installer && bun run test:history && bun run test:lock && bun run test:logger && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:context && bun run test:trajectory && bun run test:tui",
+    "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:tools && bun run test:installer && bun run test:history && bun run test:lock && bun run test:version-guard && bun run test:logger && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:context && bun run test:trajectory && bun run test:tui",
     "test:catalog": "bun run packages/agent-runtime/test/provider-catalog-smoke.ts",
     "test:agent": "bun run packages/agent-runtime/test/smoke-agent.ts",
     "test:tools": "bun run packages/agent-runtime/test/tools-smoke.ts",
     "test:installer": "bun run packages/utils/test/tool-installer.ts",
     "test:history": "bun run packages/utils/test/history-store.ts && bun run apps/cli/test/history-command.ts && bun run apps/cli/test/history-adopt.ts",
     "test:lock": "bun run packages/utils/test/file-lock.ts",
+    "test:version-guard": "bun run packages/utils/test/version-guard.ts && bun run apps/cli/test/version-guard-cli.ts",
     "test:logger": "bun run packages/utils/test/logger.ts",
     "test:context": "bun run packages/agent-runtime/test/context-compaction.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
