@@ -25,6 +25,7 @@ import ConfigToolsPage from "./views/config-tools";
 import WikiGeneratePage from "./views/wiki-generate";
 import WikiHomePage from "./views/wiki-home";
 import WikiSyncPage from "./views/wiki-sync";
+import LogviewPage from "./views/logview";
 
 export const routes: RouteDefinition[] = [
   // ========== Config 模块路由 ==========
@@ -60,4 +61,9 @@ export const routes: RouteDefinition[] = [
 
   // ========== Browse 模块路由 ==========
   { pattern: "/browse", create: () => new BrowsePage() },
+
+  // ========== Logview（轨迹）模块路由 ==========
+  // 缺省 = 最新一次运行；无运行记录时视图自显无运行态
+  { pattern: "/logview", create: () => new LogviewPage() },
+  { pattern: "/logview/:runId", create: () => new LogviewPage() },
 ];

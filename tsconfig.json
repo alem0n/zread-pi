@@ -17,7 +17,8 @@
       "@zread-pi/utils": ["./packages/utils/src/index.ts"],
       "@zread-pi/repo-analyzer": ["./packages/repo-analyzer/src/index.ts"],
       "@zread-pi/orchestrator": ["./packages/orchestrator/src/index.ts"],
-      "@zread-pi/agent-runtime": ["./packages/agent-runtime/src/index.ts"]
+      "@zread-pi/agent-runtime": ["./packages/agent-runtime/src/index.ts"],
+      "@zread-pi/trajectory": ["./packages/trajectory/src/index.ts"]
     }
   },
   "include": [

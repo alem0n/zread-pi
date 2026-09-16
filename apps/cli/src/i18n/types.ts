@@ -17,6 +17,7 @@ export interface TranslationKeys {
     browseDesc: string;
     historyDesc: string;
     historyConcurrencyDesc: string;
+    logviewDesc: string;
   };
   history: {
     pruned: string;
@@ -341,11 +342,11 @@ export interface TranslationKeys {
     manage: string;
     browse: string;
     force: string;
+    logview: string;
     firstTimeConfig: string;
     config: string;
     exit: string;
     footer: string;
-    // Divider status titles
     dividerFirstTime: string;
     dividerNoCatalog: string;
     dividerHasCatalog: string;
@@ -366,6 +367,7 @@ export interface TranslationKeys {
     completed: string;
     failed: string;
     navigate: string;
+    viewTrajectory: string;
     retry: string;
     exit: string;
     /** 底部合计行：输入 / 输出 token 与缓存占比 */
@@ -397,6 +399,17 @@ export interface TranslationKeys {
     stopped: string;
     startFailed: string;
     noDocs: string;
+  };
+  logview: {
+    title: string;
+    starting: string;
+    running: string;
+    url: string;
+    footer: string;
+    stopped: string;
+    startFailed: string;
+    noRuns: string;
+    noRunsHint: string;
   };
 }
 

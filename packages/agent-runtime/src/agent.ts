@@ -155,6 +155,11 @@ export interface AgentOptions {
 	contextWindow?: number;
 	/** pi 的思考深度（thinking level），缺省 "off" */
 	thinkingLevel?: ThinkingLevel;
+	/**
+	 * pi 会话 id：显式指定后，本次 query 的会话以此为 id（`system/init` 事件原样回带）。
+	 * 缺省由适配层生成全局唯一值。编排层传入它作为轨迹回放的 session 归属键。
+	 */
+	sessionId?: string;
 	/** 自动上下文压缩（harness 内建 compaction），缺省启用 */
 	compaction?: CompactionOptions;
 	/**
@@ -317,7 +322,10 @@ class AgentRuntimeImpl implements AgentInstance {
 
 		const request: HarnessQueryRequest = {
 			prompt,
-			sessionId: `zread-pi-${Date.now()}`,
+			// pi 会话 id：显式传入 > 生成一个全局唯一值（编排层会传入，
+			// 作为轨迹回放的 session 归属键）。单纯 `Date.now()` 在并发 Agent
+			// 同时启动时会撞车，故补随机后缀。
+			sessionId: options.sessionId ?? `zread-pi-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
 			cwd: options.cwd ?? process.cwd(),
 			modelId: modelId ?? String(runtime.model.id),
 			apiType: runtime.apiType,

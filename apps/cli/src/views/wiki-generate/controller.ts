@@ -16,6 +16,7 @@ import {
   removeDir,
   saveCachedManifest,
   saveCachedSymbols,
+  RunLogWriter,
 } from "@zread-pi/utils";
 import {
   generateWikiCatalog,
@@ -49,6 +50,10 @@ export class WikiGenerateController {
   private isGeneratingArticles = false;
   private isInitialized = false;
   private startedArticles = false;
+  /** 轨迹日志（目录 + 页面阶段共享同一个 run；缺省时按需创建） */
+  private runLog: RunLogWriter | undefined;
+  /** 最近一次运行的 runId（完成后保留，供「查看运行轨迹」入口使用） */
+  private _lastRunId: string | undefined;
 
   constructor(private options: WikiGenerateControllerOptions) {
     // wikiPages 实时跟随 WikiStore（等价迁移前 useMemo(wikiCatalog?.pages ?? [])）
@@ -94,6 +99,11 @@ export class WikiGenerateController {
   /** 写盘目标档位（配置档位；遗留目录不会被写入） */
   private get targetDetail() {
     return this.options.wiki.targetDetail;
+  }
+
+  /** 最近一次运行的 runId（完成后可查看其轨迹） */
+  get lastRunId(): string | undefined {
+    return this._lastRunId;
   }
 
   // ==================== 生命周期 ====================
@@ -169,18 +179,26 @@ export class WikiGenerateController {
 
     const concurrent = await this.loadConcurrency();
 
+    // 单页重新生成是独立的一次 run
+    const runLog = await this.createRunLog();
+    this._lastRunId = runLog.runId;
+
     try {
       await generateWikiContent({
         pages: [page],
         detail: this.targetDetail,
         maxConcurrent: concurrent,
+        runLog,
         onEvent: (event) => this.handleArticleEvent(event),
       });
+      await runLog.end("completed");
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await runLog.end("failed", message).catch(() => {});
       this.handleArticleEvent({
         type: "page_error",
         slug,
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
       });
     }
   }
@@ -216,6 +234,10 @@ export class WikiGenerateController {
     this.flowState = "catalog-generating";
     this.options.onChange();
 
+    // 轨迹日志：开始一次 run（目录 + 页面阶段共享；失败 / 完成时收尾）
+    this.runLog = await this.createRunLog();
+    this._lastRunId = this.runLog.runId;
+
     try {
       // Phase 1-2: 扫描 + 解析
       const manifest = await scanFiles();
@@ -238,6 +260,7 @@ export class WikiGenerateController {
       // Phase 3: 调用 Agent（写入目标档位变体目录）
       await generateWikiCatalog((event) => this.handleCatalogEvent(event), {
         detail: this.targetDetail,
+        runLog: this.runLog,
       });
     } catch (err) {
       // 保留已消耗的用量与结转（失败也要计入合计，重试不清空）
@@ -246,6 +269,7 @@ export class WikiGenerateController {
         status: "failed",
         error: err instanceof Error ? err.message : String(err),
       };
+      await this.finishRunLog("failed", this.state.catalog.error);
       this.options.onChange();
     } finally {
       this.isGeneratingCatalog = false;
@@ -295,6 +319,38 @@ export class WikiGenerateController {
     // 2. 标记等待 pages
     this.flowState = "waiting-pages";
     this.reconcile();
+  }
+
+  /**
+   * 创建一次运行的轨迹日志（run_start 在此处发出）。
+   * 目标仓库 = 当前工作目录（CLI 的 -d/--dir 已切换到位）。
+   */
+  private async createRunLog(): Promise<RunLogWriter> {
+    const detail = this.targetDetail ?? undefined;
+    const config = await loadConfig().catch(() => null);
+    const writer = await RunLogWriter.create(process.cwd(), {
+      kind: "generate",
+      detail,
+      model: config?.llm.model ?? undefined,
+      provider: config?.llm.provider ?? undefined,
+    });
+    writer.appendRunStart({
+      targetDir: process.cwd(),
+      detail,
+      model: config?.llm.model ?? undefined,
+      provider: config?.llm.provider ?? undefined,
+    });
+    return writer;
+  }
+
+  /** 收尾一次运行（run_end + 落盘终态），之后释放 writer */
+  private async finishRunLog(status: "completed" | "failed", error?: string): Promise<void> {
+    const writer = this.runLog;
+    if (writer === undefined) return;
+    this.runLog = undefined;
+    await writer.end(status, error).catch(() => {
+      // 收尾失败不阻断生成流程（日志写入已尽力）
+    });
   }
 
   // ==================== 文章生成 ====================
@@ -383,20 +439,29 @@ export class WikiGenerateController {
     const concurrent = await this.loadConcurrency();
     this.isGeneratingArticles = true;
 
+    // 仅文章流程（目录已存在 / 目录被跳过）时补一个 run
+    if (this.runLog === undefined) {
+      this.runLog = await this.createRunLog();
+    }
+
     try {
       await generateWikiContent({
         pages: pendingPages,
         detail: this.targetDetail,
         maxConcurrent: concurrent,
+        runLog: this.runLog,
         onEvent: (event) => this.handleArticleEvent(event),
       });
       this.flowState = "completed";
+      await this.finishRunLog("completed");
       this.options.onChange();
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.finishRunLog("failed", message);
       this.handleArticleEvent({
         type: "page_error",
         slug: pendingPages[0]?.slug ?? "unknown",
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
       });
     } finally {
       this.isGeneratingArticles = false;

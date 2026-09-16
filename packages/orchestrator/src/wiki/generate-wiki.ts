@@ -13,7 +13,7 @@
 import pLimit from 'p-limit';
 import { copyFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, createLogger } from '@zread-pi/utils';
+import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, createLogger, withRunLog, buildPageStartEvent, buildPageEndEvent, type RunLogWriter } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { getDetailSpec, MINIMAL_PANORAMA_REQUIREMENT, type BlueprintDetailSpec } from '../agents/blueprint-detail.js';
 import { createWritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
@@ -28,9 +28,10 @@ import {
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { polishPageFile } from './polish.js';
+import { createRunLogSink } from '../agents/run-log-sink.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
-import type { BlueprintDetailLevel, WikiPage } from '@zread-pi/types';
+import type { BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
 /** 本模块的命名 logger（页面生成管线）。 */
@@ -288,6 +289,27 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   const config = await loadConfig();
   const variant: BlueprintDetailLevel | null =
     options?.detail !== undefined ? options.detail : config.blueprint.detail;
+
+  return withRunLog(
+    options?.runLog,
+    {
+      kind: 'generate',
+      detail: variant ?? undefined,
+      model: config.llm.model ?? undefined,
+      provider: config.llm.provider ?? undefined,
+    },
+    async (runLog) => generatePages(options, variant, runLog, startTime),
+  );
+}
+
+/** 页面生成主体（runLog 一定存在：来自调用方或 withRunLog 自动创建） */
+async function generatePages(
+  options: GenerateWikiOptions | undefined,
+  variant: BlueprintDetailLevel | null,
+  runLog: RunLogWriter,
+  startTime: number,
+): Promise<WikiResult> {
+  const config = await loadConfig();
   // minimal 会在页面提示词里附加「全景导览」要求
   const spec = getDetailSpec(variant ?? config.blueprint.detail);
   const wikiDir = getWikiDir(variant);
@@ -324,6 +346,17 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   const tasks = pages.map((page) =>
     limit(async () => {
       const pageStartTime = performance.now();
+
+      // 页面边界事件（轨迹日志）
+      const pageAgent: RunEventAgentMeta = {
+        key: `page:${page.slug}`,
+        role: 'page',
+        pageSlug: page.slug,
+      };
+      const pageOutputPath = joinPath(wikiDir, page.section, page.file);
+      // 页面 Agent 的轨迹 sink（绑定全局唯一 sessionId，作为 pi 会话 id 与回放归属键）
+      const pageSink = createRunLogSink(runLog, pageAgent);
+      runLog.append(buildPageStartEvent({ slug: page.slug, outputPath: pageOutputPath }));
 
       // 发射 page_start 事件
       options?.onEvent?.({ type: 'page_start', slug: page.slug });
@@ -382,6 +415,7 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           prompts: buildPagePrompt(page, spec, variant),
           // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
           maxTurns: options?.maxTurns,
+          runLog: pageSink,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
             // 任何带用量的中间事件都刷新累计快照（usage 已是该 Agent 的累计值）
@@ -473,6 +507,11 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           filePath: outputFile,
           slug: page.slug,
           title: page.title,
+          runLog: createRunLogSink(runLog, {
+            key: `polish:${page.slug}`,
+            role: 'polish',
+            pageSlug: page.slug,
+          }),
         });
         if (polish.applied) {
           pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms）`);
@@ -503,6 +542,14 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           contextTokens: result.contextTokens ?? lastContextTokens,
           contextWindow: result.contextWindow ?? lastContextWindow,
         });
+        runLog.append(
+          buildPageEndEvent({
+            slug: page.slug,
+            outputPath: pageResult.outputPath,
+            success: true,
+            durationMs: pageResult.durationMs,
+          }),
+        );
 
         pagesLogger.info(`[OK] [${page.slug}] 完成 (${pageResult.durationMs}ms)`);
 
@@ -533,6 +580,15 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
           contextTokens: lastContextTokens,
           contextWindow: lastContextWindow,
         });
+        runLog.append(
+          buildPageEndEvent({
+            slug: page.slug,
+            outputPath: pageOutputPath,
+            success: false,
+            error: message,
+            durationMs: pageResult.durationMs,
+          }),
+        );
 
         pagesLogger.error(`[${page.slug}] 失败: ${message}`);
 

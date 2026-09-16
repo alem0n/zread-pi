@@ -10,7 +10,7 @@
  * - 页面状态（new / updated / archived / unchanged）由代码比较新旧页面机械判定，
  *   不再由模型输出 status；SyncDiff 的语义与旧实现一致。
  */
-import { loadConfig, createLogger, resolveWikiVariant, sectionsFromBlueprint, loadWikiBlueprint, writeWikiPages } from '@zread-pi/utils';
+import { loadConfig, createLogger, resolveWikiVariant, sectionsFromBlueprint, loadWikiBlueprint, writeWikiPages, withRunLog, buildFailedSectionsEvent, type RunLogWriter } from '@zread-pi/utils';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { scanFiles, parseFiles } from '@zread-pi/repo-analyzer';
@@ -237,11 +237,35 @@ function buildSyncTopicsRules(
  * @param options.detail - 要同步的档位变体；缺省 = 解析「当前活动变体」
  *   （配置档位 → 遗留目录 → 第一个存在的档位）；`null` = 遗留目录。
  *   sync 只读写这一个变体，不触碰并存的其他档位产物。
+ * @param options.runLog - 轨迹日志（缺省 = 自动创建单次 run）
  * @returns SyncDiff containing new/updated/archived pages
  */
 export async function syncWiki(
   onEvent?: (event: CatalogEvent) => void,
-  options: { detail?: BlueprintDetailLevel | null } = {},
+  options: { detail?: BlueprintDetailLevel | null; runLog?: RunLogWriter } = {},
+): Promise<SyncResult> {
+  const config = await loadConfig();
+  const variant =
+    options.detail !== undefined
+      ? options.detail
+      : (resolveWikiVariant(config.blueprint.detail) ?? null);
+  // 未传 runLog 时自动创建单次 run（保证日志从不缺失）；传入时复用
+  return withRunLog(
+    options.runLog,
+    {
+      kind: 'sync',
+      detail: variant ?? undefined,
+      model: config.llm.model ?? undefined,
+      provider: config.llm.provider ?? undefined,
+    },
+    (runLog) => syncWikiInternal(onEvent, options, runLog),
+  );
+}
+
+async function syncWikiInternal(
+  onEvent: ((event: CatalogEvent) => void) | undefined,
+  options: { detail?: BlueprintDetailLevel | null },
+  runLog: RunLogWriter,
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const config = await loadConfig();
@@ -301,7 +325,7 @@ export async function syncWiki(
 
   // ——— 阶段2: 按变更 section 增量修补 ———
   const usage = new BlueprintUsageTracker();
-  const context = { config, onEvent, usage, variant, detail };
+  const context = { config, onEvent, usage, variant, detail, runLog };
 
   const oldPages = oldWikiJson.pages;
   const oldSections = sectionsFromBlueprint(oldWikiJson);
@@ -389,6 +413,11 @@ export async function syncWiki(
 
   const durationMs = Date.now() - startTime;
   const tokenUsage = usage.total();
+
+  // 失败分类落进轨迹日志（不阻断其余分类的产物）
+  if (failedSections.length > 0) {
+    runLog.append(buildFailedSectionsEvent({ sections: failedSections }));
+  }
 
   onEvent?.({
     type: 'complete',

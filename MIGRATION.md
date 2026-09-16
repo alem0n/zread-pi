@@ -1737,3 +1737,250 @@ JSONL 承担默认文件 sink 后，文本输出沦为重复内容，改为**默
 - 兼容层的 `getLogFile()` 仍返回文本文件路径（开启后才有内容）；
   依赖文本文件的测试（`test:logger` needle 段、`test:tui` 的 output-guard / smoke-tui）
   已在测试内显式设置 `ZREAD_PI_LOG_TEXT=1`。
+
+---
+
+## 26. 轨迹检查视图（Trajectory）：可回放的运行事件流
+
+移植自 deepseek-harness 的 `packages/client/ui-trajectory`（轨迹检查视图），
+但模型层输入是 zread-pi 自有的事件流，不依赖 Cordis / dsh-client-runtime。
+
+### 26.1 目标
+
+把「这次生成到底发生了什么」变成可回放、可检查的一手数据：
+
+- 每次生成 / 同步流程（一个 run）把**原始事件流**落盘，可分页读取、可在运行中尾随；
+- 浏览站提供全功能检查视图（虚拟列表 + 本地检查器 + 时序总览 + 搜索过滤）；
+- CLI 新增 `logview` 命令与 wiki 首页 `l` 快捷键，一键启动浏览站并打开轨迹页。
+
+### 26.2 落点与数据流
+
+```
+<目标仓库>/.zread-pi/runs/<runId>/events.jsonl   原始事件（seq 单调，一行一条）
+<目标仓库>/.zread-pi/runs/<runId>/run.json        元数据（状态 / agent / 页面 / 用量合计）
+
+packages/types       RunEvent 联合（16 个 kind）+ RunMeta + RUN_LEVEL_AGENT
+packages/utils/trajectory-store
+  run-dir.ts         路径口径 / runId 校验 / listRuns
+  run-log-writer.ts  RunLogWriter（顺序追加 + 原子 meta + 残留自愈 + 保留期 20）
+  run-log-reader.ts  beforeSeq 向前分页 / afterSeq 尾随
+packages/trajectory  纯 TS 模型层（无 node 依赖，可被 Vite 打包）
+  replay.ts          RunEvent[] → TrajectorySnapshot（记录 / 请求 / partial / 摘要）
+  layout.ts         snapshot → turn / group / cell
+  timeline.ts       四模式时序投影（sequence / duration / time / actual）
+  search-index.ts   增量全文索引（3 秒节流提交）
+  virtual-rows.ts   稳定 key + 视口窗口 + 有界 overscan
+apps/cli   捕获点在编排层（createAgent + generate/sync）+ logview 命令 + 浏览服务器 /api/runs*
+apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完成）
+```
+
+事件捕获点在**编排层**（`create-agent.ts` 的钩子 + `generate-wiki.ts` / `sync-wiki.ts`
+的 `withRunLog` 包裹），**不改 agent-runtime 契约**。turn 边界由 **一个 Agent = 一个 turn**
+（`agent_start` 递增 turn 计数），归属键为 **`agent.sessionId ?? agent.key`**：
+replay 维护 `Map<会话, TurnState>` 而不是单一指针，因此并发 Agent 的事件不会互相吞、
+`agent_end` 只清理自己的会话（详见 §26.9）。
+
+### 26.3 与 dsh 的四点差异（有意为之）
+
+| 差异 | dsh | zread-pi | 原因 |
+| --- | --- | --- | --- |
+| 运行时依赖 | 跑在 Cordis 上，事件由 client-runtime 产生 | 无 Cordis；事件由编排层在 pi 钩子里产生 | zread-pi 的 Agent 内核是 pi，没有 dsh 的运行时 |
+| turn 的定义 | user 消息分隔（用户会插话） | **一个 Agent = 一个 turn**（classify / topics / titles / condense / page / polish） | zread-pi 的 Agent 内部没有用户插话；agent_start / agent_end 是天然的边界 |
+| 请求编号 | 按 turn / step 局部编号 | **全会话统一编号**（助手消息 + 压缩共用一个时间序空间），累计用量跨 turn 相加 | 一个 run 就是一次完整流程，全局序列更符合「回放」语义 |
+| 会话窗口 | 跨多个会话的虚拟窗口 | **单个 run 目录**；分页即文件 seq 分页（beforeSeq / afterSeq） | 落盘即事实，读取侧不需要维护虚拟游标 |
+
+折叠逻辑（replay / layout / timeline / 搜索 / 虚拟化）与 dsh 逐条对齐：
+服务端只存 / 分发**原始事件**，所有折叠在 Web 客户端完成。
+
+### 26.4 兼容性
+
+- 新增产物目录 `.zread-pi/runs/`（已被 `.gitignore` 覆盖）；旧仓库没有该目录时
+  `/api/runs` 返回空数组、轨迹页显示「暂无运行记录」，不影响任何既有功能；
+- `generateWikiCatalog` / `generateWikiContent` / `syncWiki` 新增**可选** `runLog` 参数，
+  不传时由 `withRunLog` 自动创建单次 run（目录 + 页面阶段共享同一个 run，
+  由 CLI 控制器统一创建）；
+- `RunLogWriter.end()` 的终态写入与事件追加共用串行队列（修复了「终态被更早的
+  挂起写覆盖」的竞态）；run_end 事件在关闭标记之前追加（不再丢失）；
+- 残留自愈：新建 run 时把仍为 `running` 的旧 run 标记为 `interrupted`
+  （单个目标目录同时只有一个 CLI 进程在跑）；
+- 保留期：每目标仓库默认保留最近 20 次 run（`ZREAD_PI_RUNS_RETENTION` 覆盖，`<= 0` 不清理）。
+  清理按 `run.json` 的 `startedAt`（毫秒 ISO）排序而非 runId 字典序——runId 是秒级
+  精度 + 随机后缀，同秒创建的 run 字典序不等于创建序；且在**本 run 的 run.json 已写入之后**
+  执行，用含本 run 的完整集合判定超限、只在删除时排除自己（详见 §26.9）；
+- **会话隔离（session id）**：每个 Agent 一次运行分配唯一 `sessionId`（编排层
+  `agents/run-log-sink.ts` 的 `createRunLogSink()` 统一生成并绑定 Agent 身份，
+  透传到 pi 的 `AgentOptions`）。事件携带该字段后，轨迹视图可**按会话隐藏**任意 Agent
+  （表头 Eye 按钮 / 工具栏「已隐藏 N 个会话」徽标），隐藏后时间线与表格同步重投影。
+  旧日志（无 `sessionId`）回退 `agent.key` 归属，读取兼容。
+
+### 26.5 验证（实际执行结果）
+
+- `bun run test:trajectory`：**92/92**（模型层）+ **46/46**（store 层）通过——
+  模型层新增并发归属 / session 隐藏 / 旧日志兼容断言；store 层覆盖往返 / 分页 /
+  损坏行 / 保留期 / 自愈 / 写入串行 / withRunLog；
+- `bun run test:browse`：77/77 通过（新增 `/api/runs` 列表 / 详情 / 事件分页 /
+  beforeSeq / afterSeq / 404 / **缺省窗口=从头 + afterSeq 续页** 断言）；
+- `bun run render-all-routes.ts`：25 个路由全部渲染正常（含 `/logview` 与
+  `/logview/:runId`）；
+- `bun run mock:wiki`：`completed=5 failed=0`，产出**单个 run**（目录 + 页面共享），
+  `run.json` 状态为 `completed`，`events.jsonl` 含 80 条事件、16 个 kind 覆盖
+  run_start / agent_start / message_start / message_end / tool_start / tool_end /
+  stage / section / page_start / page_end / agent_end / run_end；
+- `bun run test:blueprint`：52/52（e2e-blueprint 新增场景 8 捕获点端到端）+
+  115/115 + 23/23 + 11/11 + 17/17；
+- `cd apps/browse && bun run build`：通过（trajectory 纯模型层被 Vite 打包，无 node 依赖）；
+- `bun run typecheck` + `bun run test`：全绿（14 个套件）。
+
+### 26.6 浏览器实测（真实渲染排错）
+
+用无头 Chrome 实际渲染轨迹页（合成 962 事件的 run）定位并修掉了三个肉眼可见的缺陷：
+
+| 缺陷 | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 表格文字模糊 | 滚动时像多次渲染重叠 | 窗口化列表里所有 turn 头都是 `sticky top-0` 的**平级兄弟**，各自的 sticky 约束块都是整个滚动容器，滚动后多个 turn 头同时钉在 `top:0` 互相重叠（实测 3 个 turn 头全在 `top:0`） | 行内表头去掉 sticky；改为在表格顶渲染**唯一一条**「当前 turn」sticky 条，由 `activeTurnHeader(rows, scrollTop)` 按累计行高算出，且仅当该表头已完全滚出视口时显示 |
+| 页面左右震动 | body 出现横向滚动条（1266 > 1264） | 时序条末端的泳道块 `left = width` 且最小宽度 2px，超出容器右缘 2px | 时序条容器加 `overflow-hidden`；泳道块宽度再夹到 `width - left`；边界刻度判据改 `left >= width` |
+| 小 run 表格空白 | 显示「No records yet」 | `useVirtualList` 在行数 < 100（不开启窗口化）时把 `totalHeight` 算成 0，表格误判为无记录 | 未窗口化时 `totalHeight` 改为真实行高之和 |
+| 大 run 首屏错位 | 打开时在 run 中途、turn 编号从 1 重算 | 事件读取的缺省窗口是「最新 limit 条（尾部）」，与检查器自上而下的布局相反 | 缺省改为从 run 开头返回；前端用 `afterSeq` 自动续完剩余页（`hasNewer` 驱动），续完前不启动实时轮询 |
+| 滚动卡顿 | 每次滚动都重渲染 561 个时序块 | 时间条 / 工具栏 / 检查器未 memo，随父级 scrollTop 重渲染 | 三个组件包 `React.memo`（props 在滚动期间引用稳定） |
+| 悬停提示被裁切 | tooltip 底部切掉 | 容器加了 `overflow-hidden` 后 tooltip 的 `top` 超出 64px 容器 | `top` 夹到 `HEIGHT_PX - 24` |
+
+同时修掉一个潜伏缺陷：`buildAgentStartEvent` 静默丢弃 `agent` 元信息（生产链路由
+`bindRunLog` 注入，未受影响；补为显式传入）。
+
+### 26.7 风险与未决
+
+- **尚未用真实 API Key 跑过轨迹视图**：全部验证基于 mock LLM 的事件流。
+  首次真机验证重点看长上下文下的 compact / retry 事件与消息块的完整性；
+- **图片内容块不入 events**：`message_end` 只存文本 / thinking / tool_use 三种块，
+  Read 工具回传的图片在轨迹里以工具输出的文本说明呈现（与 dsh 一致）；
+- **轮询对 UI 不可见的失败**：单次轮询失败不改变页面状态（下一轮自动重试），
+  与 CLI 侧的 retry 事件只在 Agent 层重试时发出是同一套取舍；
+- **轨迹页是全宽独立路由**：不在 MainLayout 里（不渲染 wiki 侧边栏 / 聊天挂件），
+  通过侧边栏底部的「轨迹检查」入口或 `/trajectory` 直达；
+- `polish.mode=full` 的 polish Agent 用量记在 `PageResult.polish.tokenUsage`，
+  与生成页底部合计同口径（不进轨迹的 run 级用量合计，但事件流里有 polish Agent 的
+  完整记录）。
+
+### 26.8 轨迹页中文化（logview 网页 i18n）
+
+CLI 早已支持中英双语（`language` 配置 + `apps/cli/src/i18n` 字典），但浏览站
+（含 logview 打开的轨迹页）之前是纯英文硬编码。本次让网页跟随 CLI 的界面语言。
+
+**机制**（两段，语言源唯一）：
+
+1. **后端下发语言**：`browse-server` 新增 `GET /api/i18n`，
+   `resolveBrowseLocale()` = `normalizeLanguageCode(getDefaultLanguage(loadConfigSync() ?? DEFAULT_CONFIG))`
+   → `zh-CN` / `en-US`。`loadConfigSync` 每次读盘，CLI 改完语言重开网页即生效；
+   任何异常回退 `en-US`，不阻塞渲染。
+2. **前端 i18n**：`apps/browse/src/i18n/`（`types.ts` / `zh-CN.ts` / `en-US.ts` / `index.ts`）
+   是**独立于 CLI 的第二套字典**（两套应用的文案本来就不重合），语义与 CLI 对齐：
+   点号分层 key、`{param}` 插值、未知 key 返回空字符串。`I18nContext.tsx` 的
+   `I18nProvider` 挂载时请求一次 `/api/i18n`，通过 Context 提供 `{ locale, t }`；
+   请求未完成前用默认语言（`en-US`，与改造前的英文 UI 一致，现有用户零变化），
+   到达后整页切换。`App.tsx` 在 `BrowserRouter` 内包了一层，全站可用。
+
+**覆盖范围**：轨迹页全部 UI 文案 —— 加载 / 空态 / 错误态、顶栏标题与返回链接、
+搜索框占位、时序模式按钮（Sequence/Duration/Time/Actual）与 title、
+`Turns`/`Steps` 折叠开关、运行状态徽标（Running/Completed/Failed/Interrupted/Unknown）
+与页面进度、表格的「加载更早的事件 / 第 N 轮 / N 条记录」、时间线的「暂无时序数据 / 重置缩放」、
+检查器的全部分区标题（Summary / Prompt / Output / Thinking / Tool schema / …）
+与指标行标签（Started / Duration / TTFT / Cache hit / Context win / …）。
+
+**有意不翻译**（保持英文）：
+
+- 记录种类徽标 `SYS/USER/CTX/CMP/MSG/TOOL/SUB`（等宽技术缩写，译成中文反而难读）；
+- **数据层派生的标签**：turn label 里的 `role · section · pageSlug`、
+  「Initial System Prompt」、`Run {status} · {ms} ms` 等 —— 这些是
+  `packages/trajectory` 从事件流派生的模型内容，不是界面文案；要译需把语言
+  透传进纯模型层（replay / layout），代价与收益不匹配。前端只译自己拼装的
+  「第 N 轮 ·」前缀与「N 条记录」计数；
+- JsonTree 的 `null` / `Array(n)` 等 JSON 原语表示。
+
+**兼容性**：新增的 `/api/i18n` 是纯新增端点；前端字典是新增文件；
+旧 `config.yaml`（`language: zh` / `en` / 缺省）都能工作 —— 缺省走
+`DEFAULT_CONFIG.language='en'` → `en-US`，与改造前的英文界面一致。
+
+**验证**：`bun run browse:build`（tsc + vite 打包，两份字典与 `/i18n` 调用都在产物里）；
+`bun run test:browse` 新增 4 项断言（`/api/i18n` 状态码、`zh→zh-CN`、改配置
+`en→en-US` 即时生效、恢复 `zh` 后回到 `zh-CN`；静态模式与 Vite 代理模式都覆盖）；
+字典核心（key 查找 / 插值 / 未知 key 空字符串）用 `createTranslate` 直接验证。
+
+### 26.9 会话隔离与三处潜伏缺陷的修复（v1.12.0）
+
+轨迹功能上线后深度复检发现三个在「严格顺序」测试下不可见的缺陷，本次一并修复。
+
+#### 缺陷 1：replay 的并发归属（严重）
+
+**现象**：`concurrency.max_concurrent > 1`（默认 1；`mock:wiki` 用 3）时，
+真实 run 日志里 **14/41 条记录被折错 turn、5 条 `message_end` 事件完全丢失**、
+8/13 个请求的 turn 标签与事件自带的 `agent` 不一致。
+
+**根因**：`replay.ts` 用**单一 `current` 指针 + 单一 `inFlight` 消息**推导归属，
+完全忽略每条事件自带的 `event.agent`；任何 `agent_end` 都把指针清空，
+导致仍在运行的 Agent 的后续消息无家可归。顺序执行时指针恰好够用，
+所以原有 74 项断言全部通过、缺陷被掩盖。
+
+**修复**：归属键改为 `agent.sessionId ?? agent.key`（见缺陷 2 的字段来源），
+`activeTurns` / `inFlightBySession` / `keyToIdentity` 三个 Map 替代单指针：
+`message_*` / `tool_*` / `compact` / `status` 按会话查 turn；`agent_end`
+**只清理自己的会话**；run 级事件（`run_end` / `failed_sections`）归 `turn=null`；
+`page_end` 的失败按 `pageSlug` 精确匹配活跃的 page Agent。修复后用同一条真实日志
+复验：归属错误 14 → 0、丢失记录 5 → 0、9 个 turn 的 sessionId 全部唯一。
+
+#### 缺陷 2：pi 适配层的 sessionId 会撞车（中等）
+
+`packages/agent-runtime/src/agent.ts` 的 `query()` 硬编码
+`sessionId: 'zread-pi-${Date.now()}'`（毫秒级），并发 Agent 会拿到**同一个**
+会话 id，且 `AgentOptions.sessionId` 被忽略。这会让缺陷 1 的修复在毫秒粒度
+退化为按 key 归属（仍正确，但失去了「会话隔离」语义）。
+
+**修复**：`query()` 改用 `options.sessionId ?? 'zread-pi-' + Date.now() + '-' + 随机后缀`；
+编排层新增 `packages/orchestrator/src/agents/run-log-sink.ts`：
+`generateSessionId()`（时间戳 + 随机后缀）+ `createRunLogSink()` 统一生成
+sessionId 并把它与 Agent 身份（key / role / pageSlug）一起绑定进每个事件。
+`RunLogSink` 接口新增 `readonly sessionId`；`createAgent` 透传到 pi；
+`blueprint-stages.ts` 与 `generate-wiki.ts`（page / polish 两处）全部改用
+`createRunLogSink`。
+
+#### 缺陷 3：保留期清理删错 run（低，但导致测试 flaky）
+
+三处小问题叠加：
+
+1. `enforceRetention` 按 **runId 字典序**判定「最旧」，但 runId 是秒级精度 +
+   随机后缀，**同秒创建的 run 字典序不等于创建序**；
+2. 清理在 `writeMeta()` **之前**执行，本 run 的 `startedAt` 还是 `listRuns`
+   合成的秒级值（且格式与真实 ISO 不一致：空格分隔 vs `T` 分隔），
+   排序后本 run 被判为「最旧」删掉，随后 `writeMeta` 又重建 → 清理形同虚设；
+3. 早期版本里「跳过自己」放在排序**之前**过滤，导致创建第 N+1 个 run 时
+   过滤后恰好不超限，清理永不触发。
+
+**修复**：`create()` 改为先 `writeMeta()` 再清理（本 run 有真实毫秒 `startedAt`）；
+排序键改 `startedAt`（同值时 id 降序兜底）；用**含本 run 的完整集合**
+`slice(retention)` 判定超限，只在最后 `filter(run => run.id !== currentRunId)`
+排除自己（同毫秒的防御性降级）；`listRuns` 对无 meta 目录合成的 `startedAt`
+改用 runId 本身（与 ISO 同为 `T` 分隔、字典序可比）。
+
+#### 用户侧能力：按会话隐藏
+
+事件有了 `sessionId` 后，轨迹视图新增**按需隐藏会话**：
+
+- `TrajectoryView` 维护 `hiddenSessionIds: Set<string>`，派生 `visibleTurns`
+  **同时驱动表格与时间线**（隐藏后时间线自动重新投影，span 数随之变化）；
+- 表格每个 turn 头（含 sticky 条）带 Eye 按钮；工具栏在隐藏数 > 0 时显示
+  「已隐藏 N 个会话」徽标（EyeOff 图标）与「显示全部」；
+- i18n 三键（中英 + `types.ts`）；`TrajectoryTurnInfo.sessionId`（必填）/
+  `TrajectoryTurnModel.sessionId?`（layout 回填）。
+
+#### 测试补强（此前缺陷的共同成因：只测了顺序流）
+
+- `test:trajectory` 模型层 74 → **92**：并发交错事件流归属 / `agent_end`
+  不影响其他 Agent / 旧日志无 sessionId 回退 / turn 的 sessionId 唯一性 /
+  session 隐藏后时间线重投影；
+- 新增 store 层 **46** 项（PLAN §四 承诺但此前缺失）：往返 / beforeSeq·afterSeq
+  分页 / 损坏行跳过 / 保留期（删最早开始的 run）/ 残留自愈 / run.json 写入串行 /
+  withRunLog 自动建与复用 / runId 校验；
+- `test:blueprint` 的 e2e-blueprint 新增**场景 8**（13 项）：不传 runLog 时自动建 run、
+  run.json 字段、events.jsonl 首尾与 seq 单调、agent_start 携带**互不相同**
+  的 sessionId（max_concurrent=4 的真实交错流）、并**直接用真实捕获的事件流跑
+  replay 断言归属零错误** —— 这条断言把捕获层与模型层串起来，同类回归无法再被
+  「顺序测试」掩盖。

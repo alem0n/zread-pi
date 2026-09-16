@@ -106,6 +106,11 @@ export default class WikiHomePage extends Screen {
   }
 
   override handleKey(data: string): boolean {
+    // l：查看运行轨迹（最新一次运行）
+    if (data === "l") {
+      this.app.navigate("/logview");
+      return true;
+    }
     return this.select.handleInput(data);
   }
 

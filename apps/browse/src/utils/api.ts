@@ -6,6 +6,7 @@ import type {
   ChatResponse,
 } from '@/features/chat/types';
 import type { BlueprintDetailLevel, WikiOutput, WikiVariantsResponse } from '@/types/wiki';
+import type { LanguageCode } from '@/i18n/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 export const API_TIMEOUT_MS = 30000;
@@ -67,6 +68,14 @@ export const wikiApi = {
     if (detailQuery) params.append('detail', detailQuery.detail);
     const response = await api.get<WikiSourceResponse>(`/wiki/source?${params.toString()}`);
     return response.data;
+  },
+};
+
+export const i18nApi = {
+  /** 界面语言（由 CLI 配置的 language 字段解析，见 browse-server 的 /api/i18n） */
+  getLocale: async (): Promise<LanguageCode> => {
+    const response = await api.get<{ locale: LanguageCode }>('/i18n');
+    return response.data.locale;
   },
 };
 

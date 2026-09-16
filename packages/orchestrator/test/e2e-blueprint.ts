@@ -653,6 +653,64 @@ check(
 );
 
 
+// ---------------------------------------------------------------------------
+// 8) 捕获点：runLog 自动落盘 + 并发事件的 replay 归属（max_concurrent=4）
+// ---------------------------------------------------------------------------
+
+mode = "ok";
+await rm(wikiJsonPath, { force: true });
+console.log("\n▶ generateWikiCatalog()（runLog 自动落盘 + 并发归属）…");
+const {
+	listRuns,
+	readEvents,
+	readRunMeta,
+} = await import("@zread-pi/utils");
+const { replayRunEvents } = await import("../../trajectory/src/index.js");
+// 不传 runLog：withRunLog 自动建 run（与真实 CLI 路径一致）
+await generateWikiCatalog();
+const runs = await listRuns(repo);
+check("runs 目录非空（自动创建 run）", runs.length > 0, `runs=${runs.length}`);
+const latest = runs[0];
+check("run 状态 = completed", latest?.status === "completed", latest?.status ?? "(none)");
+const runMeta = await readRunMeta(latest!.id, repo);
+check("run.json 记录 kind=generate", runMeta?.kind === "generate");
+check("run.json 记录 detail=high", runMeta?.detail === "high");
+check("run.json 记录 model", typeof runMeta?.model === "string");
+
+const { events: logEvents } = await readEvents(latest!.id, { limit: 600 }, repo);
+check("events.jsonl 非空", logEvents.length > 0, `count=${logEvents.length}`);
+const seqs = logEvents.map((event) => event.seq);
+check("seq 从 1 开始单调递增", seqs.every((seq, index) => seq === index + 1));
+check("首事件是 run_start", logEvents[0]?.kind === "run_start");
+check("末事件是 run_end", logEvents[logEvents.length - 1]?.kind === "run_end");
+
+// 事件携带 agent 身份与 sessionId（轨迹回放并发归属的依据）
+const agentStarts = logEvents.filter((event) => event.kind === "agent_start");
+check("有 agent_start 事件（1 分类 + N 主题 + N 标题）", agentStarts.length >= 8, `count=${agentStarts.length}`);
+const sessions = agentStarts
+	.map((event) => event.agent?.sessionId)
+	.filter((value): value is string => typeof value === "string");
+check("agent_start 全部携带 sessionId", sessions.length === agentStarts.length, `missing=${agentStarts.length - sessions.length}`);
+check("各 Agent 的 sessionId 互不相同（并发会话隔离）", new Set(sessions).size === sessions.length, `${sessions.length} sessions`);
+check("agent_start 携带 role / key", agentStarts.every((event) => event.agent?.role !== undefined && event.agent?.key !== undefined));
+
+// 真实捕获的交错事件流直接即回归 replay 并发归属
+const snapshot = replayRunEvents(logEvents);
+const seqToKey = new Map<number, string>();
+for (const event of logEvents) {
+	if (event.agent !== undefined && event.agent.role !== "run") seqToKey.set(event.seq, event.agent.key);
+}
+let misattributed = 0;
+for (const record of snapshot.records) {
+	const expected = seqToKey.get(record.seq);
+	if (expected !== undefined && record.turnKey !== expected) misattributed += 1;
+}
+check(
+	"端到端：max_concurrent=4 的交错事件流 replay 归托全部正确",
+	misattributed === 0,
+	`misattributed=${misattributed} / ${snapshot.records.length} records`,
+);
+
 server.stop(true);
 
 process.chdir(join(repo, ".."));
