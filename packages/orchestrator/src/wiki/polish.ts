@@ -22,7 +22,7 @@ import {
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { loadConfig, createLogger, writeTextFile } from '@zread-pi/utils';
-import { createAgent } from '../agents/create-agent.js';
+import { createAgent, type AgentResult, type RunLogSink } from '../agents/create-agent.js';
 import { buildPolishSystemPrompt, buildPolishTaskPrompt } from '../agents/style-discipline.js';
 import { formatMermaidValidationError, validateMermaidContent } from '../tools/page-tools.js';
 import type { PolishOutcome } from './types.js';
@@ -48,6 +48,8 @@ export interface PolishPageOptions {
   title?: string;
   /** 覆盖默认 polish token 预算（测试用） */
   tokenBudget?: number;
+  /** 轨迹日志 sink（可选；已绑定 polish Agent 身份） */
+  runLog?: RunLogSink;
 }
 
 /** 读取文件内容；不存在/读不了时返回 null（不抛错，polish 不阻断页面） */
@@ -97,6 +99,7 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
       }),
       systemPrompt: buildPolishSystemPrompt(config.doc_language),
       tokenBudget: options.tokenBudget ?? DEFAULT_POLISH_TOKEN_BUDGET,
+      ...(options.runLog !== undefined ? { runLog: options.runLog } : {}),
     });
     tokenUsage = result.tokenUsage;
   } catch (err: unknown) {

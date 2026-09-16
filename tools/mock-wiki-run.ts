@@ -244,16 +244,20 @@ process.chdir(target);
 
 const { generateWikiCatalog } = await import("../packages/orchestrator/src/orchestrator.js");
 const { generateWikiContent } = await import("../packages/orchestrator/src/wiki/generate-wiki.js");
+const { RunLogWriter } = await import("../packages/utils/src/trajectory-store/index.js");
 
 // ---------------------------------------------------------------------------
-// 3) 跑流水线
+// 3) 跑流水线（目录 + 页面共享同一个 run，与真实 CLI 流程一致）
 // ---------------------------------------------------------------------------
 
 console.log(`▶ 目标仓库: ${target}`);
 console.log(`▶ 扫描到源文件: ${entries.length}，规划页面: ${expectedPages}`);
 
+const runLog = await RunLogWriter.create(target, { kind: "generate", detail: "low" });
+runLog.appendRunStart({ targetDir: target, detail: "low" });
+
 const catalogEvents: string[] = [];
-const catalog = await generateWikiCatalog((event) => catalogEvents.push(event.stage ? `${event.stage}:${event.type}` : event.type));
+const catalog = await generateWikiCatalog((event) => catalogEvents.push(event.stage ? `${event.stage}:${event.type}` : event.type), { runLog });
 console.log(`▶ 蓝图完成: ${catalog.durationMs}ms, sections=${catalog.sectionsCount}, pages=${catalog.pagesCount}, usage=${JSON.stringify(catalog.tokenUsage)}`);
 if (catalog.failedSections?.length) {
 	console.log(`  failedSections: ${JSON.stringify(catalog.failedSections)}`);
@@ -261,11 +265,14 @@ if (catalog.failedSections?.length) {
 console.log(`  CatalogEvent: ${catalogEvents.join(",")}`);
 
 const result = await generateWikiContent({
+	runLog,
 	maxConcurrent: 3,
 	onProgress: (state) => {
 		if (state.completed === state.total) console.log(`▶ 页面生成: ${state.completed}/${state.total}`);
 	},
 });
+
+await runLog.end("completed");
 
 server.stop(true);
 

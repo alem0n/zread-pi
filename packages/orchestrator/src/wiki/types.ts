@@ -4,8 +4,9 @@
  * Types for Wiki content generation system.
  */
 
-import type { BlueprintDetailLevel, WikiPage } from '@zread-pi/types';
+import type { BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
 import type { TokenUsage } from '@zread-pi/agent-runtime';
+import type { RunLogWriter } from '@zread-pi/utils';
 
 // ==================== 进度状态（批量回调） ====================
 
@@ -169,4 +170,9 @@ export interface GenerateWikiOptions {
   onEvent?: (event: ArticleEventPayload) => void;
   /** Progress callback for CLI display (batch) */
   onProgress?: (state: ProgressState) => void;
+  /**
+   * 轨迹日志（缺省 = 自动创建单次 run；传入时由上层控制生命周期，
+   * 目录 + 页面阶段共享同一个 run）
+   */
+  runLog?: RunLogWriter;
 }

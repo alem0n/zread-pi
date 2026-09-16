@@ -37,10 +37,13 @@ import {
   mergeWikiSections,
   initWikiSkeleton,
   sectionsFromBlueprint,
+  buildStageEvent,
+  buildSectionEvent,
+  type RunLogWriter,
 } from '@zread-pi/utils';
 import type { AppConfig, BlueprintDetailLevel } from '@zread-pi/types';
 import type { WikiPage, WikiSection, WikiTopic } from '@zread-pi/types';
-import { createAgent, type AgentResult } from './create-agent.js';
+import { createAgent, type AgentResult, type RunLogSink } from './create-agent.js';
 import {
   createRefineSectionTitlesTool,
   createSubmitCondensedSectionsTool,
@@ -71,6 +74,7 @@ import { renderClassifyPrompt } from '../prompts/classify';
 import { renderTopicsPrompt, SYNC_TOPICS_RULES } from '../prompts/topics';
 import TitlesPrompt from '../prompts/titles';
 import type { BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus, CatalogEvent, CatalogStage } from '../types.js';
+import type { RunEventAgentMeta } from '@zread-pi/types';
 
 /** 三个阶段各自的命名 logger（对齐 cordis 日志总线；旧实现的 [classify]/[topics]/[titles] 前缀由名字取代）。 */
 const classifyLogger = createLogger('classify');
@@ -99,6 +103,11 @@ export interface BlueprintStageContext {
   onEvent?: (event: CatalogEvent) => void;
   usage: BlueprintUsageTracker;
   /**
+   * 轨迹日志（可选）：所有阶段 Agent 的事件都会写入 `<repo>/.zread-pi/runs/<runId>/`。
+   * 缺省 = 不记录（由上层 generate / sync 在传入时才启用）。
+   */
+  runLog?: RunLogWriter;
+  /**
    * 写盘变体（档位子目录）：`wiki/<variant>/`。
    * `null` = 遗留目录（sync 只读兼容既有产物时）；生成阶段始终是档位名。
    */
@@ -108,6 +117,19 @@ export interface BlueprintStageContext {
    * 与 `variant` 不同：sync 遗留目录没有档位，此时仍按配置档位做数量控制。
    */
   detail?: BlueprintDetailLevel;
+}
+
+/** 把 Agent 身份绑定到 runLog 的 append 上（缺省 runLog 时返回 undefined） */
+function bindRunLog(
+  runLog: RunLogWriter | undefined,
+  agent: RunEventAgentMeta,
+): RunLogSink | undefined {
+  if (runLog === undefined) return undefined;
+  return {
+    append: (event) => {
+      runLog.append({ ...event, agent });
+    },
+  };
 }
 
 /**
@@ -203,6 +225,11 @@ async function runAgentAndSettle(
 ): Promise<AgentResult> {
   const agentRole: CatalogAgentRole = options.role ?? options.stage;
   const startedAt = Date.now();
+  const runLog = bindRunLog(context.runLog, {
+    key: options.key,
+    role: agentRole,
+    ...(options.section !== undefined ? { section: options.section } : {}),
+  });
   /** 该 Agent 自己的最新快照（`usage` 事件字段是目录级聚合，不能拿它当行内用量） */
   const own = {
     usage: undefined as TokenUsage | undefined,
@@ -238,6 +265,7 @@ async function runAgentAndSettle(
       prompts: options.prompts,
       ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
       ...(options.tokenBudget !== undefined ? { tokenBudget: options.tokenBudget } : {}),
+      ...(runLog !== undefined ? { runLog } : {}),
       onEvent: (event) => {
         // 该 Agent 自己的快照 / 上下文（不随聚合变化）
         if (event.usage) own.usage = event.usage;
@@ -402,6 +430,7 @@ export async function runClassifyStage(
   const merge = options.merge === true;
   const spec = getDetailSpec(detailOf(context));
   emitStageEvent(context, 'classify', { type: 'requesting' });
+  context.runLog?.append(buildStageEvent({ stage: 'classify' }));
   // 分类 Agent 的等待行（每个 Agent 一行：UI 先建行，再进入运行态）
   emitStageEvent(context, 'classify', {
     type: 'requesting',
@@ -581,6 +610,7 @@ export async function runTopicsStage(
     type: 'requesting',
     progress: { current: 0, total: sections.length },
   });
+  context.runLog?.append(buildStageEvent({ stage: 'topics' }));
   // 每个分类一个 Agent 行（waiting）：并发槽位未到时 UI 也能看到完整清单
   for (const section of sections) {
     emitStageEvent(context, 'topics', {
@@ -590,6 +620,7 @@ export async function runTopicsStage(
       agentRole: 'topics',
       agentStatus: 'waiting',
     });
+    context.runLog?.append(buildSectionEvent({ section: section.title }));
   }
 
   const tasks = sections.map((section, index) =>
@@ -806,6 +837,7 @@ export async function runTitlesStage(
     type: 'requesting',
     progress: { current: 0, total: targets.length },
   });
+  context.runLog?.append(buildStageEvent({ stage: 'titles' }));
   // 每个有页面的分类一个标题 Agent 行（waiting）
   for (const target of targets) {
     emitStageEvent(context, 'titles', {
@@ -815,6 +847,7 @@ export async function runTitlesStage(
       agentRole: 'titles',
       agentStatus: 'waiting',
     });
+    context.runLog?.append(buildSectionEvent({ section: target.section.title }));
   }
 
   const tasks = targets.map((target) =>

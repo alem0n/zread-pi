@@ -10,7 +10,24 @@
  */
 
 import { createAgent as CreateAgentSdk, hasZreadProvider, DEFAULT_MAX_AGENT_RETRY_DELAY_MS, DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS, addTokenUsage, emptyTokenUsage, type SDKMessage, type TokenUsage, type ToolDefinition, type RetryConfig } from '@zread-pi/agent-runtime';
-import { getProjectHome, loadConfig, createLogger } from '@zread-pi/utils';
+import {
+  getProjectHome,
+  loadConfig,
+  createLogger,
+  buildAgentStartEvent,
+  buildAgentEndEvent,
+  buildMessageStartEvent,
+  buildMessageDeltaEvent,
+  buildMessageEndEvent,
+  buildToolStartEvent,
+  buildToolEndEvent,
+  buildRetryEvent,
+  buildCompactEvent,
+  buildStatusEvent,
+  previewOfBlocks,
+  DELTA_THROTTLE_MS,
+} from '@zread-pi/utils';
+import type { AppendRunEvent } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
 import { loadProjectContextFiles, withProjectContext } from './context-files.js';
@@ -39,8 +56,24 @@ export interface CreateBlueprintAgentOptions {
    * 「内置语言提示 + <project_context> + 文风纪律」组合，由调用方自备全文。
    */
   systemPrompt?: string;
+  /**
+   * 轨迹日志 sink（可选）：把本次 Agent 的可回放事件写入 `<repo>/.zread-pi/runs/`。
+   * sink 在构造时已绑定 Agent 身份（key / role / section / pageSlug），
+   * 这里的 append 只传事件载荷。缺省 = 不记录（兼容旧调用方）。
+   */
+  runLog?: RunLogSink;
   /** 进度回调（可选） */
   onEvent?: (event: CatalogEvent) => void;
+}
+
+/**
+ * 轨迹日志 sink：append 时自动带上 Agent 身份（编排层注入）。
+ *
+ * 事件语义见 `packages/types/src/run-event.ts`；落盘由 `RunLogWriter` 承担
+ * （`packages/utils/src/trajectory-store/`），折叠 / 布局在 `@zread-pi/trajectory`。
+ */
+export interface RunLogSink {
+  append(event: AppendRunEvent): void;
 }
 
 /**
@@ -188,13 +221,23 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     ...(contextTokens !== undefined ? { contextTokens } : {}),
   });
 
-  // 构建钩子配置（如果有 onEvent 回调）
+  // 构建钩子配置（onEvent 回调 / runLog sink 任一存在即安装）
   const onEvent = options.onEvent;
-  const hooks = onEvent ? {
+  // 工具结果的 isError 由 PostToolUse 钩子暂存（它先于流里的 tool_result 事件），
+  // details 在流里的 tool_result 上（两者合并后写入轨迹日志）
+  const toolErrors = new Map<string, boolean>();
+  const hooks = onEvent || options.runLog ? {
     PreToolUse: [{
       hooks: [
-        async (input: Record<string, unknown>) => {
-          onEvent({
+        async (input: Record<string, unknown>, toolUseId: string) => {
+          options.runLog?.append(
+            buildToolStartEvent({
+              callId: toolUseId,
+              name: input.toolName as string,
+              args: input.toolInput,
+            }),
+          );
+          onEvent?.({
             type: 'tool_start',
             toolName: input.toolName as string,
             toolInput: JSON.stringify(input.toolInput || {}).slice(0, 100),
@@ -206,8 +249,9 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     }],
     PostToolUse: [{
       hooks: [
-        async (input: Record<string, unknown>) => {
-          onEvent({
+        async (input: Record<string, unknown>, toolUseId: string) => {
+          if (options.runLog) toolErrors.set(toolUseId, input.isError === true);
+          onEvent?.({
             type: 'tool_result',
             toolName: input.toolName as string,
             output: String(input.toolOutput || '').slice(0, 200),
@@ -234,6 +278,15 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       maxRetryDelayMs: DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS,
     },
     onRetry: (info) => {
+      // 轨迹日志：重试事件（挂在下一条 message_end 上，见 replay 的 pendingRetry）
+      options.runLog?.append(
+        buildRetryEvent({
+          attempt: info.attempt,
+          maxRetries: info.maxRetries,
+          delayMs: info.delayMs,
+          error: info.error,
+        }),
+      );
       // 发射 retry 事件通知 UI
       if (onEvent) {
         onEvent({
@@ -297,6 +350,23 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     retryConfig,
   });
 
+  // 轨迹日志：Agent 启动（系统提示 / 工具目录 / 预算）
+  options.runLog?.append(
+    buildAgentStartEvent({
+      prompt: options.prompts,
+      systemPrompt,
+      toolCatalog: options.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema })),
+      model,
+      provider: providerId,
+      tokenBudget: effectiveTokenBudget > 0 ? effectiveTokenBudget : undefined,
+    }),
+  );
+
+  // 流式消息的累计状态（message_start / message_delta 的预览由它生成）
+  let streamText = '';
+  let streamStarted = false;
+  let streamLastDeltaAt = 0;
+
   // 发送开始事件
   options.onEvent?.({ type: 'requesting', usage: totalUsage, ...contextFields() });
 
@@ -308,8 +378,31 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       contextWindow = msg.context_window;
     }
 
-    // Partial 流式输出
+    // in-run 压缩段：轨迹日志记一条 compact
+    if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+      options.runLog?.append(buildCompactEvent({ summary: msg.summary }));
+    }
+
+    // 长操作的状态文案（如压缩进行中）
+    if (msg.type === 'system' && msg.subtype === 'status') {
+      options.runLog?.append(buildStatusEvent({ text: msg.message }));
+    }
+
+    // Partial 流式输出（delta 累积成预览：首个 delta → message_start，
+    // 后续按 DELTA_THROTTLE_MS 节流 → message_delta）
     if (isPartialMessage(msg)) {
+      if (msg.partial.type === 'text' && typeof msg.partial.text === 'string') {
+        streamText += msg.partial.text;
+        const preview = previewOfBlocks([{ type: 'text', text: streamText }]);
+        if (!streamStarted) {
+          streamStarted = true;
+          streamLastDeltaAt = Date.now();
+          options.runLog?.append(buildMessageStartEvent({ preview }));
+        } else if (Date.now() - streamLastDeltaAt >= DELTA_THROTTLE_MS) {
+          streamLastDeltaAt = Date.now();
+          options.runLog?.append(buildMessageDeltaEvent({ preview }));
+        }
+      }
       options.onEvent?.({ type: 'responding', usage: totalUsage, ...contextFields() });
     }
 
@@ -320,6 +413,23 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
         // 每次响应都带当前上下文报表值（最近一次响应为准）
         contextTokens = contextTokensFromUsage(msg.usage) ?? contextTokens;
       }
+
+      // 轨迹日志：消息完成（完整内容块 + 用量；流式状态在此时重置）
+      options.runLog?.append(
+        buildMessageEndEvent({
+          blocks: msg.message.content.map((block) =>
+            block.type === 'tool_use'
+              ? { type: 'tool_use', callId: block.id, name: block.name, input: block.input }
+              : block,
+          ),
+          usage: msg.usage,
+          contextWindow,
+          model,
+          provider: providerId,
+        }),
+      );
+      streamText = '';
+      streamStarted = false;
 
       for (const block of msg.message?.content || []) {
         if (block.type === 'tool_use') {
@@ -336,6 +446,17 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
 
     if (isToolResultMessage(msg)) {
       const result = msg.result;
+      // 轨迹日志：工具完成（output + details；isError 由 PostToolUse 钩子暂存）
+      options.runLog?.append(
+        buildToolEndEvent({
+          callId: result.tool_use_id,
+          name: result.tool_name,
+          output: result.output,
+          details: result.details,
+          isError: toolErrors.get(result.tool_use_id),
+        }),
+      );
+      toolErrors.delete(result.tool_use_id);
       agentLogger.info('%s', `[Tool Result: ${result.tool_name}] ${result.output}`);
     }
 
@@ -343,6 +464,15 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       if (msg.usage) {
         totalUsage = msg.usage;
       }
+
+      // 轨迹日志：Agent 终态（成功 / 失败都记；用量为 harness ledger 的权威累计）
+      options.runLog?.append(
+        buildAgentEndEvent({
+          subtype: msg.subtype,
+          durationMs: Math.round(performance.now() - startTime),
+          usage: msg.usage,
+        }),
+      );
 
       if (msg.subtype === 'success') {
         options.onEvent?.({

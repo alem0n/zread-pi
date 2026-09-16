@@ -85,5 +85,8 @@ export type { CondensedSectionCapture, CondensedTopicCapture } from './tools/out
 // Types
 export * from './types.js'
 
+// 轨迹日志 sink（编排层注入；落盘在 @zread-pi/utils 的 RunLogWriter）
+export type { RunLogSink } from './agents/create-agent.js'
+
 // Re-export TokenUsage from agent-sdk
 export type { TokenUsage } from '@zread-pi/agent-runtime'

@@ -12,7 +12,7 @@
  * - 文章生成阶段（generateWikiContent）零改动，继续只消费最终 wiki.json。
  */
 
-import { loadConfig, loadWikiBlueprint } from '@zread-pi/utils';
+import { loadConfig, loadWikiBlueprint, withRunLog, type RunLogWriter } from '@zread-pi/utils';
 import type { BlueprintDetailLevel } from '@zread-pi/types';
 import {
   BlueprintUsageTracker,
@@ -21,6 +21,7 @@ import {
   runTitlesStage,
 } from './agents/blueprint-stages.js';
 import { rememberCurrentProject } from './wiki/memory.js';
+import { buildFailedSectionsEvent } from '@zread-pi/utils';
 import type { BlueprintFailedSection, BlueprintResult, CatalogEvent } from './types.js';
 
 /**
@@ -33,11 +34,12 @@ import type { BlueprintFailedSection, BlueprintResult, CatalogEvent } from './ty
  *
  * @param onEvent - 进度回调（可选；事件带 stage / section / 分类级 progress）
  * @param options.detail - 写入哪个档位变体（缺省 = 配置档位）
+ * @param options.runLog - 轨迹日志（缺省 = 自动创建单次 run；传入时由上层控制生命周期）
  * @returns BlueprintResult with output path and metadata
  */
 export async function generateWikiCatalog(
   onEvent?: (event: CatalogEvent) => void,
-  options: { detail?: BlueprintDetailLevel } = {},
+  options: { detail?: BlueprintDetailLevel; runLog?: RunLogWriter } = {},
 ): Promise<BlueprintResult> {
   // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
   await rememberCurrentProject();
@@ -46,57 +48,76 @@ export async function generateWikiCatalog(
   const config = await loadConfig();
   const detail = options.detail ?? config.blueprint.detail;
   const usage = new BlueprintUsageTracker();
-  const context = { config, onEvent, usage, variant: detail };
 
-  // —— 阶段 1：分类（单 Agent；失败致命，直接抛出）——
-  const sections = await runClassifyStage(context);
+  return withRunLog(
+    options.runLog,
+    {
+      kind: 'generate',
+      detail,
+      model: config.llm.model ?? undefined,
+      provider: config.llm.provider ?? undefined,
+    },
+    async (runLog) => {
+      const context = { config, onEvent, usage, variant: detail, runLog };
 
-  // —— 阶段 2：分主题（按 section 并发；单 section 失败不阻断）——
-  const failedSections: BlueprintFailedSection[] = await runTopicsStage(context, sections);
+      // —— 阶段 1：分类（单 Agent；失败致命，直接抛出）——
+      const sections = await runClassifyStage(context);
 
-  // —— 阶段 3：标题（输入分主题后的页面列表；失败保留原 title）——
-  const afterTopics = await loadWikiBlueprint(undefined, detail).catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`目录生成未产出有效 wiki.json：${message}`, { cause: err });
-  });
+      // —— 阶段 2：分主题（按 section 并发；单 section 失败不阻断）——
+      const failedSections: BlueprintFailedSection[] = await runTopicsStage(context, sections);
 
-  if (afterTopics.pages.length === 0) {
-    throw new Error('目录生成未产出有效 wiki.json：所有分类都未能产出页面');
-  }
+      // —— 阶段 3：标题（输入分主题后的页面列表；失败保留原 title）——
+      const afterTopics = await loadWikiBlueprint(undefined, detail).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`目录生成未产出有效 wiki.json：${message}`, { cause: err });
+      });
 
-  failedSections.push(...(await runTitlesStage(context, sections, afterTopics.pages)));
+      if (afterTopics.pages.length === 0) {
+        throw new Error('目录生成未产出有效 wiki.json：所有分类都未能产出页面');
+      }
 
-  // Agent 正常结束 ≠ 蓝图已落盘/有效：所有阶段结束后再校验一次 wiki.json 可加载，
-  // 避免生成界面显示目录完成、而首页按文件检查判定「无目录」。
-  let blueprint;
-  try {
-    blueprint = await loadWikiBlueprint(undefined, detail);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`目录生成未产出有效 wiki.json：${message}`, { cause: err });
-  }
+      failedSections.push(...(await runTitlesStage(context, sections, afterTopics.pages)));
 
-  if (blueprint.pages.length === 0) {
-    throw new Error('目录生成未产出有效 wiki.json：所有分类都未能产出页面');
-  }
+      // 失败分类落进轨迹日志（不阻断其余分类的产物）
+      if (failedSections.length > 0) {
+        runLog.append(
+          buildFailedSectionsEvent({ sections: failedSections }),
+        );
+      }
 
-  const durationMs = Math.round(performance.now() - startTime);
-  const tokenUsage = usage.total();
+      // Agent 正常结束 ≠ 蓝图已落盘/有效：所有阶段结束后再校验一次 wiki.json 可加载，
+      // 避免生成界面显示目录完成、而首页按文件检查判定「无目录」。
+      let blueprint;
+      try {
+        blueprint = await loadWikiBlueprint(undefined, detail);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`目录生成未产出有效 wiki.json：${message}`, { cause: err });
+      }
 
-  onEvent?.({
-    type: 'complete',
-    usage: tokenUsage,
-    durationMs,
-    ...(failedSections.length > 0 ? { failedSections } : {}),
-  });
+      if (blueprint.pages.length === 0) {
+        throw new Error('目录生成未产出有效 wiki.json：所有分类都未能产出页面');
+      }
 
-  return {
-    pagesCount: blueprint.pages.length,
-    sectionsCount: sections.length,
-    ...(failedSections.length > 0 ? { failedSections } : {}),
-    durationMs,
-    tokenUsage,
-  };
+      const durationMs = Math.round(performance.now() - startTime);
+      const tokenUsage = usage.total();
+
+      onEvent?.({
+        type: 'complete',
+        usage: tokenUsage,
+        durationMs,
+        ...(failedSections.length > 0 ? { failedSections } : {}),
+      });
+
+      return {
+        pagesCount: blueprint.pages.length,
+        sectionsCount: sections.length,
+        ...(failedSections.length > 0 ? { failedSections } : {}),
+        durationMs,
+        tokenUsage,
+      };
+    },
+  );
 }
 
 // Re-export types
