@@ -523,7 +523,7 @@ export interface AgentOptions {
   /** Permission prompt tool name override */
   permissionPromptToolName?: string
   /** Retry configuration for API calls */
-  retryConfig?: import('./utils/retry.js').RetryConfig
+  retryConfig?: import('./retry.js').RetryConfig
   /** Hook configurations (AgentOptions format) */
   hooks?: Record<string, Array<{
     matcher?: string
@@ -571,5 +571,5 @@ export interface QueryEngineConfig {
   /** Session ID for hook context */
   sessionId?: string
   /** Retry configuration (optional, uses defaults if not provided) */
-  retryConfig?: import('./utils/retry.js').RetryConfig
+  retryConfig?: import('./retry.js').RetryConfig
 }
