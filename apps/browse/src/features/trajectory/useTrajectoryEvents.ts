@@ -56,6 +56,7 @@ export function useTrajectoryEvents(
   const [resolvedRunId, setResolvedRunId] = useState<string | undefined>(undefined);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [hasNewer, setHasNewer] = useState(false);
   const [runEnded, setRunEnded] = useState(false);
   const [lastSeq, setLastSeq] = useState(0);
 
@@ -74,6 +75,7 @@ export function useTrajectoryEvents(
         return sortBySeq([...previous, ...response.events.filter((event) => !known.has(event.seq))]);
       });
       setHasMoreOlder(mode === 'newer' ? previousHasMoreOlder : response.hasMore);
+      setHasNewer(response.hasNewer);
       setRunEnded(response.runEnded);
       setLastSeq(response.lastSeq);
     },
@@ -137,9 +139,29 @@ export function useTrajectoryEvents(
     };
   }, [runId, loadInitial]);
 
-  // 运行中轮询（尾随）
+  // 续页：首屏只取了开头一页，剩余事件按 afterSeq 续完（已结束的 run 也要续，
+  // 否则看不到后半段）。续页未完成前不启动实时轮询，避免重复请求。
   useEffect(() => {
-    if (resolvedRunId === undefined || status !== 'ready' || runEnded) return;
+    if (resolvedRunId === undefined || status !== 'ready' || !hasNewer) return;
+    const token = { cancelled: false };
+    void (async (): Promise<void> => {
+      try {
+        const maxSeq = eventsRef.current.reduce((max, event) => Math.max(max, event.seq), 0);
+        const response = await trajectoryApi.getEvents(resolvedRunId, { afterSeq: maxSeq, limit });
+        if (token.cancelled) return;
+        applyResponse(response, 'newer', hasMoreOlderRef.current);
+      } catch {
+        // 续页失败保留已加载部分（reload 可恢复）
+      }
+    })();
+    return () => {
+      token.cancelled = true;
+    };
+  }, [resolvedRunId, status, hasNewer, limit, applyResponse]);
+
+  // 运行中轮询（尾随；续页未完成时由上面的 effect 接管，不重复请求）
+  useEffect(() => {
+    if (resolvedRunId === undefined || status !== 'ready' || runEnded || hasNewer) return;
     const token = { cancelled: false };
 
     const poll = async (): Promise<void> => {
@@ -162,7 +184,7 @@ export function useTrajectoryEvents(
       token.cancelled = true;
       clearInterval(timer);
     };
-  }, [resolvedRunId, status, runEnded, pollIntervalMs, applyResponse]);
+  }, [resolvedRunId, status, runEnded, hasNewer, pollIntervalMs, applyResponse]);
 
   const hasMoreOlderRef = useRef(false);
   useEffect(() => {

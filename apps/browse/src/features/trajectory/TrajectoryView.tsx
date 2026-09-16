@@ -230,6 +230,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
           topHeight={virtual.topHeight}
           bottomHeight={virtual.bottomHeight}
           totalHeight={virtual.totalHeight}
+          scrollTop={virtual.scrollTop}
           selectedIndex={selectedCellResolved?.index ?? null}
           matchSet={layout.matchSet}
           collapsedTurns={collapseTurns}

@@ -2,6 +2,7 @@
  * TrajectoryToolbar —— 搜索框 / 折叠开关 / 时序模式切换 / 运行状态徽标。
  */
 
+import { memo } from 'react';
 import { Search, ChevronsDownUp, ChevronsUpDown, Clock, ListOrdered, AlignHorizontalDistributeCenter } from 'lucide-react';
 import {
   formatDurationMs,
@@ -39,7 +40,7 @@ const STATUS_LABELS: Record<TrajectoryRunSummary['status'], { text: string; clas
   unknown: { text: 'Unknown', className: 'text-[#a39e98]' },
 };
 
-export function TrajectoryToolbar({
+export const TrajectoryToolbar = memo(function TrajectoryToolbar({
   query,
   onQueryChange,
   matchCount,
@@ -147,4 +148,4 @@ export function TrajectoryToolbar({
       </div>
     </div>
   );
-}
+});

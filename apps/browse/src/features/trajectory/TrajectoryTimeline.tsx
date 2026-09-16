@@ -8,7 +8,7 @@
  * - 悬停 500ms 显示该区间的摘要提示。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   deriveTrajectoryTimeline,
   formatTimelineOffset,
@@ -42,15 +42,14 @@ interface TrajectoryTimelineProps {
   onSelectIndex: (index: number) => void;
 }
 
-export function TrajectoryTimeline({
+export const TrajectoryTimeline = memo(function TrajectoryTimeline({
   turns,
   mode,
   focusIndexes,
   onFocusChange,
   selectedIndexes,
   onSelectIndex,
-}: TrajectoryTimelineProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+}: TrajectoryTimelineProps) {  const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [selection, setSelection] = useState<TrajectoryTimeRange | null>(null);
   const [zoomOperations, setZoomOperations] = useState(0);
@@ -231,7 +230,7 @@ export function TrajectoryTimeline({
   return (
     <div
       ref={containerRef}
-      className="relative select-none border-b border-gray-200 bg-white"
+      className="relative select-none overflow-hidden border-b border-gray-200 bg-white"
       style={{ height: HEIGHT_PX }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -254,7 +253,7 @@ export function TrajectoryTimeline({
             .map((span) => {
               const left = Math.max(0, positionOf(span.start));
               const right = Math.min(width, positionOf(span.end));
-              const w = Math.max(2, right - left);
+              const w = Math.max(2, Math.min(width - left, right - left));
               const isFocused = focusIndexes === null || focusIndexes.has(span.index);
               const isSelected = selectedIndexes.has(span.index);
               return (
@@ -279,7 +278,7 @@ export function TrajectoryTimeline({
       {/* turn 边界刻度 */}
       {model.turnBoundaries.map((boundary) => {
         const left = positionOf(boundary.time);
-        if (left < 0 || left > width) return null;
+        if (left < 0 || left >= width) return null;
         return (
           <div
             key={`boundary-${boundary.turn}`}
@@ -315,11 +314,11 @@ export function TrajectoryTimeline({
       {tooltip !== null ? (
         <div
           className="absolute z-10 max-w-[220px] truncate rounded bg-[#31302e] px-2 py-1 text-[11px] text-white pointer-events-none shadow"
-          style={{ left: tooltip.left, top: tooltip.top + HEIGHT_PX - 22 }}
+          style={{ left: tooltip.left, top: Math.min(tooltip.top, HEIGHT_PX - 24) }}
         >
           {tooltip.text}
         </div>
       ) : null}
     </div>
   );
-}
+});

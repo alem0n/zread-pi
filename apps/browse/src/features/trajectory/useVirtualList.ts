@@ -53,7 +53,7 @@ export function useVirtualList(rows: VirtualRow[]): VirtualListResult {
     return () => observer.disconnect();
   }, []);
 
-  const window = useMemo(() => {
+  const viewportWindow = useMemo(() => {
     if (rows.length < VIRTUALIZATION_THRESHOLD) {
       return {
         startIndex: 0,
@@ -65,10 +65,13 @@ export function useVirtualList(rows: VirtualRow[]): VirtualListResult {
     return trajectoryViewportWindow(rows, scrollTop, viewportHeight, VIRTUAL_OVERSCAN_ROWS);
   }, [rows, scrollTop, viewportHeight]);
 
-  const totalHeight = useMemo(
-    () => (rows.length < VIRTUALIZATION_THRESHOLD ? 0 : trajectoryTotalHeight(rows)),
-    [rows],
-  );
+  const totalHeight = useMemo(() => {
+    // 未开启窗口化时也要给真实总高（否则表格会把「有行」误判为「无记录」）
+    if (rows.length < VIRTUALIZATION_THRESHOLD) {
+      return rows.reduce((total, row) => total + row.height, 0);
+    }
+    return trajectoryTotalHeight(rows);
+  }, [rows]);
 
   const atBottom = useMemo(() => {
     if (rows.length < VIRTUALIZATION_THRESHOLD) return true;
@@ -124,10 +127,10 @@ export function useVirtualList(rows: VirtualRow[]): VirtualListResult {
 
   return {
     containerRef,
-    startIndex: window.startIndex,
-    endIndex: window.endIndex,
-    topHeight: window.topHeight,
-    bottomHeight: window.bottomHeight,
+    startIndex: viewportWindow.startIndex,
+    endIndex: viewportWindow.endIndex,
+    topHeight: viewportWindow.topHeight,
+    bottomHeight: viewportWindow.bottomHeight,
     totalHeight,
     scrollTop,
     atBottom,

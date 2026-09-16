@@ -173,6 +173,7 @@ interface TrajectoryTableProps {
   topHeight: number;
   bottomHeight: number;
   totalHeight: number;
+  scrollTop: number;
   selectedIndex: number | null;
   matchSet: ReadonlySet<string> | null;
   collapsedTurns: boolean;
@@ -183,6 +184,19 @@ interface TrajectoryTableProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
+/** 滚动位置上方最近的 turn 头（用于单条 sticky 条，避免多个 sticky header 重叠） */
+function activeTurnHeader(rows: TrajectoryRow[], scrollTop: number): { row: TrajectoryRow; offset: number } | null {
+  let active: { row: TrajectoryRow; offset: number } | null = null;
+  let offset = 0;
+  for (const row of rows) {
+    // 严格在视口顶之上才需要 sticky 条（否则与仍在视口内的表头重复渲染）
+    if (row.kind === 'turn-header' && offset < scrollTop) active = { row, offset };
+    if (offset >= scrollTop) break;
+    offset += row.height;
+  }
+  return active;
+}
+
 export const TrajectoryTable = memo(function TrajectoryTable({
   rows,
   startIndex,
@@ -190,6 +204,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
   topHeight,
   bottomHeight,
   totalHeight,
+  scrollTop,
   selectedIndex,
   matchSet,
   collapsedTurns,
@@ -228,7 +243,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
           <div
             key={row.key}
             style={{ height: row.height }}
-            className="flex items-center gap-2 px-3 sticky top-0 z-[1] bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
+            className="flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
             onClick={() => onToggleTurn(turn.turn)}
             role="button"
             tabIndex={0}
@@ -325,6 +340,15 @@ export const TrajectoryTable = memo(function TrajectoryTable({
     );
   }
 
+  const sticky = activeTurnHeader(rows, scrollTop);
+  const stickyTurn = sticky?.row.kind === 'turn-header' ? sticky.row.turn : undefined;
+  // 表头已完全滚出视口顶时才显示 sticky 条（部分可见时沿用文档流里的表头）
+  const stickyVisible = sticky !== null && sticky.offset + sticky.row.height <= scrollTop;
+  const stickyMeta =
+    sticky !== null && stickyTurn !== undefined && stickyVisible
+      ? { key: sticky.row.key, height: sticky.row.height, turn: stickyTurn }
+      : null;
+
   return (
     <div
       ref={containerRef}
@@ -332,6 +356,23 @@ export const TrajectoryTable = memo(function TrajectoryTable({
       onScroll={onScroll}
     >
       <div style={{ height: topHeight }} />
+      {stickyMeta !== null ? (
+        <div
+          key={`sticky-${stickyMeta.key}`}
+          style={{ height: stickyMeta.height }}
+          className="sticky top-0 z-[1] flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
+          onClick={() => onToggleTurn(stickyMeta.turn.turn)}
+          role="button"
+          tabIndex={0}
+        >
+          <span className="text-xs font-semibold text-[#31302e] truncate">
+            {stickyMeta.turn.turn === null ? 'Between turns' : `Turn ${stickyMeta.turn.turn} · ${stickyMeta.turn.label}`}
+          </span>
+          <span className="text-[10px] text-[#a39e98]">
+            {stickyMeta.turn.groups.reduce((total, group) => total + group.cells.length, 0)} records
+          </span>
+        </div>
+      ) : null}
       {visible.map((row, offset) => renderRow(row, startIndex + offset))}
       <div style={{ height: bottomHeight }} />
     </div>

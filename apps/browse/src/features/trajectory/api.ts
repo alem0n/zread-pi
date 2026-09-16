@@ -49,7 +49,7 @@ export const trajectoryApi = {
    * 拉取事件：
    * - `afterSeq`：尾随（seq > afterSeq 的最早 limit 条）
    * - `beforeSeq`：向前分页（seq < beforeSeq 的最新 limit 条，顺序返回）
-   * - 都不传：最新 limit 条（尾部）
+   * - 都不传：从 run 开头返回（检查器自上而下，首屏必须是 turn 1）
    */
   getEvents: async (
     runId: string,

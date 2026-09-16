@@ -5,7 +5,7 @@
  * 请求导航在 requests 序列上前后跳转。
  */
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   DETAILS_MAX_WIDTH,
@@ -48,7 +48,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function TrajectoryInspector({
+export const TrajectoryInspector = memo(function TrajectoryInspector({
   cell,
   requests,
   onSelectSeq,
@@ -247,7 +247,7 @@ export function TrajectoryInspector({
       </div>
     </div>
   );
-}
+});
 
 function safeParseJson(value: string): unknown {
   try {
