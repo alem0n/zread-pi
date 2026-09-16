@@ -108,12 +108,11 @@ export interface WikiOutput {
    */
   detail?: BlueprintDetailLevel;
   /**
-   * 分类阶段落盘的一级结构清单（可选）。
+   * 分类阶段落盘的一级结构清单。
    *
-   * 三阶段流程中骨架先写 sections、pages 为空，主题/标题阶段再增量补齐；
-   * 旧版 wiki.json 没有该字段，读取方需按「无 sections = 从 pages 推导」处理。
+   * 三阶段流程中骨架先写 sections、pages 为空，主题/标题阶段再增量补齐。
    */
-  sections?: WikiSection[];
+  sections: WikiSection[];
   techStackSummary?: TechStackSummary;
 }
 

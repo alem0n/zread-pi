@@ -200,7 +200,6 @@ export {
   normalizeSectionList,
   normalizeBlueprintSections,
   mergeBlueprintSections,
-  deriveSectionsFromPages,
   sectionsFromBlueprint,
   slugStem,
   nextPageIndex,

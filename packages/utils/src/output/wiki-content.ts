@@ -213,26 +213,9 @@ export function mergeBlueprintSections(
   return result;
 }
 
-/** 从页面列表推导分类（旧版 wiki.json 没有 sections 字段时的回退） */
-export function deriveSectionsFromPages(pages: WikiPage[]): WikiSection[] {
-  const result: WikiSection[] = [];
-  const seen = new Set<string>();
-  for (const page of pages) {
-    if (!page.section) continue;
-    const key = sectionKey(page.section);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({ title: page.section });
-  }
-  return result;
-}
-
-/** 读取蓝图里的分类清单（有 sections 用 sections，否则从 pages 推导） */
+/** 读取蓝图里的分类清单（三阶段流程始终写 sections） */
 export function sectionsFromBlueprint(output: WikiOutput): WikiSection[] {
-  if (Array.isArray(output.sections) && output.sections.length > 0) {
-    return normalizeSectionList(output.sections);
-  }
-  return deriveSectionsFromPages(output.pages);
+  return normalizeSectionList(output.sections);
 }
 
 // ==================== slug / level / 关联路径归一化 ====================
@@ -642,10 +625,21 @@ export async function generateWikiJson(
   techStackSummary?: TechStackSummary,
   variant?: BlueprintDetailLevel | null,
 ): Promise<string> {
+  // 归档入口只收 pages：分类由 pages 的 section 字段聚合得到
+  const seen = new Set<string>();
+  const sections: WikiSection[] = [];
+  for (const page of pages) {
+    const key = sectionKey(page.section);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sections.push({ title: page.section });
+  }
+
   const wikiOutput: WikiOutput = {
     id: generateWikiId(),
     generated_at: new Date().toISOString(),
     language: config.doc_language,
+    sections,
     pages,
     ...(variant ? { detail: variant } : {}),
     techStackSummary,
