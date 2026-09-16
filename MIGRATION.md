@@ -1737,3 +1737,97 @@ JSONL 承担默认文件 sink 后，文本输出沦为重复内容，改为**默
 - 兼容层的 `getLogFile()` 仍返回文本文件路径（开启后才有内容）；
   依赖文本文件的测试（`test:logger` needle 段、`test:tui` 的 output-guard / smoke-tui）
   已在测试内显式设置 `ZREAD_PI_LOG_TEXT=1`。
+
+---
+
+## 26. 轨迹检查视图（Trajectory）：可回放的运行事件流
+
+移植自 deepseek-harness 的 `packages/client/ui-trajectory`（轨迹检查视图），
+但模型层输入是 zread-pi 自有的事件流，不依赖 Cordis / dsh-client-runtime。
+
+### 26.1 目标
+
+把「这次生成到底发生了什么」变成可回放、可检查的一手数据：
+
+- 每次生成 / 同步流程（一个 run）把**原始事件流**落盘，可分页读取、可在运行中尾随；
+- 浏览站提供全功能检查视图（虚拟列表 + 本地检查器 + 时序总览 + 搜索过滤）；
+- CLI 新增 `logview` 命令与 wiki 首页 `l` 快捷键，一键启动浏览站并打开轨迹页。
+
+### 26.2 落点与数据流
+
+```
+<目标仓库>/.zread-pi/runs/<runId>/events.jsonl   原始事件（seq 单调，一行一条）
+<目标仓库>/.zread-pi/runs/<runId>/run.json        元数据（状态 / agent / 页面 / 用量合计）
+
+packages/types       RunEvent 联合（16 个 kind）+ RunMeta + RUN_LEVEL_AGENT
+packages/utils/trajectory-store
+  run-dir.ts         路径口径 / runId 校验 / listRuns
+  run-log-writer.ts  RunLogWriter（顺序追加 + 原子 meta + 残留自愈 + 保留期 20）
+  run-log-reader.ts  beforeSeq 向前分页 / afterSeq 尾随
+packages/trajectory  纯 TS 模型层（无 node 依赖，可被 Vite 打包）
+  replay.ts          RunEvent[] → TrajectorySnapshot（记录 / 请求 / partial / 摘要）
+  layout.ts         snapshot → turn / group / cell
+  timeline.ts       四模式时序投影（sequence / duration / time / actual）
+  search-index.ts   增量全文索引（3 秒节流提交）
+  virtual-rows.ts   稳定 key + 视口窗口 + 有界 overscan
+apps/cli   捕获点在编排层（createAgent + generate/sync）+ logview 命令 + 浏览服务器 /api/runs*
+apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完成）
+```
+
+事件捕获点在**编排层**（`create-agent.ts` 的钩子 + `generate-wiki.ts` / `sync-wiki.ts`
+的 `withRunLog` 包裹），**不改 agent-runtime 契约**。turn 边界由
+「assistant（含 tool_use）→ 下一个 assistant」机械推导，不需要 pi 暴露 turn 概念。
+
+### 26.3 与 dsh 的四点差异（有意为之）
+
+| 差异 | dsh | zread-pi | 原因 |
+| --- | --- | --- | --- |
+| 运行时依赖 | 跑在 Cordis 上，事件由 client-runtime 产生 | 无 Cordis；事件由编排层在 pi 钩子里产生 | zread-pi 的 Agent 内核是 pi，没有 dsh 的运行时 |
+| turn 的定义 | user 消息分隔（用户会插话） | **一个 Agent = 一个 turn**（classify / topics / titles / condense / page / polish） | zread-pi 的 Agent 内部没有用户插话；agent_start / agent_end 是天然的边界 |
+| 请求编号 | 按 turn / step 局部编号 | **全会话统一编号**（助手消息 + 压缩共用一个时间序空间），累计用量跨 turn 相加 | 一个 run 就是一次完整流程，全局序列更符合「回放」语义 |
+| 会话窗口 | 跨多个会话的虚拟窗口 | **单个 run 目录**；分页即文件 seq 分页（beforeSeq / afterSeq） | 落盘即事实，读取侧不需要维护虚拟游标 |
+
+折叠逻辑（replay / layout / timeline / 搜索 / 虚拟化）与 dsh 逐条对齐：
+服务端只存 / 分发**原始事件**，所有折叠在 Web 客户端完成。
+
+### 26.4 兼容性
+
+- 新增产物目录 `.zread-pi/runs/`（已被 `.gitignore` 覆盖）；旧仓库没有该目录时
+  `/api/runs` 返回空数组、轨迹页显示「暂无运行记录」，不影响任何既有功能；
+- `generateWikiCatalog` / `generateWikiContent` / `syncWiki` 新增**可选** `runLog` 参数，
+  不传时由 `withRunLog` 自动创建单次 run（目录 + 页面阶段共享同一个 run，
+  由 CLI 控制器统一创建）；
+- `RunLogWriter.end()` 的终态写入与事件追加共用串行队列（修复了「终态被更早的
+  挂起写覆盖」的竞态）；run_end 事件在关闭标记之前追加（不再丢失）；
+- 残留自愈：新建 run 时把仍为 `running` 的旧 run 标记为 `interrupted`
+  （单个目标目录同时只有一个 CLI 进程在跑）；
+- 保留期：每目标仓库默认保留最近 20 次 run（`ZREAD_PI_RUNS_RETENTION` 覆盖，`<= 0` 不清理）。
+
+### 26.5 验证（实际执行结果）
+
+- `bun run test:trajectory`：74/74 通过（replay / layout / timeline 四模式 /
+  搜索 / 虚拟窗口 / 格式化）；
+- `bun run test:browse`：70/70 通过（新增 `/api/runs` 列表 / 详情 / 事件分页 /
+  beforeSeq / afterSeq / 404 断言）；
+- `bun run render-all-routes.ts`：25 个路由全部渲染正常（含 `/logview` 与
+  `/logview/:runId`）；
+- `bun run mock:wiki`：`completed=5 failed=0`，产出**单个 run**（目录 + 页面共享），
+  `run.json` 状态为 `completed`，`events.jsonl` 含 80 条事件、16 个 kind 覆盖
+  run_start / agent_start / message_start / message_end / tool_start / tool_end /
+  stage / section / page_start / page_end / agent_end / run_end；
+- `cd apps/browse && bun run build`：通过（trajectory 纯模型层被 Vite 打包，无 node 依赖）；
+- `bun run typecheck` + `bun run test`：全绿（14 个套件）。
+
+### 26.6 风险与未决
+
+- **尚未用真实 API Key 跑过轨迹视图**：全部验证基于 mock LLM 的事件流。
+  首次真机验证重点看长上下文下的 compact / retry 事件与消息块的完整性；
+- **图片内容块不入 events**：`message_end` 只存文本 / thinking / tool_use 三种块，
+  Read 工具回传的图片在轨迹里以工具输出的文本说明呈现（与 dsh 一致）；
+- **轮询对 UI 不可见的失败**：单次轮询失败不改变页面状态（下一轮自动重试），
+  与 CLI 侧的 retry 事件只在 Agent 层重试时发出是同一套取舍；
+- **轨迹页是全宽独立路由**：不在 MainLayout 里（不渲染 wiki 侧边栏 / 聊天挂件），
+  通过侧边栏底部的「轨迹检查」入口或 `/trajectory` 直达；
+- `polish.mode=full` 的 polish Agent 用量记在 `PageResult.polish.tokenUsage`，
+  与生成页底部合计同口径（不进轨迹的 run 级用量合计，但事件流里有 polish Agent 的
+  完整记录）。
