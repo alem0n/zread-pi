@@ -324,6 +324,135 @@ check('previewOfBlocks 只取 text/thinking', previewOfBlocks([{ type: 'text', t
 check('previewOfBlocks 折叠空白', previewOfBlocks([{ type: 'text', text: 'a\n  b' }]) === 'a b');
 
 // ---------------------------------------------------------------------------
+// 9) 并发归属（session id）：交错的事件流不互相吞、agent_end 不影响其他 Agent
+// ---------------------------------------------------------------------------
+
+console.log('▶ 并发归属（session id）');
+
+// 两个带不同 sessionId 的 Agent，事件在日志里交错
+const SESSION_A = 'zread-pi-aaaa-1111';
+const SESSION_B = 'zread-pi-bbbb-2222';
+const AGENT_A: RunEvent['agent'] = { key: 'page:alpha', role: 'page', pageSlug: 'alpha', sessionId: SESSION_A };
+const AGENT_B: RunEvent['agent'] = { key: 'page:beta', role: 'page', pageSlug: 'beta', sessionId: SESSION_B };
+
+function agentStart(agent: RunEvent['agent']): RunEvent {
+  return event({
+    kind: 'agent_start',
+    agent,
+    prompt: 'work',
+    systemPrompt: 's',
+    toolCatalog: [{ name: 'read', inputSchema: { type: 'object' } }],
+  });
+}
+function msgEnd(agent: RunEvent['agent'], callId: string, text: string): RunEvent {
+  return event({
+    kind: 'message_end',
+    agent,
+    blocks: [
+      { type: 'text', text },
+      { type: 'tool_use', callId, name: 'read', input: { path: 'x' } },
+    ],
+    usage: USAGE,
+    stopReason: 'stop',
+  });
+}
+
+const concurrentEvents: RunEvent[] = [
+  event({ kind: 'run_start', agent: RUN_LEVEL_AGENT, runKind: 'generate', targetDir: '/repo' }),
+  // A 启动并发出一条消息（含工具调用）
+  agentStart(AGENT_A),
+  event({ kind: 'message_start', agent: AGENT_A, preview: 'A…' }),
+  msgEnd(AGENT_A, 'call-A', 'alpha text'),
+  // B 启动（A 尚未结束）—— 旧实现里 current 指针会切到 B
+  agentStart(AGENT_B),
+  event({ kind: 'message_start', agent: AGENT_B, preview: 'B…' }),
+  msgEnd(AGENT_B, 'call-B', 'beta text'),
+  // A 的工具与结束
+  event({ kind: 'tool_start', agent: AGENT_A, callId: 'call-A', name: 'read', input: { path: 'x' } }),
+  event({ kind: 'tool_end', agent: AGENT_A, callId: 'call-A', name: 'read', output: 'A file' }),
+  event({ kind: 'agent_end', agent: AGENT_A, subtype: 'success', durationMs: 100, usage: USAGE }),
+  // B 在 A 结束后继续 —— 旧实现里 current 已被 agent_end 清空，这些事件会丢失
+  event({ kind: 'message_start', agent: AGENT_B, preview: 'B2…' }),
+  msgEnd(AGENT_B, 'call-B2', 'beta second'),
+  event({ kind: 'tool_start', agent: AGENT_B, callId: 'call-B2', name: 'read', input: { path: 'y' } }),
+  event({ kind: 'tool_end', agent: AGENT_B, callId: 'call-B2', name: 'read', output: 'B file' }),
+  event({ kind: 'agent_end', agent: AGENT_B, subtype: 'success', durationMs: 200, usage: USAGE }),
+  event({ kind: 'run_end', agent: RUN_LEVEL_AGENT, status: 'completed', durationMs: 1000 }),
+];
+
+const concurrentSnapshot = replayRunEvents(concurrentEvents);
+const concurrentLayout = deriveTrajectoryLayout(concurrentSnapshot);
+
+// 每个 turn 带唯一 sessionId
+checkEqual('并发 run 的 turn 数 = 2', concurrentSnapshot.turns.length, 2);
+check('两个 turn 的 sessionId 互不相同', concurrentSnapshot.turns[0]!.sessionId !== concurrentSnapshot.turns[1]!.sessionId);
+checkEqual('turn 1 = page:alpha', concurrentSnapshot.turns[0]?.key, 'page:alpha');
+checkEqual('turn 2 = page:beta', concurrentSnapshot.turns[1]?.key, 'page:beta');
+
+// 归属正确性：每条记录归到事件自己的 Agent
+const seqToKey = new Map<number, string>();
+for (const e of concurrentEvents) if (e.agent && e.agent.role !== 'run') seqToKey.set(e.seq, e.agent.key);
+let concurrentMisattributed = 0;
+for (const record of concurrentSnapshot.records) {
+  const expected = seqToKey.get(record.seq);
+  if (expected !== undefined && record.turnKey !== expected) concurrentMisattributed += 1;
+}
+checkEqual('并发交错事件的归属全部正确', concurrentMisattributed, 0);
+
+// 不丢记录：B 在 A 结束后的第二条消息必须保留
+const betaMessages = concurrentSnapshot.records.filter(
+  (record) => record.kind === 'message' && record.turnKey === 'page:beta',
+);
+checkEqual('page:beta 的消息数 = 2（未被 agent_end(A) 清空）', betaMessages.length, 2);
+const betaTexts = betaMessages.map((record) => (record as { blocks?: Array<{ text?: string }> }).blocks?.[0]?.text ?? '');
+check('B 的第二条消息内容保留', betaTexts.includes('beta second'));
+
+// 工具归到各自的父消息分组（call-B 只出现在消息块里、没有独立 tool_start/end，
+// 因此 beta 只有 call-B2 一条工具记录）
+const alphaTools = concurrentSnapshot.records.filter((record) => record.kind === 'tool' && record.turnKey === 'page:alpha');
+const betaTools = concurrentSnapshot.records.filter((record) => record.kind === 'tool' && record.turnKey === 'page:beta');
+checkEqual('page:alpha 的工具 = 1', alphaTools.length, 1);
+checkEqual('page:beta 的工具 = 1（A 结束后 B 的工具仍在）', betaTools.length, 1);
+
+// 请求编号的 turn 标签与事件归属一致
+const badConcurrentRequests = concurrentSnapshot.requests.filter((request) => {
+  if (request.seq === undefined) return false;
+  const expected = seqToKey.get(request.seq);
+  const turnInfo = concurrentSnapshot.turns.find((turn) => turn.number === request.turn);
+  return turnInfo !== undefined && turnInfo.key !== expected;
+});
+checkEqual('并发 run 的请求归属全部正确', badConcurrentRequests.length, 0);
+
+// ---------------------------------------------------------------------------
+// 10) 旧日志兼容：无 sessionId 时回退 key（顺序执行语义不变）
+// ---------------------------------------------------------------------------
+
+console.log('▶ 旧日志兼容（无 sessionId）');
+
+const legacySnapshot = replayRunEvents(events); // events 是第 1 节构造的、无 sessionId
+check('旧日志的 turn 无 sessionId（回退 key 归属）', legacySnapshot.turns.every((turn) => turn.sessionId === turn.key));
+checkEqual('旧日志仍能折叠出 3 个 turn', legacySnapshot.turns.length, 3);
+
+// ---------------------------------------------------------------------------
+// 11) session 隐藏：过滤 turn 后时间线重新投影
+// ---------------------------------------------------------------------------
+
+console.log('▶ session 隐藏');
+
+const hidden = new Set([concurrentSnapshot.turns[0]!.sessionId]);
+const visibleTurns = concurrentLayout.filter((turn) => !hidden.has(turn.sessionId ?? ''));
+check('page:alpha 已被隐藏', !visibleTurns.some((turn) => turn.label.includes('alpha')));
+check('page:beta 仍可见', visibleTurns.some((turn) => turn.label.includes('beta')));
+// turn=null 的独立段（run 收尾）无 sessionId，不受隐藏影响
+checkEqual('隐藏后剩余 = page:beta + 独立段', visibleTurns.length, 2);
+// 时间线用 visibleTurns 重新派生：span 数应只反映可见记录
+const timelineBefore = deriveTrajectoryTimeline(concurrentLayout, 'sequence');
+const timelineAfter = deriveTrajectoryTimeline(visibleTurns, 'sequence');
+check('隐藏前时间线非空', timelineBefore !== null);
+check('隐藏后时间线非空', timelineAfter !== null);
+checkEqual('隐藏后时间线 span 数减少', (timelineAfter?.spans.length ?? 1) < (timelineBefore?.spans.length ?? 0), true);
+
+// ---------------------------------------------------------------------------
 // 结果
 // ---------------------------------------------------------------------------
 
