@@ -1,2 +1,5 @@
 __pycache__/
 .zread-pi/
+# 版本守卫的备份目录（与 .zread-pi 同级，不会被上面的规则覆盖）
+.zread-pi_bak/
+.zread-pi_bak-*/

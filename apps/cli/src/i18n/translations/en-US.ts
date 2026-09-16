@@ -23,6 +23,13 @@ export const enUS: TranslationKeys = {
     empty: 'No history yet',
     failed: 'Failed to read history: {error}',
   },
+  versionGuard: {
+    incompatible: 'Incompatible version data detected ({scope}): the directory was created by {stored}, current version is {current}. Backed up to:',
+    backupHint: 'Your old data is fully preserved in the backup directory. Please handle it ASAP (migrate any files you need, then delete the backup to free disk space).',
+    created: 'Initialized {scope} (version {current}).',
+    scopeHome: 'project home',
+    scopeRepo: 'repo data directory',
+  },
   layout: {
     model: 'Model',
     intro: 'Transform your local codebase into readable Wiki docs.',

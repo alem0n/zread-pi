@@ -18,6 +18,7 @@ import { routes } from "./routes";
 import { ensureProjectRecorded, getWikiJsonPath, listWikiVariants, readJsonFile } from "@zread-pi/utils";
 import type { WikiOutput } from "@zread-pi/types";
 import { countGeneratedPages } from "./utils/generated-docs";
+import { runVersionGuard } from "./commands/version-guard";
 
 export interface AppOptions {
   initialEntries: string[];
@@ -55,6 +56,10 @@ async function adoptExistingProject(): Promise<void> {
 }
 
 export async function runApp({ initialEntries }: AppOptions): Promise<void> {
+  // 版本守卫必须在 TUI 接管终端前完成：不兼容时备份旧数据并给出提示，
+  // 且必须在读取任何数据目录（含下面的老旧项目登记）之前执行。
+  await runVersionGuard({ repo: true });
+
   // 老旧项目自动登记必须在 TUI 接管终端前完成（失败不阻塞）
   await adoptExistingProject();
 

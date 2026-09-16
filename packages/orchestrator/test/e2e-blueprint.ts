@@ -667,11 +667,23 @@ const {
 } = await import("@zread-pi/utils");
 const { replayRunEvents } = await import("../../trajectory/src/index.js");
 // 不传 runLog：withRunLog 自动建 run（与真实 CLI 路径一致）
-await generateWikiCatalog();
+// 失败时把根因带进断言 detail：withRunLog 只把异常记成 run failed，
+// 断言本身看不到根因，间歇失败会无法定位
+let scenario8Error = "(none)";
+try {
+	await generateWikiCatalog();
+} catch (err) {
+	scenario8Error = err instanceof Error ? err.message : String(err);
+	console.error(`  ! generateWikiCatalog() 抛出：${scenario8Error}`);
+}
 const runs = await listRuns(repo);
 check("runs 目录非空（自动创建 run）", runs.length > 0, `runs=${runs.length}`);
 const latest = runs[0];
-check("run 状态 = completed", latest?.status === "completed", latest?.status ?? "(none)");
+check(
+	"run 状态 = completed",
+	latest?.status === "completed",
+	`${latest?.status ?? "(none)"}${scenario8Error !== "(none)" ? ` error=${scenario8Error}` : ""}`,
+);
 const runMeta = await readRunMeta(latest!.id, repo);
 check("run.json 记录 kind=generate", runMeta?.kind === "generate");
 check("run.json 记录 detail=high", runMeta?.detail === "high");

@@ -1984,3 +1984,70 @@ sessionId 并把它与 Agent 身份（key / role / pageSlug）一起绑定进每
   的 sessionId（max_concurrent=4 的真实交错流）、并**直接用真实捕获的事件流跑
   replay 断言归属零错误** —— 这条断言把捕获层与模型层串起来，同类回归无法再被
   「顺序测试」掩盖。
+
+---
+
+## 27. 版本守卫：按主版本隔离数据目录（v1.13.0）
+
+### 背景
+
+跨大版本升级时，数据目录的结构可能不兼容（字段、布局、事件格式都会演化）。
+与其让新版本强行读写旧数据导致损坏，或者写一堆「识别旧格式并迁移」的分支代码，
+不如直接按主版本隔离：不兼容就把旧目录整体备份，让两个版本的数据互不影响。
+
+### 设计
+
+两处数据目录各自维护一个 `version` 标记文件：
+
+| 位置 | 内容 |
+| --- | --- |
+| `~/.zread-pi/version` | 项目家目录（config / auth / history / logs / 托管二进制 …） |
+| `<repo>/.zread-pi/version` | 目标仓库输出目录（wiki 产物 / runs 轨迹 / cache …） |
+
+- 纯逻辑：`packages/utils/src/version-guard.ts`（`ensureVersionGuard(dir, currentVersion)`）
+- CLI 包装：`apps/cli/src/commands/version-guard.ts`（`runVersionGuard`）
+- 调用点：`runApp()`（wiki / config / browse / logview，**在 TUI 接管终端之前**，
+  且在 `adoptExistingProject()` 之前）与 `index.ts` 的 `history` 命令（只守卫家目录）
+
+兼容口径 = **主版本号相同**（语义化版本约定）；无法解析的版本号一律视为不兼容（保守：
+宁可备份，不可误读旧格式）。判定与处理矩阵：
+
+| 情形 | 结果 |
+| --- | --- |
+| 目录不存在 | `created`：创建 + 写版本，**无提示**（首次安装不打扰用户） |
+| 版本标记存在且主版本相同 | `compatible`：无操作（幂等，不重写标记） |
+| 目录存在但无标记 | `incompatible`：备份 → 重建 → 写版本 |
+| 主版本不同 | `incompatible`：备份 → 重建 → 写版本 |
+
+备份命名 `<dir>_bak`，已占用依次 `<dir>_bak-2` / `-3`。旧数据**完整保留**在备份目录，
+提示信息（stderr，接管终端前输出，用户一定看得到）含备份路径与「尽快处理」建议。
+
+### 与 pi / 旧实现的差异
+
+- 旧 `agent-sdk` 没有版本隔离概念，跨版本升级直接读写旧结构；本仓库此前也没有。
+- 不做「旧格式 → 新格式」的迁移代码：隔离即迁移策略（初期快速迭代的明确取舍）。
+- 不使用跨进程文件锁：备份是目录整体重命名，锁文件只能放目录内而重命名会把它
+  一起搬走；改为执行前重检 + 原子写版本标记 + 失败不崩溃（`runVersionGuard` 内
+  try/catch，单处失败不阻断启动）。
+- 提示语言用新增的 `loadConfigLanguageSync()`（只读原始 `language` 字段，不做完整校验）：
+  `loadConfigSync` 要求 language / doc_language / concurrency 齐全，缺字段就整体回退
+  `DEFAULT_CONFIG`（language = 'en'），对旧 / 残缺配置会给出错误语言的提示。
+
+### 破坏性（升级注意）
+
+**首次运行新主版本 = 现有 `~/.zread-pi` 与 `<repo>/.zread-pi` 被移到 `_bak`，
+配置需要重做。** 这是 v1.13.0 的明确行为（见 `.github/release-notes/v1.13.0.md`）。
+`_bak` / `_bak-N` 与 `.zread-pi` 同级，**不会被用户仓库的 `.gitignore` 覆盖**
+（`.gitignore` 只忽略 `.zread-pi/`）；本仓库自己的 `.gitignore` 已补 `.zread-pi_bak/` 规则。
+
+### 测试
+
+- `packages/utils/test/version-guard.ts`（39 项）：解析与兼容判定、标记读写、
+  备份路径命名、`ensureVersionGuard` 四条路径（含「旧数据完整保留在备份里」断言）。
+- `apps/cli/test/version-guard-cli.ts`（17 项）：stderr 提示含备份路径、兼容时无输出、
+  首次安装静默、`ZREAD_PI_VERSION_GUARD=0` 跳过、`repo:false` 不碰仓库目录、
+  提示语言随旧配置。
+- spawn 型 CLI 测试（`cli-target-dir` / `history-adopt` / `history-command` /
+  `real-run-check`）统一设 `ZREAD_PI_VERSION_GUARD=0`：它们的临时家目录没有版本标记，
+  否则会被当成不兼容数据备份掉，断言随之失效。
+

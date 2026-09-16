@@ -13,7 +13,7 @@
  * 运行：bun run test:trajectory（含在 bun run test 中）
  */
 
-import { mkdtemp, mkdir, appendFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, appendFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -50,9 +50,12 @@ function checkEqual<T>(name: string, actual: T, expected: T): void {
   check(name, actual === expected, `期望 ${JSON.stringify(expected)}，实际 ${JSON.stringify(actual)}`);
 }
 
-/** 唯一的临时项目根（跨平台：os.tmpdir + mkdtemp） */
+/** 临时项目根（跨平台：os.tmpdir + mkdtemp）；结束时统一清理 */
+const tempProjects: string[] = [];
 async function tempProject(): Promise<string> {
-  return mkdtemp(join(tmpdir(), 'zread-pi-runs-'));
+  const root = await mkdtemp(join(tmpdir(), 'zread-pi-runs-'));
+  tempProjects.push(root);
+  return root;
 }
 
 const AGENT_WITH_SESSION: RunEventAgentMeta = {
@@ -250,6 +253,8 @@ await withRunLog(shared, { kind: 'generate', targetDir: repo6 }, async (runLog) 
   return undefined;
 });
 checkEqual('传入 runLog 时不新建 run', (await listRuns(repo6)).length, 2);
+// runs[0] 必须是后创建的 shared run（同秒内创建时不能靠 runId 字符串序）
+checkEqual('listRuns 按最新在前', (await listRuns(repo6))[0]?.id, shared.runId);
 
 // 业务函数抛错时 run 记 failed
 const repo7 = await tempProject();
@@ -273,7 +278,9 @@ check('generateRunId 可用', isValidRunId(generateRunId()));
 checkEqual('非法 runId 被拒', isValidRunId('not-a-run-id'), false);
 checkEqual('resolveRunId(latest) 拿到最新', await resolveRunId('latest', repo6), (await latestRun(repo6))?.id);
 checkEqual('空仓库 resolveRunId 返回 undefined', await resolveRunId(undefined, await tempProject()), undefined);
-checkEqual('listRuns 按最新在前', (await listRuns(repo6))[0]?.id > (await listRuns(repo6))[1]?.id, true);
+// 同秒内创建的 run 不能靠 runId 字符串序（随机后缀不可靠）；
+// runs[0] 必须是 startedAt 最新的那个 = 后创建的 shared run
+checkEqual('listRuns 按最新在前', (await listRuns(repo6))[0]?.id, shared.runId);
 
 // 非法 runId 创建被拒
 await RunLogWriter.create(await tempProject(), { kind: 'generate', runId: 'bad-id' })
@@ -283,6 +290,9 @@ await RunLogWriter.create(await tempProject(), { kind: 'generate', runId: 'bad-i
 // ---------------------------------------------------------------------------
 // 结果
 // ---------------------------------------------------------------------------
+
+// 清理临时目录（Windows 下服务器/文件句柄可能还没释放，尽力而为）
+await Promise.all(tempProjects.map((root) => rm(root, { recursive: true, force: true }).catch(() => undefined)));
 
 console.log(`\n结果：${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

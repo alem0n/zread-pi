@@ -274,6 +274,7 @@ API Key 与模型列表都在其详情页里维护）；也能为任意 Provider
 ```
 your-project/
 └── .zread-pi/
+    ├── version                        # 创建该目录的 zread-pi 版本（版本守卫用）
     ├── wiki/
     │   ├── minimal/                    # 每个档位一套独立完整产物（互不覆盖）
     │   ├── low/
@@ -282,8 +283,7 @@ your-project/
     │   │   ├── wiki.json               # 蓝图：页面、分区、技术栈摘要、档位
     │   │   ├── {section}/{page}.md      # 生成的 Markdown 页面（当前版本）
     │   │   └── archived/<快照名>/        # 同步时归档的旧页面快照
-    │   ├── max/
-    │   └── wiki.json                   # 旧版遗留目录（只读兼容，浏览站显示为「默认」）
+    │   └── max/
     ├── runs/                            # 运行轨迹（每次生成 / 同步一个目录）
     │   └── 2026-09-15T23-46-21-ffd1/
     │       ├── events.jsonl             # 原始事件流（seq 单调，一行一条）
@@ -294,6 +294,11 @@ your-project/
 ```
 
 每页都是内嵌 Mermaid 图表的纯 Markdown —— GitHub、GitLab、Docusaurus、Notion、你自己的静态站点都能直接渲染。
+
+> **版本隔离**：`.zread-pi/version` 与家目录的 `~/.zread-pi/version` 记录创建它的版本。
+> 升级到**不同主版本**后首次运行，旧目录会被原样改名为 `.zread-pi_bak`（完整保留），
+> 然后重建新目录 —— 需要的文件请从备份里拷回。环境变量 `ZREAD_PI_VERSION_GUARD=0` 可跳过该检查。
+> 本项目仍在初期快速迭代，不保证跨版本兼容，升级前请自行备份 `~/.zread-pi`。
 
 ### 轨迹检查视图（Trajectory）
 

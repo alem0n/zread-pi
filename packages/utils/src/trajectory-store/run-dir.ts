@@ -58,7 +58,7 @@ export function isValidRunId(value: unknown): value is string {
 }
 
 /**
- * 列出所有运行（按 id 降序 = 最新在前）。
+ * 列出所有运行（按 startedAt 降序 = 最新在前）。
  *
  * run.json 缺失 / 损坏时合成一条 `interrupted` 摘要（残留自愈的读取侧兜底）。
  */
@@ -98,7 +98,13 @@ export async function listRuns(projectRoot: string = process.cwd()): Promise<Run
     );
   }
 
-  return summaries.sort((left, right) => right.id.localeCompare(left.id));
+  // 按真实开始时间排序：startedAt 是毫秒精度 ISO，比秒级 runId 准
+  // （同秒内创建的 run，runId 的随机后缀不保证顺序 = 创建顺序）。
+  // 同 startedAt 时以 id 降序兜底。无 meta 的合成条目用 runId 本身作 startedAt。
+  return summaries.sort((left, right) => {
+    const byStarted = (right.startedAt ?? '').localeCompare(left.startedAt ?? '');
+    return byStarted !== 0 ? byStarted : right.id.localeCompare(left.id);
+  });
 }
 
 /** 最新一次运行（任意状态） */

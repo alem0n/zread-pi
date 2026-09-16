@@ -20,6 +20,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getHistoryPath, readHistory, rememberProject } from '@zread-pi/utils';
 
+// 临时家目录没有 version 标记（会被版本守卫当成不兼容数据备份掉）；
+// 版本守卫有专门单测，这里跳过，保持与真实版本号无关
+process.env.ZREAD_PI_VERSION_GUARD = '0';
+
 // ---------------------------------------------------------------------------
 // 0) 断言工具
 // ---------------------------------------------------------------------------
