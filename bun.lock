@@ -123,6 +123,10 @@
         "typescript": "^5.0.0",
       },
     },
+    "packages/trajectory": {
+      "name": "@zread-pi/trajectory",
+      "version": "0.0.0",
+    },
     "packages/types": {
       "name": "@zread-pi/types",
       "version": "0.1.0",
@@ -672,6 +676,8 @@
     "@zread-pi/orchestrator": ["@zread-pi/orchestrator@workspace:packages/orchestrator"],
 
     "@zread-pi/repo-analyzer": ["@zread-pi/repo-analyzer@workspace:packages/repo-analyzer"],
+
+    "@zread-pi/trajectory": ["@zread-pi/trajectory@workspace:packages/trajectory"],
 
     "@zread-pi/types": ["@zread-pi/types@workspace:packages/types"],
 
