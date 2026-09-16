@@ -1775,8 +1775,10 @@ apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完�
 ```
 
 事件捕获点在**编排层**（`create-agent.ts` 的钩子 + `generate-wiki.ts` / `sync-wiki.ts`
-的 `withRunLog` 包裹），**不改 agent-runtime 契约**。turn 边界由
-「assistant（含 tool_use）→ 下一个 assistant」机械推导，不需要 pi 暴露 turn 概念。
+的 `withRunLog` 包裹），**不改 agent-runtime 契约**。turn 边界由 **一个 Agent = 一个 turn**
+（`agent_start` 递增 turn 计数），归属键为 **`agent.sessionId ?? agent.key`**：
+replay 维护 `Map<会话, TurnState>` 而不是单一指针，因此并发 Agent 的事件不会互相吞、
+`agent_end` 只清理自己的会话（详见 §26.9）。
 
 ### 26.3 与 dsh 的四点差异（有意为之）
 
@@ -1802,11 +1804,20 @@ apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完�
 - 残留自愈：新建 run 时把仍为 `running` 的旧 run 标记为 `interrupted`
   （单个目标目录同时只有一个 CLI 进程在跑）；
 - 保留期：每目标仓库默认保留最近 20 次 run（`ZREAD_PI_RUNS_RETENTION` 覆盖，`<= 0` 不清理）。
+  清理按 `run.json` 的 `startedAt`（毫秒 ISO）排序而非 runId 字典序——runId 是秒级
+  精度 + 随机后缀，同秒创建的 run 字典序不等于创建序；且在**本 run 的 run.json 已写入之后**
+  执行，用含本 run 的完整集合判定超限、只在删除时排除自己（详见 §26.9）；
+- **会话隔离（session id）**：每个 Agent 一次运行分配唯一 `sessionId`（编排层
+  `agents/run-log-sink.ts` 的 `createRunLogSink()` 统一生成并绑定 Agent 身份，
+  透传到 pi 的 `AgentOptions`）。事件携带该字段后，轨迹视图可**按会话隐藏**任意 Agent
+  （表头 Eye 按钮 / 工具栏「已隐藏 N 个会话」徽标），隐藏后时间线与表格同步重投影。
+  旧日志（无 `sessionId`）回退 `agent.key` 归属，读取兼容。
 
 ### 26.5 验证（实际执行结果）
 
-- `bun run test:trajectory`：74/74 通过（replay / layout / timeline 四模式 /
-  搜索 / 虚拟窗口 / 格式化）；
+- `bun run test:trajectory`：**92/92**（模型层）+ **46/46**（store 层）通过——
+  模型层新增并发归属 / session 隐藏 / 旧日志兼容断言；store 层覆盖往返 / 分页 /
+  损坏行 / 保留期 / 自愈 / 写入串行 / withRunLog；
 - `bun run test:browse`：77/77 通过（新增 `/api/runs` 列表 / 详情 / 事件分页 /
   beforeSeq / afterSeq / 404 / **缺省窗口=从头 + afterSeq 续页** 断言）；
 - `bun run render-all-routes.ts`：25 个路由全部渲染正常（含 `/logview` 与
@@ -1815,6 +1826,8 @@ apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完�
   `run.json` 状态为 `completed`，`events.jsonl` 含 80 条事件、16 个 kind 覆盖
   run_start / agent_start / message_start / message_end / tool_start / tool_end /
   stage / section / page_start / page_end / agent_end / run_end；
+- `bun run test:blueprint`：52/52（e2e-blueprint 新增场景 8 捕获点端到端）+
+  115/115 + 23/23 + 11/11 + 17/17；
 - `cd apps/browse && bun run build`：通过（trajectory 纯模型层被 Vite 打包，无 node 依赖）；
 - `bun run typecheck` + `bun run test`：全绿（14 个套件）。
 
@@ -1891,3 +1904,83 @@ CLI 早已支持中英双语（`language` 配置 + `apps/cli/src/i18n` 字典）
 `bun run test:browse` 新增 4 项断言（`/api/i18n` 状态码、`zh→zh-CN`、改配置
 `en→en-US` 即时生效、恢复 `zh` 后回到 `zh-CN`；静态模式与 Vite 代理模式都覆盖）；
 字典核心（key 查找 / 插值 / 未知 key 空字符串）用 `createTranslate` 直接验证。
+
+### 26.9 会话隔离与三处潜伏缺陷的修复（v1.12.0）
+
+轨迹功能上线后深度复检发现三个在「严格顺序」测试下不可见的缺陷，本次一并修复。
+
+#### 缺陷 1：replay 的并发归属（严重）
+
+**现象**：`concurrency.max_concurrent > 1`（默认 1；`mock:wiki` 用 3）时，
+真实 run 日志里 **14/41 条记录被折错 turn、5 条 `message_end` 事件完全丢失**、
+8/13 个请求的 turn 标签与事件自带的 `agent` 不一致。
+
+**根因**：`replay.ts` 用**单一 `current` 指针 + 单一 `inFlight` 消息**推导归属，
+完全忽略每条事件自带的 `event.agent`；任何 `agent_end` 都把指针清空，
+导致仍在运行的 Agent 的后续消息无家可归。顺序执行时指针恰好够用，
+所以原有 74 项断言全部通过、缺陷被掩盖。
+
+**修复**：归属键改为 `agent.sessionId ?? agent.key`（见缺陷 2 的字段来源），
+`activeTurns` / `inFlightBySession` / `keyToIdentity` 三个 Map 替代单指针：
+`message_*` / `tool_*` / `compact` / `status` 按会话查 turn；`agent_end`
+**只清理自己的会话**；run 级事件（`run_end` / `failed_sections`）归 `turn=null`；
+`page_end` 的失败按 `pageSlug` 精确匹配活跃的 page Agent。修复后用同一条真实日志
+复验：归属错误 14 → 0、丢失记录 5 → 0、9 个 turn 的 sessionId 全部唯一。
+
+#### 缺陷 2：pi 适配层的 sessionId 会撞车（中等）
+
+`packages/agent-runtime/src/agent.ts` 的 `query()` 硬编码
+`sessionId: 'zread-pi-${Date.now()}'`（毫秒级），并发 Agent 会拿到**同一个**
+会话 id，且 `AgentOptions.sessionId` 被忽略。这会让缺陷 1 的修复在毫秒粒度
+退化为按 key 归属（仍正确，但失去了「会话隔离」语义）。
+
+**修复**：`query()` 改用 `options.sessionId ?? 'zread-pi-' + Date.now() + '-' + 随机后缀`；
+编排层新增 `packages/orchestrator/src/agents/run-log-sink.ts`：
+`generateSessionId()`（时间戳 + 随机后缀）+ `createRunLogSink()` 统一生成
+sessionId 并把它与 Agent 身份（key / role / pageSlug）一起绑定进每个事件。
+`RunLogSink` 接口新增 `readonly sessionId`；`createAgent` 透传到 pi；
+`blueprint-stages.ts` 与 `generate-wiki.ts`（page / polish 两处）全部改用
+`createRunLogSink`。
+
+#### 缺陷 3：保留期清理删错 run（低，但导致测试 flaky）
+
+三处小问题叠加：
+
+1. `enforceRetention` 按 **runId 字典序**判定「最旧」，但 runId 是秒级精度 +
+   随机后缀，**同秒创建的 run 字典序不等于创建序**；
+2. 清理在 `writeMeta()` **之前**执行，本 run 的 `startedAt` 还是 `listRuns`
+   合成的秒级值（且格式与真实 ISO 不一致：空格分隔 vs `T` 分隔），
+   排序后本 run 被判为「最旧」删掉，随后 `writeMeta` 又重建 → 清理形同虚设；
+3. 早期版本里「跳过自己」放在排序**之前**过滤，导致创建第 N+1 个 run 时
+   过滤后恰好不超限，清理永不触发。
+
+**修复**：`create()` 改为先 `writeMeta()` 再清理（本 run 有真实毫秒 `startedAt`）；
+排序键改 `startedAt`（同值时 id 降序兜底）；用**含本 run 的完整集合**
+`slice(retention)` 判定超限，只在最后 `filter(run => run.id !== currentRunId)`
+排除自己（同毫秒的防御性降级）；`listRuns` 对无 meta 目录合成的 `startedAt`
+改用 runId 本身（与 ISO 同为 `T` 分隔、字典序可比）。
+
+#### 用户侧能力：按会话隐藏
+
+事件有了 `sessionId` 后，轨迹视图新增**按需隐藏会话**：
+
+- `TrajectoryView` 维护 `hiddenSessionIds: Set<string>`，派生 `visibleTurns`
+  **同时驱动表格与时间线**（隐藏后时间线自动重新投影，span 数随之变化）；
+- 表格每个 turn 头（含 sticky 条）带 Eye 按钮；工具栏在隐藏数 > 0 时显示
+  「已隐藏 N 个会话」徽标（EyeOff 图标）与「显示全部」；
+- i18n 三键（中英 + `types.ts`）；`TrajectoryTurnInfo.sessionId`（必填）/
+  `TrajectoryTurnModel.sessionId?`（layout 回填）。
+
+#### 测试补强（此前缺陷的共同成因：只测了顺序流）
+
+- `test:trajectory` 模型层 74 → **92**：并发交错事件流归属 / `agent_end`
+  不影响其他 Agent / 旧日志无 sessionId 回退 / turn 的 sessionId 唯一性 /
+  session 隐藏后时间线重投影；
+- 新增 store 层 **46** 项（PLAN §四 承诺但此前缺失）：往返 / beforeSeq·afterSeq
+  分页 / 损坏行跳过 / 保留期（删最早开始的 run）/ 残留自愈 / run.json 写入串行 /
+  withRunLog 自动建与复用 / runId 校验；
+- `test:blueprint` 的 e2e-blueprint 新增**场景 8**（13 项）：不传 runLog 时自动建 run、
+  run.json 字段、events.jsonl 首尾与 seq 单调、agent_start 携带**互不相同**
+  的 sessionId（max_concurrent=4 的真实交错流）、并**直接用真实捕获的事件流跑
+  replay 断言归属零错误** —— 这条断言把捕获层与模型层串起来，同类回归无法再被
+  「顺序测试」掩盖。
