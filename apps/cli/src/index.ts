@@ -7,6 +7,7 @@ import { runWiki } from "./commands/wiki";
 import { runBrowse } from "./commands/browse";
 import { runLogview } from "./commands/logview";
 import { runHistory } from "./commands/history";
+import { runVersionGuard } from "./commands/version-guard";
 import { zhCN } from "./i18n/translations/zh-CN";
 import { enUS } from "./i18n/translations/en-US";
 
@@ -78,6 +79,8 @@ program
   .description(t.cli.historyDesc)
   .option("-c, --concurrency <n>", t.cli.historyConcurrencyDesc)
   .action(async (options: { concurrency?: string }) => {
+    // 只守卫家目录：history 不读写目标仓库的数据目录
+    await runVersionGuard({ repo: false });
     await runHistory({ concurrency: parseHistoryConcurrency(options.concurrency) });
   });
 

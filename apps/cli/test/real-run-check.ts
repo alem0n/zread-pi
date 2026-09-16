@@ -16,6 +16,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 
+// 本测试的临时家目录没有 version 标记（会被版本守卫当成不兼容数据备份掉）；
+// 版本守卫有专门单测，这里跳过，保持与真实版本号无关
+process.env.ZREAD_PI_VERSION_GUARD = "0";
+
 const home = await mkdtemp(join(tmpdir(), "zread-real-run-home-"));
 // 空目标目录：保证首页处于「尚无文档目录」状态，与断言无关仓库自身是否已生成过文档
 const project = await mkdtemp(join(tmpdir(), "zread-real-run-project-"));

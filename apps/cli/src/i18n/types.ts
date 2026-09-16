@@ -25,6 +25,13 @@ export interface TranslationKeys {
     empty: string;
     failed: string;
   };
+  versionGuard: {
+    incompatible: string;
+    backupHint: string;
+    created: string;
+    scopeHome: string;
+    scopeRepo: string;
+  };
   layout: {
     model: string;
     intro: string;

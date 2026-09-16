@@ -23,6 +23,13 @@ export const zhCN: TranslationKeys = {
     empty: '暂无历史记录',
     failed: '历史记录读取失败: {error}',
   },
+  versionGuard: {
+    incompatible: '检测到不兼容的版本数据（{scope}）：目录由 {stored} 创建，当前版本 {current}。已备份到：',
+    backupHint: '旧数据已完整保留在备份目录，请尽快处理（迁移需要的文件后删除该备份目录，避免占用磁盘）。',
+    created: '已初始化 {scope}（版本 {current}）。',
+    scopeHome: '项目家目录',
+    scopeRepo: '仓库数据目录',
+  },
   layout: {
     model: '模型',
     intro: '将本地代码库转化为可读的 Wiki 文档。',

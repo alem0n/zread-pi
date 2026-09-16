@@ -63,6 +63,20 @@ export { Time } from './logger/time.js';
 // 配置 / 凭据 / 日志 / 解析器缓存 / 托管二进制 / 全局记忆 history 全部经由这里取路径
 export { ZREAD_PI_DIR_NAME, ZREAD_PI_HOME_ENV, getProjectHome, projectHomePath } from './project-home.js';
 
+// 版本守卫（隔离不同大版本的数据目录：~/.zread-pi 与 <repo>/.zread-pi）
+export {
+  VERSION_FILE_NAME,
+  BACKUP_SUFFIX,
+  parseMajorVersion,
+  isVersionCompatible,
+  getVersionFilePath,
+  readVersionFile,
+  writeVersionFile,
+  nextBackupPath,
+  ensureVersionGuard,
+} from './version-guard.js';
+export type { VersionGuardOutcome } from './version-guard.js';
+
 // 跨进程文件锁（config / auth / tools-state / history 的读-改-写共用）
 export { acquireFileLock, acquireFileLockSync, withFileLock, withFileLockSync } from './lockfile.js';
 
@@ -85,6 +99,7 @@ export { mapWithConcurrency } from './history/concurrency.js';
 export {
   loadConfig,
   loadConfigSync,
+  loadConfigLanguageSync,
   saveConfig,
   validateConfig,
   getDefaultLanguage,

@@ -6,6 +6,9 @@ dist-bin/
 
 # 生成的 Wiki 产物（在目标仓库里生成，不入库）
 .zread-pi/
+# 版本守卫的备份目录（与 .zread-pi 同级，不会被上面的规则覆盖）
+.zread-pi_bak/
+.zread-pi_bak-*/
 
 # 日志与临时文件
 *.log

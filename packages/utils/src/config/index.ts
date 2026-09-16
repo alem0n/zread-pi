@@ -352,6 +352,26 @@ export function loadConfigSync(): AppConfig | null {
   }
 }
 
+/**
+ * 只读配置的界面语言（'zh' | 'en'），不做完整校验。
+ *
+ * `loadConfigSync` 会校验 language / doc_language / concurrency 是否齐全，
+ * 缺字段就整体回退 `DEFAULT_CONFIG`（language = 'en'）。版本守卫需要在备份
+ * 「旧版本 / 残缺」配置之前就给出正确语言的提示，因此这里直接取原始 language 字段；
+ * 读不到任何配置时回退 'zh'。
+ */
+export function loadConfigLanguageSync(): 'zh' | 'en' {
+  try {
+    const configPath = getConfigPath();
+    if (!existsSync(configPath)) return 'zh';
+    const raw = parse(readFileSync(configPath, 'utf-8'));
+    if (!raw || typeof raw !== 'object') return 'zh';
+    return (raw as { language?: unknown }).language === 'en' ? 'en' : 'zh';
+  } catch {
+    return 'zh';
+  }
+}
+
 export function validateConfig(raw: unknown): AppConfig {
   if (!raw || typeof raw !== 'object') {
     return DEFAULT_CONFIG;
