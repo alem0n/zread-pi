@@ -101,6 +101,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `zread-pi wiki`          | 显式 Wiki 生成入口（与默认命令同一 TUI）                                   |
 | `zread-pi config`        | 交互式配置编辑器 —— Provider、API Key、模型、思考深度、模型上下文/输出覆盖、最大轮次（折算 token 预算）、蓝图细节档位、文风润色、外部工具  |
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
+| `zread-pi logview [runId]`| 启动轨迹（Trajectory）检查视图 —— 在浏览器回放本次 / 历次运行的完整事件流；runId 缺省 = 最近一次运行 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
 
@@ -115,6 +116,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `Esc`            | 返回 / 取消（根页面退出）     |
 | `PageUp/Down` `Home/End` | 长列表翻页            |
 | `r`              | 刷新（模型目录 / 重跑检测）   |
+| `l`              | Wiki 首页 / 生成完成页 → 打开运行轨迹 |
 | `Ctrl+C`         | 强制退出                      |
 
 ## 截图
@@ -282,12 +284,50 @@ your-project/
     │   │   └── archived/<快照名>/        # 同步时归档的旧页面快照
     │   ├── max/
     │   └── wiki.json                   # 旧版遗留目录（只读兼容，浏览站显示为「默认」）
+    ├── runs/                            # 运行轨迹（每次生成 / 同步一个目录）
+    │   └── 2026-09-15T23-46-21-ffd1/
+    │       ├── events.jsonl             # 原始事件流（seq 单调，一行一条）
+    │       └── run.json                 # 元数据：状态 / agent 计数 / 页面进度 / 用量合计
     └── cache/
         ├── last_manifest.json           # 文件扫描结果
         └── last_symbols.json            # AST-hash 符号缓存
 ```
 
 每页都是内嵌 Mermaid 图表的纯 Markdown —— GitHub、GitLab、Docusaurus、Notion、你自己的静态站点都能直接渲染。
+
+### 轨迹检查视图（Trajectory）
+
+每次生成或同步都会把**完整事件流**落盘到 `.zread-pi/runs/<runId>/`，
+可在浏览站里逐条回放、检查、搜索与过滤 —— 回答「这次生成到底发生了什么」。
+
+**入口**（任选其一）：
+
+- Wiki 首页按 `l`，或侧边栏底部的「轨迹检查」；
+- 生成完成页底部提示的 `l: 查看运行轨迹`；
+- 无头环境：`zread-pi logview [runId]`（runId 缺省 = 最近一次运行）；
+- 浏览站直达 `http://localhost:<port>/trajectory`。
+
+**界面操作**：
+
+| 操作                 | 作用                                                                 |
+| -------------------- | -------------------------------------------------------------------- |
+| 点击行                | 选中记录，右侧检查器展示完整载荷 / 工具参数 / 结果 / 用量 / TTFT        |
+| `↑ / ↓`              | 在可选记录间移动（自动滚入视口）；`Esc` 清除选择                       |
+| 点击 turn 头          | 折叠 / 展开该 turn（一个 Agent = 一个 turn）                           |
+| 搜索框                | 多词交集过滤（命中高亮；匹配提示 / 工具参数 / 输出 / 工具名）           |
+| `Turns` / `Steps`    | 全部 turn 折叠 / 同组连续助手消息合并                                  |
+| 时序条拖拽            | 框选时间区间，过滤出台账里只属于该区间的记录                            |
+| 时序条滚轮            | 以光标为中心缩放（sequence 模式下滚轮无效果）                          |
+| 时序条右键            | 清除选区                                                              |
+| 时序条悬停            | 显示该区间的记录摘要                                                  |
+| `Sequence/Duration/Time/Actual` | 时序投影模式：序号 / 压缩空闲的时长 / 真实墙钟点 / 真实时长 |
+| 检查器左缘拖拽        | 调整详情面板宽度                                                       |
+| 检查器 `‹ ›`         | 跳到上一条 / 下一条模型请求（跨 turn 的统一编号空间）                   |
+| 「Load older events」 | 向前翻更旧的事件页（贴底时新事件自动滚入）                              |
+
+轨迹页是全宽独立路由（不渲染 wiki 侧边栏）；运行未结束时自动轮询尾随新事件，
+结束后停止。单个目标仓库默认保留最近 20 次运行（`ZREAD_PI_RUNS_RETENTION` 覆盖，
+`<= 0` 不清理）；新运行开始时，残留的 `running` 状态旧运行会被自动标记为 `interrupted`。
 
 <p align="center">
   <img src="./static/index-browse.png" width="90%" alt="本地 Web 阅读器">
