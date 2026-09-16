@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import type { Server } from "http";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant } from "@zread-pi/utils";
+import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant, listRuns, resolveRunId, readEvents, readRunMeta, isValidRunId } from "@zread-pi/utils";
 import type { BlueprintDetailLevel } from "@zread-pi/types";
 import { resolveBrowseChat, serializeBrowseChatError } from "./browse-chat";
 import {
@@ -56,6 +56,8 @@ export interface BrowseServerInfo {
 export interface BrowseServerOptions {
   /** 是否自动打开浏览器（默认 true；无头/测试环境可用 ZREAD_PI_BROWSE_NO_OPEN=1 关闭） */
   openBrowser?: boolean;
+  /** 浏览器打开的初始路径（相对 URL，如 `/trajectory/2026-...`；缺省 = 根路径） */
+  initialPath?: string;
 }
 
 // 打包时通过 tsup define 把 globalThis.IS_PACKAGED 替换为 true
@@ -251,6 +253,9 @@ function readCodeSnippet(
 
 /** 遗留（无档位）变体的 API 标识（与前端「默认」条目对应） */
 const LEGACY_VARIANT_PARAM = "default";
+
+/** events 接口的默认每页条数（与 reader 的 DEFAULT_READ_LIMIT 对齐） */
+const DEFAULT_EVENTS_LIMIT = 500;
 
 /** 解析后的请求变体（档位子目录或遗留目录） */
 interface ResolvedWikiVariant {
@@ -516,6 +521,93 @@ function createWikiApp(projectPath: string) {
     }
   });
 
+  // ==================== 轨迹（runs）API ====================
+
+  // 列出所有运行（最新在前）+ latest 指针
+  app.get("/api/runs", async (_req: Request, res: Response) => {
+    try {
+      const runs = await listRuns(projectPath);
+      const latest = runs[0]?.id ?? null;
+      res.json({ runs, latest });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to list runs",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // 单次运行的元数据（未知 / 非法 runId → 404）
+  app.get("/api/runs/:runId", async (req: Request, res: Response) => {
+    try {
+      const runId = req.params.runId;
+      if (!isValidRunId(runId)) {
+        return res.status(404).json({ error: `Unknown run id: ${runId}` });
+      }
+      const meta = await readRunMeta(runId, projectPath).catch(() => undefined);
+      if (meta === undefined) {
+        return res.status(404).json({ error: `Run not found: ${runId}` });
+      }
+      res.json(meta);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to load run meta",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * 单次运行的事件流（分页 / 尾随）：
+   * - `?afterSeq=N`：返回 seq > N 的事件（实时尾随；limit 上限）
+   * - `?beforeSeq=N`：返回 seq < N 的最近 limit 条（向前分页，按 seq 升序返回）
+   * - 都不传：从头返回
+   * 响应带 `hasMore`（更旧的页可继续向前翻）与 `runEnded`（运行已结束，前端停止轮询）
+   */
+  app.get("/api/runs/:runId/events", async (req: Request, res: Response) => {
+    try {
+      const runId = req.params.runId;
+      if (!isValidRunId(runId)) {
+        return res.status(404).json({ error: `Unknown run id: ${runId}` });
+      }
+      const meta = await readRunMeta(runId, projectPath).catch(() => undefined);
+      if (meta === undefined) {
+        return res.status(404).json({ error: `Run not found: ${runId}` });
+      }
+
+      const parseSeq = (value: unknown): number | undefined => {
+        if (typeof value !== "string") return undefined;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
+      };
+      const limit = parseSeq(req.query.limit) ?? DEFAULT_EVENTS_LIMIT;
+      const afterSeq = parseSeq(req.query.afterSeq);
+      const beforeSeq = parseSeq(req.query.beforeSeq);
+
+      const result = await readEvents(runId, {
+        ...(afterSeq !== undefined ? { afterSeq } : {}),
+        ...(beforeSeq !== undefined ? { beforeSeq } : {}),
+        limit,
+      }, projectPath);
+
+      res.json({
+        runId,
+        events: result.events,
+        hasMore: result.hasMore,
+        hasNewer: result.hasNewer,
+        /** 运行已结束：前端据此停止尾随轮询 */
+        runEnded: meta.status !== "running",
+        status: meta.status,
+        lastSeq: meta.lastSeq,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to load run events",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   return { app };
 }
 
@@ -580,7 +672,8 @@ export async function startWikiBrowseServer(
   const shouldOpenBrowser = options.openBrowser ?? process.env[NO_OPEN_ENV] !== "1";
   if (shouldOpenBrowser) {
     // 无头环境打不开浏览器不应影响服务器本身
-    void open(url).catch(() => {});
+    const target = options.initialPath ? new URL(options.initialPath, url).href : url;
+    void open(target).catch(() => {});
   }
 
   let closed = false;

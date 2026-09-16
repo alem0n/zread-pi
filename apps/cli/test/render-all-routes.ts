@@ -75,6 +75,8 @@ const paths = [
   "/wiki",
   "/wiki/generate?mode=manage",
   "/wiki/sync",
+  "/logview",
+  "/logview/2026-01-02T03-04-05-0a1b",
 ];
 
 let bad = 0;

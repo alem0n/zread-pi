@@ -81,6 +81,12 @@ export default class WikiGeneratePage extends Screen {
   }
 
   override handleKey(data: string): boolean {
+    // l：查看最近一次运行的轨迹（目录 + 页面阶段共享的 run）
+    if (data === "l" && this.controller.lastRunId) {
+      this.app.navigate(`/logview/${this.controller.lastRunId}`);
+      return true;
+    }
+
     // 目录失败时按 r 重新生成目录
     if (data === "r" && this.controller.state.catalog.status === "failed") {
       this.controller.retryCatalog();
@@ -110,7 +116,10 @@ export default class WikiGeneratePage extends Screen {
     const footer = [
       "",
       style(
-        `↑/↓: ${this.t("wikiGenerate.navigate")} | r: ${this.t("wikiGenerate.retry")} | ctrl+c: ${this.t("wikiGenerate.exit")}`,
+        `↑/↓: ${this.t("wikiGenerate.navigate")} | r: ${this.t("wikiGenerate.retry")} | ctrl+c: ${this.t("wikiGenerate.exit")}` +
+          (this.controller.lastRunId
+            ? ` | l: ${this.t("wikiGenerate.viewTrajectory")}`
+            : ""),
         { dim: true },
       ),
     ];

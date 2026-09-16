@@ -5,6 +5,7 @@ import { enterTargetDir } from "./utils/target-dir";
 import { runConfig } from "./commands/config";
 import { runWiki } from "./commands/wiki";
 import { runBrowse } from "./commands/browse";
+import { runLogview } from "./commands/logview";
 import { runHistory } from "./commands/history";
 import { zhCN } from "./i18n/translations/zh-CN";
 import { enUS } from "./i18n/translations/en-US";
@@ -78,6 +79,15 @@ program
   .option("-c, --concurrency <n>", t.cli.historyConcurrencyDesc)
   .action(async (options: { concurrency?: string }) => {
     await runHistory({ concurrency: parseHistoryConcurrency(options.concurrency) });
+  });
+
+// logview 命令：轨迹（Trajectory）检查视图
+program
+  .command("logview [runId]")
+  .description(t.cli.logviewDesc)
+  .action(async (runId: string | undefined) => {
+    if (!applyTargetDir()) return;
+    await runLogview(runId);
   });
 
 program.parse();

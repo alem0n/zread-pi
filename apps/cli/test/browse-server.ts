@@ -271,6 +271,136 @@ checkEqual("source 无效档位返回 404", sourceBadDetail.status, 404);
 
 check("hasWikiCatalog 识别档位变体", hasWikiCatalog(repo) === true);
 
+// ---------------------------------------------------------------------------
+// 1c) 轨迹 API：/api/runs 列表 / 详情 / 事件分页
+// ---------------------------------------------------------------------------
+
+console.log("▶ 轨迹 API（/api/runs*）");
+
+// 写两条 run：一条已完成（10 条事件），一条进行中（3 条事件）
+const RUN_ID_A = "2026-03-04T05-06-07-0a1b";
+const RUN_ID_B = "2026-03-05T06-07-08-1c2d";
+const runsDir = join(repo, ".zread-pi", "runs");
+
+async function writeRun(
+  runId: string,
+  status: "completed" | "running",
+  events: Array<Record<string, unknown>>,
+): Promise<void> {
+  await mkdir(join(runsDir, runId), { recursive: true });
+  await writeFile(
+    join(runsDir, runId, "run.json"),
+    JSON.stringify(
+      {
+        id: runId,
+        startedAt: `${runId.slice(0, 10)}T${runId.slice(11, 19).replace(/-/g, ":")}.000Z`,
+        ...(status === "completed" ? { endedAt: "2026-03-04T05:07:00.000Z", durationMs: 60_000 } : {}),
+        status,
+        kind: "generate",
+        detail: "high",
+        targetDir: repo,
+        agents: { count: 2, byRole: { classify: 1, page: 1 } },
+        pages: { total: 1, completed: status === "completed" ? 1 : 0, failed: 0 },
+        events: events.length,
+        lastSeq: events.length,
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+  await writeFile(
+    join(runsDir, runId, "events.jsonl"),
+    events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf-8",
+  );
+}
+
+function fakeEvent(seq: number, kind: string): Record<string, unknown> {
+  return { kind, seq, ts: 1_000 * seq, agent: { key: `agent-${seq}`, role: "page" } };
+}
+
+await writeRun(
+  RUN_ID_A,
+  "completed",
+  Array.from({ length: 10 }, (_, index) => fakeEvent(index + 1, index % 2 === 0 ? "message_start" : "message_end")),
+);
+await writeRun(RUN_ID_B, "running", [
+  fakeEvent(1, "run_start"),
+  fakeEvent(2, "agent_start"),
+  fakeEvent(3, "message_start"),
+]);
+
+const runsListRes = await fetch(`${info.url}/api/runs`);
+const runsList = (await runsListRes.json()) as {
+  runs: Array<{ id: string; status: string }>;
+  latest: string | null;
+};
+checkEqual("GET /api/runs 状态码", runsListRes.status, 200);
+checkEqual("runs 按最新在前排列", runsList.runs[0]?.id, RUN_ID_B);
+checkEqual("latest 指向最新 run", runsList.latest, RUN_ID_B);
+checkEqual("runs 含两条记录", runsList.runs.length, 2);
+
+const metaRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}`);
+const meta = (await metaRes.json()) as { id: string; status: string; events: number };
+checkEqual("GET /api/runs/:runId 状态码", metaRes.status, 200);
+checkEqual("run meta id", meta.id, RUN_ID_A);
+checkEqual("run meta status", meta.status, "completed");
+checkEqual("run meta events 计数", meta.events, 10);
+
+const badRunId = await fetch(`${info.url}/api/runs/not-a-run-id`);
+checkEqual("非法 runId 返回 404", badRunId.status, 404);
+check(
+  "非法 runId 错误可读",
+  ((await badRunId.json()) as { error?: string }).error === "Unknown run id: not-a-run-id",
+);
+
+const missingRun = await fetch(`${info.url}/api/runs/2026-01-01T00-00-00-aaaa`);
+checkEqual("合法但不存在的 runId 返回 404", missingRun.status, 404);
+
+// 事件分页：不传参数从头返回
+const eventsRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events`);
+const eventsPayload = (await eventsRes.json()) as {
+  events: Array<{ seq: number }>;
+  hasMore: boolean;
+  runEnded: boolean;
+  status: string;
+  lastSeq: number;
+};
+checkEqual("GET /api/runs/:runId/events 状态码", eventsRes.status, 200);
+checkEqual("缺省返回全部事件", eventsPayload.events.length, 10);
+check("事件按 seq 升序", eventsPayload.events.every((event, index) => event.seq === index + 1));
+checkEqual("已完成 run 的 runEnded", eventsPayload.runEnded, true);
+checkEqual("lastSeq 与事件数一致", eventsPayload.lastSeq, 10);
+
+// 向前分页（beforeSeq = seq < N 的最近 limit 条）：返回更旧的页并提示 hasMore
+const olderRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events?beforeSeq=11&limit=4`);
+const older = (await olderRes.json()) as { events: Array<{ seq: number }>; hasMore: boolean };
+checkEqual("beforeSeq 分页返回最近 limit 条（升序）", JSON.stringify(older.events.map((event) => event.seq)), "[7,8,9,10]");
+checkEqual("beforeSeq 分页 hasMore = true", older.hasMore, true);
+
+const olderLastRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events?beforeSeq=4&limit=10`);
+const olderLast = (await olderLastRes.json()) as { events: Array<{ seq: number }>; hasMore: boolean };
+checkEqual("翻到最旧页时 hasMore = false", olderLast.hasMore, false);
+
+// 尾随（afterSeq）：运行中的 run 返回新事件
+const tailRes = await fetch(`${info.url}/api/runs/${RUN_ID_B}/events?afterSeq=1&limit=10`);
+const tail = (await tailRes.json()) as {
+  events: Array<{ seq: number }>;
+  runEnded: boolean;
+  status: string;
+};
+checkEqual("afterSeq 只返回 seq > N 的事件", tail.events.length, 2);
+checkEqual("进行中 run 的 runEnded = false", tail.runEnded, false);
+checkEqual("进行中 run 的 status = running", tail.status, "running");
+
+const tailEmpty = await fetch(`${info.url}/api/runs/${RUN_ID_B}/events?afterSeq=99`);
+const tailEmptyPayload = (await tailEmpty.json()) as { events: Array<{ seq: number }> };
+checkEqual("afterSeq 超出范围返回空数组", tailEmptyPayload.events.length, 0);
+
+const badRunEvents = await fetch(`${info.url}/api/runs/not-a-run-id/events`);
+checkEqual("非法 runId 的事件接口 404", badRunEvents.status, 404);
+
 // 仅存在档位变体（无遗留目录）的目录也算「有文档」
 const variantOnlyRepo = await mkdtemp(join(tmpdir(), "zread-browse-variant-only-"));
 await mkdir(join(variantOnlyRepo, ".zread-pi", "wiki", "high"), { recursive: true });
