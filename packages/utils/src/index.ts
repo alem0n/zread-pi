@@ -222,3 +222,6 @@ export type {
 // Provider Registry
 export * from './provider-registry/types.js';
 export { getProviderRegistry, syncProviders } from './provider-registry/index.js';
+
+// 可回放运行日志（轨迹视图的数据源：events.jsonl + run.json）
+export * from './trajectory-store/index.js';
