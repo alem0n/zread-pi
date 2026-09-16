@@ -20,9 +20,9 @@ export {
 export type { WikiVariantInfo } from './file-io.js';
 
 // Logger
-// 旧的兼容层（全局单例 logger / getLogFile）+ 对齐 cordis 的日志总线
-// （命名 logger / 多 exporter / 级别阈值 / 结构化记录）
-export { logger, getLogFile } from './logger.js';
+// 对齐 cordis 的日志总线（命名 logger / 多 exporter / 级别阈值 / 结构化记录）
+// getLogFile = 今天的日志文件路径（getLogFilePath 的便捷别名，按调用时刻计算日期）
+export { getLogFilePath as getLogFile } from './logger/file-exporter.js';
 export {
   createLogger,
   getLoggerService,

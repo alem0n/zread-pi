@@ -39,7 +39,6 @@ import {
   getLogFile,
   getLogFilePath,
   getLoggerService,
-  logger,
   parseLogLevels,
   resetLoggerServiceForTesting,
   resolveExporterLevel,
@@ -302,13 +301,13 @@ async function readLog(): Promise<string> {
   check('近期文件保留', remaining.includes(recentName), remaining.join(','));
   check('retention<=0 不清理', sweepOldLogFiles(0) === 0);
 
-  // needle 兼容（兼容层 info 行仍含 [INFO] + 消息）——文本 sink 默认关闭，显式开启
+  // needle 兼容（命名 logger 的 info 行含 [INFO] + 消息）——文本 sink 默认关闭，显式开启
   resetLoggerServiceForTesting();
   process.env[LOG_TEXT_ENV] = '1';
-  logger.info('needle-compat-4242');
+  createLogger('needle-compat').info('needle-compat-4242');
   const content = await readLog();
-  check('兼容层 info 行含 [INFO] 与消息', content.includes('[INFO]') && content.includes('needle-compat-4242'), content.split('\n').slice(-2)[0]);
-  check('兼容层行含时间戳', /\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]/.test(content));
+  check('info 行含 [INFO] 与消息', content.includes('[INFO]') && content.includes('needle-compat-4242'), content.split('\n').slice(-2)[0]);
+  check('行含时间戳', /\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]/.test(content));
 
   // file exporter 记录全部级别（含 debug）
   resetLoggerServiceForTesting();
@@ -335,19 +334,15 @@ async function readLog(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// ⑧ 兼容层标记（progress / success / debug）+ addExporter
+// ⑧ 命名 logger debug + addExporter
 // ---------------------------------------------------------------------------
 
 {
   process.env[LOG_TEXT_ENV] = '1';
   resetLoggerServiceForTesting();
-  logger.progress('Scanning project', '/tmp/x');
-  logger.success('All done');
-  logger.debug('debug-line-77');
+  createLogger('compat-markers').debug('debug-line-77');
   const content = await readLog();
-  check('progress 保留 [PROGRESS] 标记', content.includes('[PROGRESS] Scanning project /tmp/x'));
-  check('success 保留 [OK] 标记', content.includes('[OK] All done'));
-  check('兼容层 debug 可用', content.includes('debug-line-77'));
+  check('命名 logger debug 可用', content.includes('debug-line-77'));
 
   // addExporter 注册自定义 exporter（用 error 确保越过默认 INFO 阈值）
   const collected: Message[] = [];

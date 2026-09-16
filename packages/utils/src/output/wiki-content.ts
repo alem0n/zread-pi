@@ -31,7 +31,9 @@ import {
   writeTextFileAtomic,
 } from '../file-io.js';
 import { withFileLock } from '../lockfile.js';
-import { logger } from '../logger.js';
+import { createLogger } from '../logger/service.js';
+
+const logger = createLogger('orchestrator.wiki-content');
 
 const DEFAULT_BLUEPRINT_FILE = 'wiki.json';
 
@@ -391,7 +393,7 @@ export async function initWikiSkeleton(
   const outputPath = getWikiJsonPath(options.variant);
   await withFileLock(outputPath, () => writeWikiOutput(outputPath, output));
 
-  logger.success(`Wiki 骨架已生成: ${outputPath}（${output.sections?.length ?? 0} 个分类）`);
+  logger.info(`Wiki 骨架已生成: ${outputPath}（${output.sections?.length ?? 0} 个分类）`);
   return outputPath;
 }
 
@@ -652,7 +654,7 @@ export async function generateWikiJson(
   const outputPath = getWikiJsonPath(variant);
   await writeJsonFile(outputPath, wikiOutput);
 
-  logger.success(`Blueprint generated: ${outputPath}`);
+  logger.info(`Blueprint generated: ${outputPath}`);
   return outputPath;
 }
 
