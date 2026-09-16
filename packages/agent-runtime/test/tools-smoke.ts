@@ -612,10 +612,10 @@ try {
   await writeFile(join(fixture, 'edit-target.txt'), 'alpha\nbeta\ngamma\n', 'utf-8')
   const editBasic = await callTool(
     FileEditTool,
-    { path: 'edit-target.txt', old_string: 'beta', new_string: 'BETA' },
+    { path: 'edit-target.txt', edits: [{ oldText: 'beta', newText: 'BETA' }] },
     ctx,
   )
-  check('Edit old_string/new_string 生效', (await readFile(join(fixture, 'edit-target.txt'), 'utf-8')) === 'alpha\nBETA\ngamma\n')
+  check('Edit edits[] 生效', (await readFile(join(fixture, 'edit-target.txt'), 'utf-8')) === 'alpha\nBETA\ngamma\n')
   check(
     'Edit details 带 diff 与首行变更行号',
     typeof (editBasic.details as { diff?: string })?.diff === 'string' &&
@@ -624,17 +624,17 @@ try {
     JSON.stringify((editBasic.details as { firstChangedLine?: number })?.firstChangedLine),
   )
 
-  // CRLF：磁盘是 CRLF，模型给 LF 的 old_string
+  // CRLF：磁盘是 CRLF，模型给 LF 的 oldText
   const crlfPath = join(fixture, 'edit-crlf.txt')
   await writeFile(crlfPath, 'one\r\ntwo\r\nthree\r\n', 'utf-8')
   const editCrlf = await callTool(
     FileEditTool,
-    { path: 'edit-crlf.txt', old_string: 'one\ntwo', new_string: 'one\nTWO' },
+    { path: 'edit-crlf.txt', edits: [{ oldText: 'one\ntwo', newText: 'one\nTWO' }] },
     ctx,
   )
   const crlfResult = await readFile(crlfPath, 'utf-8')
   check(
-    'Edit 归一化 CRLF：LF 的 old_string 能命中 CRLF 文件，且行尾保持 CRLF',
+    'Edit 归一化 CRLF：LF 的 oldText 能命中 CRLF 文件，且行尾保持 CRLF',
     editCrlf.is_error !== true && crlfResult === 'one\r\nTWO\r\nthree\r\n',
     JSON.stringify(crlfResult),
   )
@@ -642,25 +642,16 @@ try {
   // BOM：必须保留
   const bomPath = join(fixture, 'edit-bom.txt')
   await writeFile(bomPath, '\uFEFFalpha\nbeta\n', 'utf-8')
-  await callTool(FileEditTool, { path: 'edit-bom.txt', old_string: 'beta', new_string: 'BETA' }, ctx)
+  await callTool(FileEditTool, { path: 'edit-bom.txt', edits: [{ oldText: 'beta', newText: 'BETA' }] }, ctx)
   const bomResult = await readFile(bomPath, 'utf-8')
   check('Edit 保留 BOM', bomResult.startsWith('\uFEFF') && bomResult.includes('BETA'), JSON.stringify(bomResult.slice(0, 8)))
 
-  // replace_all
-  await writeFile(join(fixture, 'edit-all.txt'), 'x-x-x\n', 'utf-8')
-  await callTool(
-    FileEditTool,
-    { path: 'edit-all.txt', old_string: 'x', new_string: 'y', replace_all: true },
-    ctx,
-  )
-  check('Edit replace_all 替换全部出现', (await readFile(join(fixture, 'edit-all.txt'), 'utf-8')) === 'y-y-y\n')
-
-  // 多段 disjoint edits（上游形态）
+  // 多段 disjoint edits
   await writeFile(join(fixture, 'edit-multi.txt'), 'first\nsecond\nthird\nfourth\n', 'utf-8')
   const editMulti = await callTool(
     FileEditTool,
     {
-      file_path: 'edit-multi.txt',
+      path: 'edit-multi.txt',
       edits: [
         { oldText: 'first', newText: 'FIRST' },
         { oldText: 'fourth', newText: 'FOURTH' },
@@ -675,22 +666,13 @@ try {
     textOf(editMulti),
   )
 
-  // edits 传成 JSON 字符串（部分模型会这样发）
-  await writeFile(join(fixture, 'edit-json.txt'), 'a\nb\n', 'utf-8')
-  const editJson = await callTool(
-    FileEditTool,
-    { path: 'edit-json.txt', edits: JSON.stringify([{ oldText: 'a', newText: 'A' }]) as unknown as ToolInputParams[string] },
-    ctx,
-  )
-  check('Edit 解析 JSON 字符串形式的 edits', editJson.is_error !== true && (await readFile(join(fixture, 'edit-json.txt'), 'utf-8')) === 'A\nb\n')
-
-  const editDuplicate = await callTool(FileEditTool, { path: 'edit-multi.txt', old_string: 'F', new_string: 'Z' }, ctx)
+  const editDuplicate = await callTool(FileEditTool, { path: 'edit-multi.txt', edits: [{ oldText: 'F', newText: 'Z' }] }, ctx)
   check('Edit 非唯一匹配时报错', editDuplicate.is_error === true && textOf(editDuplicate).includes('occurrences'), textOf(editDuplicate))
 
-  const editNotFound = await callTool(FileEditTool, { path: 'edit-multi.txt', old_string: 'absent', new_string: 'Z' }, ctx)
+  const editNotFound = await callTool(FileEditTool, { path: 'edit-multi.txt', edits: [{ oldText: 'absent', newText: 'Z' }] }, ctx)
   check('Edit 找不到目标文本时报错', editNotFound.is_error === true && textOf(editNotFound).includes('Could not find the exact text'))
 
-  const editMissing = await callTool(FileEditTool, { path: 'nope.txt', old_string: 'a', new_string: 'b' }, ctx)
+  const editMissing = await callTool(FileEditTool, { path: 'nope.txt', edits: [{ oldText: 'a', newText: 'b' }] }, ctx)
   check('Edit 文件不存在时报错', editMissing.is_error === true && textOf(editMissing).includes('Could not edit file'))
 
   // 并发编辑同一文件：没有队列时会丢更新
@@ -699,7 +681,7 @@ try {
   const parallelEdits = Array.from({ length: 16 }, (_, index) =>
     callTool(
       FileEditTool,
-      { path: 'concurrency/shared.txt', old_string: 'ANCHOR', new_string: `ANCHOR\nmarker-${index}` },
+      { path: 'concurrency/shared.txt', edits: [{ oldText: 'ANCHOR', newText: `ANCHOR\nmarker-${index}` }] },
       ctx,
     ),
   )
