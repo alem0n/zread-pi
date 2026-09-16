@@ -279,13 +279,17 @@ export function deriveTrajectoryLayout(snapshot: TrajectorySnapshot): readonly T
 
   // 回填 turn 标签（一个 Agent = 一个 turn；turn=null 为 turn 之间的独立段）
   const labels = new Map<number, string>();
-  for (const info of snapshot.turns) labels.set(info.number, info.label);
+  const sessionIds = new Map<number, string>();
+  for (const info of snapshot.turns) {
+    labels.set(info.number, info.label);
+    if (info.sessionId !== undefined) sessionIds.set(info.number, info.sessionId);
+  }
 
   return [
     ...[...turns.entries()].map(([number, entry]) =>
-      toTurnModel(number, labels.get(number) ?? entry.label, entry),
+      toTurnModel(number, labels.get(number) ?? entry.label, entry, sessionIds.get(number)),
     ),
-    ...standalone.map((entry) => toTurnModel(null, entry.label, entry)),
+    ...standalone.map((entry) => toTurnModel(null, entry.label, entry, undefined)),
   ].sort((left, right) => firstCellIndex(left) - firstCellIndex(right));
 }
 
@@ -307,7 +311,12 @@ function firstCellIndex(turn: TrajectoryTurnModel): number {
   );
 }
 
-function toTurnModel(number: number | null, label: string, entry: TurnBucket): TrajectoryTurnModel {
+function toTurnModel(
+  number: number | null,
+  label: string,
+  entry: TurnBucket,
+  sessionId: string | undefined,
+): TrajectoryTurnModel {
   const groups = entry.groups.map(({ title, laid }): TrajectoryTurnModel['groups'][number] => {
     const description = groupDescription(laid);
     return {
@@ -316,7 +325,7 @@ function toTurnModel(number: number | null, label: string, entry: TurnBucket): T
       cells: laid.map((item) => item.cell),
     };
   });
-  return { turn: number, label, groups };
+  return { turn: number, label, ...(sessionId !== undefined ? { sessionId } : {}), groups };
 }
 
 /** 组的墙钟跨度 + 工具直方图，如 `1.5 s read×3` */

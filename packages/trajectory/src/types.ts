@@ -123,6 +123,8 @@ export interface TrajectoryTurnModel {
   turn: number | null;
   /** turn 标签（如「规划主题」「拟定标题 · 核心架构」「页面 · quick-start」） */
   label: string;
+  /** 会话归属键（agent.sessionId；无则该 turn 不可按 session 隐藏） */
+  sessionId?: string;
   /** Agent 标识（每个 Agent 一个 turn） */
   agentKey?: string;
   /** Agent 角色（分类 / 分主题 / 标题 / 缩编 / 页面 / 润色） */
@@ -192,6 +194,8 @@ export interface TrajectorySnapshot {
 export interface TrajectoryTurnInfo {
   number: number;
   key: string;
+  /** 会话归属键（agent.sessionId；旧日志回退 key）—— 前端按需隐藏 session 用 */
+  sessionId: string;
   label: string;
   role?: RunEventAgentMeta['role'];
   section?: string;

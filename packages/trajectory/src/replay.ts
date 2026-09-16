@@ -7,6 +7,13 @@
  *    而不是 user 消息边界 —— zread-pi 的 Agent 内部没有用户插话；
  * ③ 请求编号覆盖全部 Agent 的 assistant 消息 + 压缩，共用一个时间序编号空间；
  * ④ 「会话窗口」= 单个 run 目录，分页即文件 seq 分页。
+ *
+ * 归属键（session id）：并发 Agent（topics 按 section、page 按 p-limit）
+ * 的事件在日志里交错，**每条事件自带 `agent.sessionId`**（全局唯一，
+ * 同时是 pi 会话 id）。replay 以它为键把事件归进对应的 turn / 进行中消息，
+ * 与事件到达顺序无关。`agent_end` 只结束自己那一份，不会影响仍在跑的其他
+ * Agent（旧实现用单一 `current` 指针，会互相吞记录）。旧日志没有 sessionId
+ * 时回退 `agent.key`，顺序执行的语义不变。
  */
 
 import type {
@@ -29,6 +36,8 @@ import {
 
 interface TurnState {
   key: string;
+  /** 归属键（agent.sessionId ?? agent.key）—— 并发区分用 */
+  identity: string;
   number: number;
   role?: RunEventAgentMeta['role'];
   section?: string;
@@ -42,7 +51,8 @@ interface TurnState {
 }
 
 interface InFlightMessage {
-  turnKey: string;
+  /** 归属键（查 turns 用） */
+  identity: string;
   step: number;
   startedAt: number;
   firstTokenAt?: number;
@@ -69,6 +79,12 @@ function usageOf(usage: RunTokenUsage | undefined): TrajectoryUsage | undefined 
     ...(usage.cache_read_input_tokens ? { cacheRead: usage.cache_read_input_tokens } : {}),
     ...(usage.cache_creation_input_tokens ? { cacheWrite: usage.cache_creation_input_tokens } : {}),
   };
+}
+
+/** 事件的归属键：session id 优先（全局唯一），回退 agent.key（兼容旧日志） */
+function identityOf(agent: RunEventAgentMeta | undefined): string | undefined {
+  if (agent === undefined) return undefined;
+  return agent.sessionId ?? agent.key;
 }
 
 /** turn 标签：角色 + 分类 / 页面 */
@@ -111,11 +127,16 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
   const ordered = [...events].sort((left, right) => left.seq - right.seq);
 
   const records: ReplayRecord[] = [];
+  /** identity → turn（一个 Agent 一个 turn；键 = agent.sessionId ?? key） */
   const turns = new Map<string, TurnState>();
+  /** agent.key → identity（旧 record 的 turnKey 回查 turns 用） */
+  const keyToIdentity = new Map<string, string>();
   let turnCounter = 0;
-  let current: TurnState | undefined;
-  let inFlight: InFlightMessage | undefined;
-  const toolsByCallId = new Map<string, { record: ReplayToolRecord; turnKey: string }>();
+  /** 活跃 Agent：identity → turn（agent_end 后移除；并发 Agent 各占一格） */
+  const activeTurns = new Map<string, TurnState>();
+  /** 每 Agent 各自的进行中消息：identity → inFlight */
+  const inFlightBySession = new Map<string, InFlightMessage>();
+  const toolsByCallId = new Map<string, { record: ReplayToolRecord; identity: string }>();
   /** 每个 turn 内 tool_use callId → 父消息 step（工具挂到发出它的消息的分组） */
   const parentStepByCallId = new Map<string, number>();
 
@@ -145,14 +166,14 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
         runSummary.durationMs = payload.durationMs;
         if (payload.error) runSummary.error = payload.error;
         if (payload.usage) runSummary.usage = payload.usage;
-        // run 收尾：一条 run 级 context 记录（落到最后一个 turn，或独立的 turn=null 段）
+        // run 收尾：一条 run 级 context 记录（阶段都已结束，归到 turn=null 的独立段）
         records.push({
           kind: 'context',
           seq: event.seq,
           ts: event.ts,
-          turnKey: current?.key ?? null,
-          turn: current?.number ?? null,
-          group: current ? groupOf(current.messages) : 'Run',
+          turnKey: null,
+          turn: null,
+          group: 'Run',
           text: `Run ${payload.status} · ${payload.durationMs} ms`,
           ...(payload.error ? { isError: true } : {}),
         });
@@ -162,9 +183,12 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
         const payload = event;
         const agent = event.agent;
         if (agent === undefined) break;
+        const identity = identityOf(agent);
+        if (identity === undefined) break;
         turnCounter += 1;
-        current = {
+        const turn: TurnState = {
           key: agent.key,
+          identity,
           number: turnCounter,
           role: agent.role,
           ...(agent.section ? { section: agent.section } : {}),
@@ -172,7 +196,9 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
           messages: 0,
           catalog: indexCatalog(payload.toolCatalog),
         };
-        turns.set(agent.key, current);
+        turns.set(identity, turn);
+        keyToIdentity.set(agent.key, identity);
+        activeTurns.set(identity, turn);
 
         const promptDetail: TrajectoryPromptSnapshot = {
           system: payload.systemPrompt ?? '',
@@ -185,8 +211,8 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
           kind: 'system',
           seq: event.seq,
           ts: event.ts,
-          turnKey: current.key,
-          turn: current.number,
+          turnKey: turn.key,
+          turn: turn.number,
           group: 'Message',
           text: 'Initial System Prompt',
           promptDetail,
@@ -195,8 +221,8 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
           kind: 'user',
           seq: event.seq,
           ts: event.ts,
-          turnKey: current.key,
-          turn: current.number,
+          turnKey: turn.key,
+          turn: turn.number,
           group: 'Message',
           text: previewOfBlocks([{ type: 'text', text: payload.prompt }]) || 'Prompt',
           preview: payload.prompt,
@@ -207,31 +233,39 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
       }
       case 'agent_end': {
         const payload = event;
-        if (current) {
-          current.endSubtype = payload.subtype;
+        const identity = identityOf(event.agent);
+        const turn = identity !== undefined ? turns.get(identity) : undefined;
+        if (turn) {
+          turn.endSubtype = payload.subtype;
+          // 非成功终态：在该 turn 的最后一条消息请求上标 error（对齐 dsh 的 turn 错误归属）
+          if (payload.subtype !== 'success') turn.endError = payload.subtype;
         }
-        // 非成功终态：在该 turn 的最后一条消息请求上标 error（对齐 dsh 的 turn 错误归属）
-        if (current && payload.subtype !== 'success') {
-          current.endError = payload.subtype;
+        if (identity !== undefined) {
+          // 只结束自己那一份，不影响其他并发 Agent
+          activeTurns.delete(identity);
+          inFlightBySession.delete(identity);
         }
-        current = undefined;
-        inFlight = undefined;
         break;
       }
       case 'message_start': {
         const payload = event;
-        if (!current) break;
-        current.messages += 1;
-        inFlight = {
-          turnKey: current.key,
-          step: current.messages,
+        const identity = identityOf(event.agent);
+        if (identity === undefined) break; // 无 agent 身份：无法归属
+        const turn = activeTurns.get(identity);
+        if (turn === undefined) break; // 未知 / 已结束的 Agent：丢弃，不误归给别人
+        turn.messages += 1;
+        inFlightBySession.set(identity, {
+          identity,
+          step: turn.messages,
           startedAt: event.ts,
           preview: payload.preview,
-        };
+        });
         break;
       }
       case 'message_delta': {
         const payload = event;
+        const identity = identityOf(event.agent);
+        const inFlight = identity !== undefined ? inFlightBySession.get(identity) : undefined;
         if (inFlight) {
           if (inFlight.firstTokenAt === undefined) inFlight.firstTokenAt = event.ts;
           inFlight.preview = payload.preview;
@@ -240,19 +274,23 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
       }
       case 'message_end': {
         const payload = event;
-        const turn = inFlight ? turns.get(inFlight.turnKey) : current;
-        if (!inFlight || !turn) {
-          // 没有对应 message_start（旧日志 / 流式丢失）：按 turn 记一条
-          if (current) {
-            current.messages += 1;
+        const identity = identityOf(event.agent);
+        if (identity === undefined) break; // 无 agent 身份：无法归属
+        const inFlight = inFlightBySession.get(identity);
+        const turn = turns.get(identity);
+        if (inFlight === undefined || turn === undefined) {
+          // 没有对应 message_start（旧日志 / 流式丢失 / 本 Agent 已结束）：
+          // 只在自己的 turn 上补一条，绝不归给别的 Agent
+          if (turn) {
+            turn.messages += 1;
             records.push({
               kind: 'message',
               seq: event.seq,
               ts: event.ts,
-              turnKey: current.key,
-              turn: current.number,
-              group: groupOf(current.messages),
-              step: current.messages,
+              turnKey: turn.key,
+              turn: turn.number,
+              group: groupOf(turn.messages),
+              step: turn.messages,
               blocks: payload.blocks,
               ...(payload.usage ? { usage: payload.usage } : {}),
               ...(payload.stopReason ? { stopReason: payload.stopReason } : {}),
@@ -260,6 +298,7 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
               ...(payload.model ? { model: payload.model } : {}),
               ...(payload.provider ? { provider: payload.provider } : {}),
             });
+            inFlightBySession.delete(identity);
           }
           break;
         }
@@ -288,13 +327,15 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
           ...(payload.provider ? { provider: payload.provider } : {}),
           ...(inFlight.pendingRetry ? { retry: inFlight.pendingRetry } : {}),
         });
-        inFlight = undefined;
+        inFlightBySession.delete(identity);
         break;
       }
       case 'tool_start': {
         const payload = event;
-        const turn = current;
-        if (!turn) break;
+        const identity = identityOf(event.agent);
+        if (identity === undefined) break; // 无 agent 身份：无法归属
+        const turn = activeTurns.get(identity);
+        if (turn === undefined) break; // 未知 / 已结束的 Agent：丢弃
         const parentStep = parentStepByCallId.get(payload.callId) ?? turn.messages;
         const schema = turn.catalog.get(payload.name);
         const record: ReplayRecord = {
@@ -311,7 +352,7 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
           parentStep,
           ...(schema ? { schemaDetail: schema } : {}),
         };
-        toolsByCallId.set(payload.callId, { record, turnKey: turn.key });
+        toolsByCallId.set(payload.callId, { record, identity });
         records.push(record);
         break;
       }
@@ -319,22 +360,24 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
         const payload = event;
         const pending = toolsByCallId.get(payload.callId);
         if (!pending) {
-          // 无 tool_start 的结果（旧日志）：按当前 turn 补一条
-          if (current) {
+          // 无 tool_start 的结果（旧日志）：按事件自己的 Agent 补一条
+          const identity = identityOf(event.agent);
+          const turn = identity !== undefined ? turns.get(identity) : undefined;
+          if (turn) {
             const fallback: ReplayRecord = {
               kind: 'tool',
               seq: event.seq,
               ts: event.ts,
-              turnKey: current.key,
-              turn: current.number,
-              group: groupOf(current.messages),
+              turnKey: turn.key,
+              turn: turn.number,
+              group: groupOf(turn.messages),
               callId: payload.callId,
               name: payload.name ?? 'tool',
               output: payload.output,
               endedAt: event.ts,
               ...(payload.details ? { details: payload.details } : {}),
               ...(payload.isError ? { isError: true } : {}),
-              parentStep: current.messages,
+              parentStep: turn.messages,
             };
             records.push(fallback);
           }
@@ -357,6 +400,8 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
         break;
       }
       case 'retry': {
+        const identity = identityOf(event.agent);
+        const inFlight = identity !== undefined ? inFlightBySession.get(identity) : undefined;
         if (inFlight) {
           inFlight.pendingRetry = {
             attempt: event.attempt,
@@ -369,13 +414,16 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
       }
       case 'compact': {
         const payload = event;
-        if (!current) break;
+        const identity = identityOf(event.agent);
+        if (identity === undefined) break; // 无 agent 身份：无法归属
+        const turn = activeTurns.get(identity);
+        if (turn === undefined) break; // 压缩发生在未知的 Agent 上：丢弃
         records.push({
           kind: 'compacted',
           seq: event.seq,
           ts: event.ts,
-          turnKey: current.key,
-          turn: current.number,
+          turnKey: turn.key,
+          turn: turn.number,
           group: `Compaction ${event.seq}`,
           ...(payload.summary ? { summary: payload.summary } : {}),
           running: payload.summary === undefined,
@@ -384,13 +432,15 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
       }
       case 'status': {
         const payload = event;
+        const identity = identityOf(event.agent);
+        const turn = identity !== undefined ? activeTurns.get(identity) : undefined;
         records.push({
           kind: 'context',
           seq: event.seq,
           ts: event.ts,
-          turnKey: current?.key ?? null,
-          turn: current?.number ?? null,
-          group: current ? groupOf(current.messages) : 'Run',
+          turnKey: turn?.key ?? null,
+          turn: turn?.number ?? null,
+          group: turn ? groupOf(turn.messages) : 'Run',
           text: payload.text,
         });
         break;
@@ -406,23 +456,24 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
         // 分类注解：agent 元信息已携带 section，不单独产生记录
         break;
       case 'page_start': {
-        const payload = event;
+        // 页面 Agent 的身份在 agent_start 时已带 pageSlug，这里只记账
         runSummary.pages.total += 1;
-        if (current) current.pageSlug = current.pageSlug ?? payload.slug;
         break;
       }
       case 'page_end': {
         const payload = event;
         if (payload.success) runSummary.pages.completed += 1;
         else runSummary.pages.failed += 1;
-        if (!payload.success && current) {
+        if (!payload.success) {
+          // 归到该页面的活跃 Agent（按 pageSlug 精确匹配）；找不到则 run 级
+          const turn = [...activeTurns.values()].find((candidate) => candidate.pageSlug === payload.slug);
           records.push({
             kind: 'context',
             seq: event.seq,
             ts: event.ts,
-            turnKey: current.key,
-            turn: current.number,
-            group: groupOf(current.messages),
+            turnKey: turn?.key ?? null,
+            turn: turn?.number ?? null,
+            group: turn ? groupOf(turn.messages) : 'Run',
             text: `Page failed${payload.error ? `: ${payload.error}` : ''}`,
             isError: true,
           });
@@ -431,14 +482,15 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
       }
       case 'failed_sections': {
         const payload = event;
+        // 阶段都已结束（由编排层在收尾时发出）：一律归 run 级独立段
         for (const entry of payload.sections) {
           records.push({
             kind: 'context',
             seq: event.seq,
             ts: event.ts,
-            turnKey: current?.key ?? null,
-            turn: current?.number ?? null,
-            group: current ? groupOf(current.messages) : 'Run',
+            turnKey: null,
+            turn: null,
+            group: 'Run',
             text: `Section failed (${entry.stage}): ${entry.section} — ${entry.error}`,
             isError: true,
           });
@@ -451,10 +503,14 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
   }
 
   // 进行中的消息 → partial（流式帧；只知预览，不知完整内容）
+  // 并发时可能同时有多个 Agent 在流式，取最后一个（顺序场景下只有一个）
+  const flights = [...inFlightBySession.values()];
   let partial: TrajectoryPartial | null = null;
-  if (inFlight) {
+  if (flights.length > 0) {
+    const inFlight = flights[flights.length - 1]!;
+    const partialTurn = turns.get(inFlight.identity);
     partial = {
-      turn: turns.get(inFlight.turnKey)?.number ?? null,
+      turn: partialTurn?.number ?? null,
       step: inFlight.step,
       preview: inFlight.preview,
       blocks: [{ type: 'text', text: inFlight.preview }],
@@ -462,7 +518,7 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
   }
 
   // 请求编号：消息 + 压缩，共用一个时间序编号空间 + 累计 usage
-  const requests = indexRequests(records, turns);
+  const requests = indexRequests(records, turns, keyToIdentity);
 
   // callSchemas：最后活跃的 Agent 目录（检查器兜底；工具记录自身已带 schemaDetail）
   const callSchemas = new Map<string, string>();
@@ -474,6 +530,7 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
     number: turn.number,
     key: turn.key,
     label: labelOfTurn(turn),
+    sessionId: turn.identity,
     ...(turn.role ? { role: turn.role } : {}),
     ...(turn.section ? { section: turn.section } : {}),
     ...(turn.pageSlug ? { pageSlug: turn.pageSlug } : {}),
@@ -487,13 +544,18 @@ export function replayRunEvents(events: readonly RunEvent[]): TrajectorySnapshot
 function indexRequests(
   records: readonly ReplayRecord[],
   turns: ReadonlyMap<string, TurnState>,
+  keyToIdentity: ReadonlyMap<string, string>,
 ): TrajectoryRequestNumber[] {
   const numbered: TrajectoryRequestNumber[] = [];
   let cumulative: TrajectoryUsage | undefined;
 
   for (const record of records) {
     if (record.kind !== 'message' && record.kind !== 'compacted') continue;
-    const turn = record.turnKey ? (turns.get(record.turnKey) as TurnState | undefined) : undefined;
+    // record.turnKey 是 Agent key；turns 以 identity（sessionId ?? key）为键
+    const turn =
+      record.turnKey !== null
+        ? (turns.get(keyToIdentity.get(record.turnKey) ?? record.turnKey) as TurnState | undefined)
+        : undefined;
     const usage = usageOf(record.usage);
     cumulative = addUsage(cumulative, record.usage);
 
