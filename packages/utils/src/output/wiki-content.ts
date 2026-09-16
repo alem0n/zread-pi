@@ -313,10 +313,10 @@ async function writeWikiOutput(path: string, output: WikiOutput): Promise<void> 
  * 在文件锁保护下对 wiki.json 做「读-改-写」。
  * wiki.json 必须已存在（分类阶段会先落盘骨架）；不存在时抛出可读错误。
  *
- * `variant` 指定变体子目录（null / 缺省 = 遗留 `wiki/wiki.json`）。
+ * `variant` 指定变体子目录。
  */
 async function withWikiOutput<T>(
-  variant: BlueprintDetailLevel | null | undefined,
+  variant: BlueprintDetailLevel,
   fn: (output: WikiOutput) => T | Promise<T>,
 ): Promise<T> {
   const path = getWikiJsonPath(variant);
@@ -347,16 +347,15 @@ export interface BlueprintSkeletonOptions extends BlueprintSectionOptions {
   limit?: number;
   /**
    * 写盘变体（档位子目录）：`wiki/<variant>/wiki.json`。
-   * 缺省 / null = 遗留 `wiki/wiki.json`（只读兼容，新生成不再使用）。
    */
-  variant?: BlueprintDetailLevel | null;
+  variant: BlueprintDetailLevel;
 }
 
 export async function initWikiSkeleton(
   sections: WikiSection[],
   config: AppConfig,
-  techStackSummary?: TechStackSummary,
-  options: BlueprintSkeletonOptions = {},
+  techStackSummary: TechStackSummary | undefined,
+  options: BlueprintSkeletonOptions,
 ): Promise<string> {
   const output: WikiOutput = {
     id: generateWikiId(),
@@ -369,7 +368,7 @@ export async function initWikiSkeleton(
       { minimal: options.minimal },
     ),
     pages: [],
-    ...(options.variant ? { detail: options.variant } : {}),
+    detail: options.variant,
     ...(techStackSummary ? { techStackSummary } : {}),
   };
 
@@ -386,12 +385,12 @@ export async function initWikiSkeleton(
  *
  * `options.limit` 为合并后的分类数上限（由蓝图细节档位决定）；
  * `options.minimal` = minimal 档位：既有分类替换为唯一的「概览」（页面不动）；
- * `options.variant` = 写盘变体（缺省 = 遗留目录）。
+ * `options.variant` = 写盘变体。
  */
 export async function mergeWikiSections(
   incoming: WikiSection[],
   config: AppConfig,
-  options: BlueprintSkeletonOptions = {},
+  options: BlueprintSkeletonOptions,
 ): Promise<WikiSection[]> {
   return withWikiOutput(options.variant, (output) => {
     output.sections = options.minimal
@@ -427,8 +426,8 @@ export interface MergeTopicsOptions {
    * sync 的主题阶段开启，保证未改动的页面不换 URL、不产生重复页。
    */
   reuseExisting?: boolean;
-  /** 写盘变体（档位子目录；缺省 / null = 遗留目录） */
-  variant?: BlueprintDetailLevel | null;
+  /** 写盘变体（档位子目录） */
+  variant: BlueprintDetailLevel;
 }
 
 /**
@@ -440,7 +439,7 @@ export interface MergeTopicsOptions {
 export async function mergeSectionTopics(
   section: WikiSection,
   topics: WikiTopic[],
-  options: MergeTopicsOptions = {},
+  options: MergeTopicsOptions,
 ): Promise<MergeTopicsResult> {
   const sectionTitle = section.title?.trim();
   if (!sectionTitle) throw new Error('section.title 不能为空');
@@ -544,14 +543,14 @@ export interface ApplyTitlesResult {
  * slug 不属于该分类时计入 unknown 并跳过（不允许跨分类改标题）。
  */
 export interface ApplyTitlesOptions {
-  /** 写盘变体（档位子目录；缺省 / null = 遗留目录） */
-  variant?: BlueprintDetailLevel | null;
+  /** 写盘变体（档位子目录） */
+  variant: BlueprintDetailLevel;
 }
 
 export async function applySectionTitles(
   section: WikiSection,
   titles: Array<{ slug?: string; title?: string }>,
-  options: ApplyTitlesOptions = {},
+  options: ApplyTitlesOptions,
 ): Promise<ApplyTitlesResult> {
   const sectionTitle = section.title?.trim();
   if (!sectionTitle) throw new Error('section.title 不能为空');
@@ -602,7 +601,7 @@ export async function applySectionTitles(
  */
 export async function writeWikiPages(
   pages: WikiPage[],
-  options: { variant?: BlueprintDetailLevel | null } = {},
+  options: { variant: BlueprintDetailLevel },
 ): Promise<string> {
   const outputPath = getWikiJsonPath(options.variant);
   await withWikiOutput(options.variant, (output) => {
@@ -622,8 +621,8 @@ export async function writeWikiPages(
 export async function generateWikiJson(
   pages: WikiPage[],
   config: AppConfig,
-  techStackSummary?: TechStackSummary,
-  variant?: BlueprintDetailLevel | null,
+  techStackSummary: TechStackSummary | undefined,
+  variant: BlueprintDetailLevel,
 ): Promise<string> {
   // 归档入口只收 pages：分类由 pages 的 section 字段聚合得到
   const seen = new Set<string>();
@@ -660,14 +659,14 @@ export async function generateWikiJson(
  * 三阶段流程中先写骨架（sections + 空 pages）、再增量补齐页面，
  * 因此「pages 为空」只有在 sections 也为空时才算非法。
  *
- * @param path - Optional custom path (defaults to `.zread-pi/wiki[/<variant>]/wiki.json`)
- * @param variant - 变体子目录（缺省 / null = 遗留目录）
+ * @param path - Optional custom path (defaults to `.zread-pi/wiki/<variant>/wiki.json`)
+ * @param variant - 变体子目录（必填）
  * @returns WikiOutput with pages array
  * @throws Error if blueprint not found or invalid structure
  */
 export async function loadWikiBlueprint(
-  path?: string,
-  variant?: BlueprintDetailLevel | null,
+  path: string | undefined,
+  variant: BlueprintDetailLevel,
 ): Promise<WikiOutput> {
   const wikiDir = getWikiDir(variant);
   const blueprintPath = path ?? join(wikiDir, DEFAULT_BLUEPRINT_FILE);

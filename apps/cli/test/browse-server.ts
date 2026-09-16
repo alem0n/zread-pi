@@ -83,14 +83,18 @@ const PAGE = {
   associatedFiles: ["hello.py"],
 };
 
-await mkdir(join(repo, ".zread-pi", "wiki", PAGE.section), { recursive: true });
+const WIKI_DIR = join(repo, ".zread-pi", "wiki", "high");
+
+await mkdir(join(WIKI_DIR, PAGE.section), { recursive: true });
 await writeFile(
-  join(repo, ".zread-pi", "wiki", "wiki.json"),
+  join(WIKI_DIR, "wiki.json"),
   JSON.stringify(
     {
       id: "browse-test",
       generated_at: new Date().toISOString(),
       language: "zh",
+      detail: "high",
+      sections: [{ title: PAGE.section }],
       pages: [PAGE],
     },
     null,
@@ -99,7 +103,7 @@ await writeFile(
   "utf-8",
 );
 await writeFile(
-  join(repo, ".zread-pi", "wiki", PAGE.section, PAGE.file),
+  join(WIKI_DIR, PAGE.section, PAGE.file),
   "# 概览\n\n浏览文档用夹具页面。\n",
   "utf-8",
 );
@@ -225,7 +229,7 @@ async function writeVariant(detail: string, page: typeof HIGH_PAGE, generatedAt:
   await writeFile(
     join(dir, "wiki.json"),
     JSON.stringify(
-      { id: detail, generated_at: generatedAt, language: "zh", detail, pages: [page] },
+      { id: detail, generated_at: generatedAt, language: "zh", detail, sections: [{ title: page.section }], pages: [page] },
       null,
       2,
     ),
@@ -239,23 +243,19 @@ await writeVariant("low", LOW_PAGE, "2026-02-03T00:00:00.000Z");
 await writeFile(join(repo, "hello.py"), "print('hello')\n", "utf-8");
 
 interface VariantsPayload {
-  variants: Array<{ detail: string | null; name: string; legacy: boolean; pagesCount: number }>;
+  variants: Array<{ detail: string; name: string; pagesCount: number }>;
   active: string | null;
 }
 const variantsRes = await fetch(`${info.url}/api/wiki/variants`);
 const variantsPayload = (await variantsRes.json()) as VariantsPayload;
 checkEqual("GET /api/wiki/variants 状态码", variantsRes.status, 200);
-checkEqual("variants 含 high / low / 默认 三个条目", variantsPayload.variants.length, 3);
+checkEqual("variants 含 high / low 两个条目", variantsPayload.variants.length, 2);
 checkEqual(
-  "variants 按档位顺序排列（遗留最后）",
+  "variants 按档位顺序排列",
   JSON.stringify(variantsPayload.variants.map((variant) => variant.detail)),
-  JSON.stringify(["low", "high", null]),
+  JSON.stringify(["low", "high"]),
 );
 checkEqual("variants active = 配置档位 high", variantsPayload.active, "high");
-check(
-  "variants 中遗留条目名为「默认」",
-  variantsPayload.variants.some((variant) => variant.detail === null && variant.name === "默认"),
-);
 check(
   "variants 页数来自各自的 wiki.json",
   variantsPayload.variants.every((variant) => variant.pagesCount === 1),
@@ -272,23 +272,13 @@ const lowCatalog = (await (await fetch(`${info.url}/api/wiki/catalog?detail=low`
 };
 checkEqual("?detail=low 返回 low 变体", lowCatalog.pages[0]?.slug, LOW_PAGE.slug);
 
-const legacyCatalog = (await (await fetch(`${info.url}/api/wiki/catalog?detail=default`)).json()) as {
-  pages: Array<{ slug: string }>;
-};
-checkEqual("?detail=default 返回遗留目录（默认）", legacyCatalog.pages[0]?.slug, PAGE.slug);
-
 const highContent = (await (
   await fetch(`${info.url}/api/wiki/content/${HIGH_PAGE.slug}?detail=high`)
 ).json()) as { content: string };
 check(
   "?detail=high 的正文从 high 变体目录解析",
-  highContent.content.includes("high variant page") && !highContent.content.includes("浏览文档用夹具页面"),
+  highContent.content.includes("high variant page"),
 );
-
-const legacyContent = (await (
-  await fetch(`${info.url}/api/wiki/content/${PAGE.slug}?detail=default`)
-).json()) as { content: string };
-check("?detail=default 的正文从遗留目录解析", legacyContent.content.includes("浏览文档用夹具页面"));
 
 const unknownVariant = await fetch(`${info.url}/api/wiki/catalog?detail=bogus`);
 checkEqual("无效档位返回 404", unknownVariant.status, 404);
@@ -468,12 +458,19 @@ checkEqual("afterSeq 超出范围返回空数组", tailEmptyPayload.events.lengt
 const badRunEvents = await fetch(`${info.url}/api/runs/not-a-run-id/events`);
 checkEqual("非法 runId 的事件接口 404", badRunEvents.status, 404);
 
-// 仅存在档位变体（无遗留目录）的目录也算「有文档」
+// 仅存在档位变体的目录也算「有文档」
 const variantOnlyRepo = await mkdtemp(join(tmpdir(), "zread-browse-variant-only-"));
 await mkdir(join(variantOnlyRepo, ".zread-pi", "wiki", "high"), { recursive: true });
 await writeFile(
   join(variantOnlyRepo, ".zread-pi", "wiki", "high", "wiki.json"),
-  JSON.stringify({ id: "variant-only", generated_at: new Date().toISOString(), language: "zh", pages: [HIGH_PAGE] }),
+  JSON.stringify({
+    id: "variant-only",
+    generated_at: new Date().toISOString(),
+    language: "zh",
+    detail: "high",
+    sections: [{ title: HIGH_PAGE.section }],
+    pages: [HIGH_PAGE],
+  }),
   "utf-8",
 );
 check("hasWikiCatalog 识别仅有档位变体的目录", hasWikiCatalog(variantOnlyRepo) === true);

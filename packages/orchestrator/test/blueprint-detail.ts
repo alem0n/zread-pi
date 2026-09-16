@@ -318,12 +318,12 @@ const { generateWikiCatalog } = await import("../src/orchestrator.js");
 
 const ctx = { cwd: repo, abortSignal: new AbortController().signal } as never;
 
-/** 变体目录下的 wiki.json（null = 遗留目录） */
-const wikiJsonPath = (detail: BlueprintDetailLevel | null): string => getWikiJsonPath(detail);
+/** 变体目录下的 wiki.json */
+const wikiJsonPath = (detail: BlueprintDetailLevel): string => getWikiJsonPath(detail);
 const resetWiki = async (): Promise<void> => {
 	await rm(join(repo, ".zread-pi"), { recursive: true, force: true });
 };
-const wikiExists = async (detail: BlueprintDetailLevel | null): Promise<boolean> =>
+const wikiExists = async (detail: BlueprintDetailLevel): Promise<boolean> =>
 	readFile(wikiJsonPath(detail), "utf-8").then(
 		() => true,
 		() => false,
@@ -712,65 +712,58 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	check("B7 缩编主题工具：捕获结果", topicCapture.topics?.[0]?.title === "T1");
 }
 
-// ---- B8：变体目录落盘 / 遗留兼容 / listWikiVariants / resolveWikiVariant ----
+// ---- B8：变体目录落盘 / listWikiVariants / resolveWikiVariant ----
 {
 	await resetWiki();
 	const config = await loadConfig();
 
-	// 档位目录各自独立，遗留目录同时存在
+	// 档位目录各自独立
 	await initWikiSkeleton([...BASE_SECTIONS, { title: "领域A" }], config, undefined, {
 		variant: "high",
 	});
 	await initWikiSkeleton([...BASE_SECTIONS], config, undefined, { variant: "low" });
-	await initWikiSkeleton([...BASE_SECTIONS, { title: "遗留域" }], config);
 
 	check("B8 档位目录落盘：wiki/high/wiki.json", await wikiExists("high"));
 	check("B8 档位目录落盘：wiki/low/wiki.json", await wikiExists("low"));
-	check("B8 遗留目录落盘：wiki/wiki.json", await wikiExists(null));
 
 	const highBlueprint = await loadWikiBlueprint(undefined, "high");
 	check(
 		"B8 按变体读取互不串档",
 		highBlueprint.sections?.some((section) => section.title === "领域A") === true &&
-			highBlueprint.sections?.some((section) => section.title === "遗留域") !== true,
+			highBlueprint.sections?.some((section) => section.title === "概览") === true,
 		JSON.stringify(highBlueprint.sections?.map((section) => section.title)),
 	);
-	const legacyBlueprint = await loadWikiBlueprint();
+	const lowBlueprint = await loadWikiBlueprint(undefined, "low");
 	check(
-		"B8 遗留兼容：loadWikiBlueprint() 读遗留目录",
-		legacyBlueprint.sections?.some((section) => section.title === "遗留域") === true,
-		JSON.stringify(legacyBlueprint.sections?.map((section) => section.title)),
+		"B8 low 变体只含自己的分类",
+		lowBlueprint.sections?.some((section) => section.title === "领域A") !== true,
+		JSON.stringify(lowBlueprint.sections?.map((section) => section.title)),
 	);
 	check(
 		"B8 生成档位记录进 WikiOutput.detail",
-		highBlueprint.detail === "high" && legacyBlueprint.detail === undefined,
-		`high=${String(highBlueprint.detail)} legacy=${String(legacyBlueprint.detail)}`,
+		highBlueprint.detail === "high" && lowBlueprint.detail === "low",
+		`high=${String(highBlueprint.detail)} low=${String(lowBlueprint.detail)}`,
 	);
 
 	const variants = listWikiVariants();
 	check(
-		"B8 listWikiVariants：档位顺序 + 遗留最后",
-		JSON.stringify(variants.map((variant) => variant.detail)) === JSON.stringify(["low", "high", null]),
+		"B8 listWikiVariants：档位顺序",
+		JSON.stringify(variants.map((variant) => variant.detail)) === JSON.stringify(["low", "high"]),
 		JSON.stringify(variants.map((variant) => variant.detail)),
 	);
 	check(
-		"B8 listWikiVariants：元信息（pagesCount / sectionsCount / generatedAt / legacy）",
+		"B8 listWikiVariants：元信息（pagesCount / sectionsCount / generatedAt）",
 		variants.every(
 			(variant) =>
 				typeof variant.pagesCount === "number" &&
 				typeof variant.sectionsCount === "number" &&
 				typeof variant.generatedAt === "string",
-		) &&
-			variants.find((variant) => variant.detail === "high")?.legacy === false &&
-			variants.at(-1)?.legacy === true,
+		),
 		JSON.stringify(variants),
 	);
 
 	check("B8 resolveWikiVariant：优先配置档位", resolveWikiVariant("high") === "high");
-	check("B8 resolveWikiVariant：配置档位缺失 → 遗留", resolveWikiVariant("minimal") === null);
-
-	await rm(wikiJsonPath(null), { force: true });
-	check("B8 resolveWikiVariant：无遗留 → 第一个存在档位", resolveWikiVariant("minimal") === "low");
+	check("B8 resolveWikiVariant：配置档位缺失 → 第一个存在档位", resolveWikiVariant("minimal") === "low");
 
 	await resetWiki();
 	check("B8 resolveWikiVariant：无任何变体 → undefined", resolveWikiVariant("high") === undefined);

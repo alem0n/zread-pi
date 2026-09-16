@@ -32,7 +32,6 @@ export interface TranslationKeys {
     docsNone: string;
     docsGenerated: string;
     docsUnit: string;
-    docsLegacy: string;
     docsTarget: string;
   };
   config: {

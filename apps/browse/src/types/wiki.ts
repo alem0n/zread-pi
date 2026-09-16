@@ -24,12 +24,11 @@ export interface WikiOutput {
   detail?: BlueprintDetailLevel;
 }
 
-/** 一个可浏览的 wiki 变体（档位子目录或遗留目录） */
+/** 一个可浏览的 wiki 变体（档位子目录） */
 export interface WikiVariant {
-  /** 档位名；null = 遗留目录（界面显示为「默认」） */
-  detail: BlueprintDetailLevel | null;
+  /** 档位名 */
+  detail: BlueprintDetailLevel;
   name: string;
-  legacy: boolean;
   generatedAt: string | null;
   pagesCount: number;
   sectionsCount: number | null;
@@ -38,7 +37,7 @@ export interface WikiVariant {
 /** GET /api/wiki/variants 的响应 */
 export interface WikiVariantsResponse {
   variants: WikiVariant[];
-  /** 缺省档位（未传 ?detail= 时服务端会解析到的档位；null = 遗留目录） */
+  /** 缺省档位（未传 ?detail= 时服务端会解析到的档位；无任何变体时为 null） */
   active: BlueprintDetailLevel | null;
 }
 

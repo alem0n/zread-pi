@@ -30,7 +30,6 @@ export const enUS: TranslationKeys = {
     docsNone: 'not generated',
     docsGenerated: 'generated',
     docsUnit: 'pages',
-    docsLegacy: 'default',
     docsTarget: 'target',
   },
   config: {

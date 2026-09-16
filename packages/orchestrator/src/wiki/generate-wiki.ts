@@ -243,8 +243,8 @@ async function relocatePageFile(source: string, target: string): Promise<void> {
 export async function rescuePageFile(
   page: WikiPage,
   attempts: PageWriteAttempt[],
-  wikiDir: string = getWikiDir(),
-  variant?: BlueprintDetailLevel | null,
+  wikiDir: string,
+  variant: BlueprintDetailLevel,
 ): Promise<string | null> {
   const target = joinPath(wikiDir, page.section, page.file);
 
@@ -285,16 +285,15 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
   // 全局记忆：开始生成文档时记录当前项目（失败不阻断生成）
   await rememberCurrentProject();
 
-  // 蓝图细节档位（写盘变体）：显式指定 > 配置档位；null = 遗留目录
+  // 蓝图细节档位（写盘变体）：显式指定 > 配置档位
   const config = await loadConfig();
-  const variant: BlueprintDetailLevel | null =
-    options?.detail !== undefined ? options.detail : config.blueprint.detail;
+  const variant: BlueprintDetailLevel = options?.detail ?? config.blueprint.detail;
 
   return withRunLog(
     options?.runLog,
     {
       kind: 'generate',
-      detail: variant ?? undefined,
+      detail: variant,
       model: config.llm.model ?? undefined,
       provider: config.llm.provider ?? undefined,
     },
@@ -305,13 +304,13 @@ export async function generateWikiContent(options?: GenerateWikiOptions): Promis
 /** 页面生成主体（runLog 一定存在：来自调用方或 withRunLog 自动创建） */
 async function generatePages(
   options: GenerateWikiOptions | undefined,
-  variant: BlueprintDetailLevel | null,
+  variant: BlueprintDetailLevel,
   runLog: RunLogWriter,
   startTime: number,
 ): Promise<WikiResult> {
   const config = await loadConfig();
   // minimal 会在页面提示词里附加「全景导览」要求
-  const spec = getDetailSpec(variant ?? config.blueprint.detail);
+  const spec = getDetailSpec(variant);
   const wikiDir = getWikiDir(variant);
   const writeTool = createWritePageTool(variant);
 

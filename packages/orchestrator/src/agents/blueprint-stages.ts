@@ -110,12 +110,10 @@ export interface BlueprintStageContext {
   runLog?: RunLogWriter;
   /**
    * 写盘变体（档位子目录）：`wiki/<variant>/`。
-   * `null` = 遗留目录（sync 只读兼容既有产物时）；生成阶段始终是档位名。
    */
-  variant: BlueprintDetailLevel | null;
+  variant: BlueprintDetailLevel;
   /**
    * 数量控制档位（缺省 = 配置档位）。
-   * 与 `variant` 不同：sync 遗留目录没有档位，此时仍按配置档位做数量控制。
    */
   detail?: BlueprintDetailLevel;
 }
@@ -484,7 +482,7 @@ export async function runClassifyStage(
 /** 读取某个分类下既有页面的标题（sync 代码兜底时优先保留旧页面用） */
 async function loadSectionPageTitles(
   sectionTitle: string,
-  variant: BlueprintDetailLevel | null,
+  variant: BlueprintDetailLevel,
 ): Promise<string[]> {
   const blueprint = await loadWikiBlueprint(undefined, variant);
   const key = sectionTitle.trim().toLowerCase();

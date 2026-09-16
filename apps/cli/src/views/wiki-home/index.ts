@@ -179,7 +179,7 @@ export default class WikiHomePage extends Screen {
     // 活动变体（任一档位 / 遗留目录）：状态标题与浏览入口
     const activePages = this.app.wiki.catalog?.pages;
     this.statusProgress =
-      activePages && activePages.length > 0
+      activePages && activePages.length > 0 && this.app.wiki.detail
         ? await countGeneratedPages(activePages, this.app.wiki.detail)
         : null;
 

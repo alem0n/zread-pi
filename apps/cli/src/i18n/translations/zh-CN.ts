@@ -30,7 +30,6 @@ export const zhCN: TranslationKeys = {
     docsNone: '未生成',
     docsGenerated: '已生成',
     docsUnit: '篇',
-    docsLegacy: '默认',
     docsTarget: '目标',
   },
   config: {
