@@ -9,6 +9,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@zread-pi/trajectory': fileURLToPath(new URL('../../packages/trajectory/src/index.ts', import.meta.url)),
+      '@zread-pi/types': fileURLToPath(new URL('../../packages/types/src/index.ts', import.meta.url)),
     },
   },
   server: {

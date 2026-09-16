@@ -14,7 +14,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@zread-pi/trajectory": ["../../packages/trajectory/src/index.ts"],
+      "@zread-pi/types": ["../../packages/types/src/index.ts"]
     },
     "noUnusedLocals": true,
     "noUnusedParameters": true,

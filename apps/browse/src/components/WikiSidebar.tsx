@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useWiki } from '@/hooks/useWiki';
-import { BookOpen, ChevronDown, ChevronRight, ChevronUp, Layers } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, ChevronUp, Layers, Activity } from 'lucide-react';
 import type { BlueprintDetailLevel, TreeNode, WikiPage } from '@/types/wiki';
 
 /** 档位展示名（与 CLI `/config/detail` 的文案保持一致） */
@@ -160,6 +160,17 @@ export function WikiSidebar() {
         {tree.map(node => (
           <TreeItem key={node.id} node={node} onSelectPage={handleSelectPage} />
         ))}
+      </div>
+
+      {/* 轨迹检查入口（最近一次运行的记录） */}
+      <div className="border-t border-gray-100 p-3">
+        <button
+          onClick={() => navigate('/trajectory')}
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150"
+        >
+          <Activity size={14} className="text-gray-400" />
+          <span>轨迹检查</span>
+        </button>
       </div>
 
       {/* 档位选择器（列表向上弹出；无变体时不渲染） */}
