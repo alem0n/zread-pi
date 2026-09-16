@@ -44,6 +44,7 @@ import {
 import type { AppConfig, BlueprintDetailLevel } from '@zread-pi/types';
 import type { WikiPage, WikiSection, WikiTopic } from '@zread-pi/types';
 import { createAgent, type AgentResult, type RunLogSink } from './create-agent.js';
+import { createRunLogSink } from './run-log-sink.js';
 import {
   createRefineSectionTitlesTool,
   createSubmitCondensedSectionsTool,
@@ -119,17 +120,12 @@ export interface BlueprintStageContext {
   detail?: BlueprintDetailLevel;
 }
 
-/** 把 Agent 身份绑定到 runLog 的 append 上（缺省 runLog 时返回 undefined） */
+/** 把 Agent 身份绑定到 runLog 的 append 上（生成全局唯一 sessionId；缺省 runLog 时返回 undefined） */
 function bindRunLog(
   runLog: RunLogWriter | undefined,
   agent: RunEventAgentMeta,
 ): RunLogSink | undefined {
-  if (runLog === undefined) return undefined;
-  return {
-    append: (event) => {
-      runLog.append({ ...event, agent });
-    },
-  };
+  return createRunLogSink(runLog, agent);
 }
 
 /**

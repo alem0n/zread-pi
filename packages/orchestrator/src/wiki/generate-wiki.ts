@@ -28,6 +28,7 @@ import {
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { polishPageFile } from './polish.js';
+import { createRunLogSink } from '../agents/run-log-sink.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import type { BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
@@ -353,6 +354,8 @@ async function generatePages(
         pageSlug: page.slug,
       };
       const pageOutputPath = joinPath(wikiDir, page.section, page.file);
+      // 页面 Agent 的轨迹 sink（绑定全局唯一 sessionId，作为 pi 会话 id 与回放归属键）
+      const pageSink = createRunLogSink(runLog, pageAgent);
       runLog.append(buildPageStartEvent({ slug: page.slug, outputPath: pageOutputPath }));
 
       // 发射 page_start 事件
@@ -412,9 +415,7 @@ async function generatePages(
           prompts: buildPagePrompt(page, spec, variant),
           // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
           maxTurns: options?.maxTurns,
-          runLog: {
-            append: (event) => runLog.append({ ...event, agent: pageAgent }),
-          },
+          runLog: pageSink,
           // 通过 onEvent 将 CatalogEvent 转换为 ArticleEventPayload
           onEvent: (catalogEvent) => {
             // 任何带用量的中间事件都刷新累计快照（usage 已是该 Agent 的累计值）
@@ -506,13 +507,11 @@ async function generatePages(
           filePath: outputFile,
           slug: page.slug,
           title: page.title,
-          runLog: {
-            append: (event) =>
-              runLog.append({
-                ...event,
-                agent: { key: `polish:${page.slug}`, role: 'polish', pageSlug: page.slug },
-              }),
-          },
+          runLog: createRunLogSink(runLog, {
+            key: `polish:${page.slug}`,
+            role: 'polish',
+            pageSlug: page.slug,
+          }),
         });
         if (polish.applied) {
           pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms）`);

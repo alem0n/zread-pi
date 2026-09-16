@@ -73,6 +73,8 @@ export interface CreateBlueprintAgentOptions {
  * （`packages/utils/src/trajectory-store/`），折叠 / 布局在 `@zread-pi/trajectory`。
  */
 export interface RunLogSink {
+  /** 本次 Agent 会话的全局唯一标识（同时是 pi 会话的 sessionId） */
+  readonly sessionId: string;
   append(event: AppendRunEvent): void;
 }
 
@@ -334,6 +336,9 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     tools: options.tools,
     systemPrompt,
     maxTurns,
+    // 轨迹回放的 session 归属键（pi 会话 id = sink 的 sessionId；
+    // 缺省由适配层生成全局唯一值，仍能正常工作，只是事件里不带 sessionId）
+    sessionId: options.runLog?.sessionId,
     contextWindow: modelContextWindow,
     maxTokens: modelMaxTokens,
     budget: {
