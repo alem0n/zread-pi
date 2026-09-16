@@ -11,7 +11,7 @@ import type { RunEvent, RunMeta } from '@zread-pi/types';
 import { getEventsPath, getMetaPath } from './run-dir.js';
 
 /** 单次读取返回的事件上限（防止异常大的日志一次性灌进内存） */
-export const DEFAULT_READ_LIMIT = 500;
+export const DEFAULT_READ_LIMIT = 2000;
 
 export interface ReadEventsOptions {
   /** 向前分页：只取 seq < beforeSeq 的事件，返回**最新的** limit 条（顺序保持） */
@@ -109,11 +109,13 @@ export async function readEvents(
     };
   }
 
-  // 缺省：最新的 limit 条（尾部）
+  // 缺省：从 run 开头加载（检查器是自上而下的，首屏必须是 turn 1 / 系统提示，
+  // 不是事件尾部）。剩余部分由前端按 afterSeq 续页（hasNewer）
+  const window = all.slice(0, limit);
   return {
-    events: all.slice(-limit),
-    hasMore: all.length > limit,
-    hasNewer: false,
+    events: window,
+    hasMore: false,
+    hasNewer: all.length > window.length,
     runEnded,
   };
 }

@@ -255,7 +255,7 @@ function readCodeSnippet(
 const LEGACY_VARIANT_PARAM = "default";
 
 /** events 接口的默认每页条数（与 reader 的 DEFAULT_READ_LIMIT 对齐） */
-const DEFAULT_EVENTS_LIMIT = 500;
+const DEFAULT_EVENTS_LIMIT = 2000;
 
 /** 解析后的请求变体（档位子目录或遗留目录） */
 interface ResolvedWikiVariant {

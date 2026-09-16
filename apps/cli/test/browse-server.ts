@@ -373,6 +373,28 @@ check("事件按 seq 升序", eventsPayload.events.every((event, index) => event
 checkEqual("已完成 run 的 runEnded", eventsPayload.runEnded, true);
 checkEqual("lastSeq 与事件数一致", eventsPayload.lastSeq, 10);
 
+// 缺省窗口 = 从 run 开头（检查器自上而下，首屏必须是 turn 1，不是事件尾部）
+// 事件数超过 limit 时：缺省返回 seq 1..limit，并提示 hasNewer
+const headRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events?limit=4`);
+const headPayload = (await headRes.json()) as {
+  events: Array<{ seq: number }>;
+  hasMore: boolean;
+  hasNewer: boolean;
+};
+checkEqual("事件数超 limit 时缺省返回开头一页", JSON.stringify(headPayload.events.map((event) => event.seq)), "[1,2,3,4]");
+checkEqual("开头一页 hasMore = false", headPayload.hasMore, false);
+checkEqual("开头一页提示 hasNewer", headPayload.hasNewer, true);
+
+// afterSeq 续页：把剩余事件续完
+const midRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events?afterSeq=4&limit=4`);
+const midPayload = (await midRes.json()) as { events: Array<{ seq: number }>; hasNewer: boolean };
+checkEqual("afterSeq 续页返回后续一页", JSON.stringify(midPayload.events.map((event) => event.seq)), "[5,6,7,8]");
+checkEqual("续页仍有剩余 hasNewer = true", midPayload.hasNewer, true);
+const restRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events?afterSeq=8&limit=4`);
+const restPayload = (await restRes.json()) as { events: Array<{ seq: number }>; hasNewer: boolean };
+checkEqual("最后一页返回剩余事件", JSON.stringify(restPayload.events.map((event) => event.seq)), "[9,10]");
+checkEqual("续完时 hasNewer = false", restPayload.hasNewer, false);
+
 // 向前分页（beforeSeq = seq < N 的最近 limit 条）：返回更旧的页并提示 hasMore
 const olderRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/events?beforeSeq=11&limit=4`);
 const older = (await olderRes.json()) as { events: Array<{ seq: number }>; hasMore: boolean };

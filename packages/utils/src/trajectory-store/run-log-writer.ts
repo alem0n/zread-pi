@@ -409,6 +409,7 @@ export function buildAgentStartEvent(input: {
 }): Omit<AgentStartEvent, 'seq' | 'ts'> {
   return {
     kind: 'agent_start',
+    ...(input.agent ? { agent: input.agent } : {}),
     prompt: clipText(input.prompt),
     ...(input.systemPrompt ? { systemPrompt: clipText(input.systemPrompt) } : {}),
     toolCatalog: input.toolCatalog.map((tool) => ({
