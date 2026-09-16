@@ -154,6 +154,51 @@ const content = (await (await fetch(`${info.url}/api/wiki/content/${PAGE.slug}`)
 check("GET /api/wiki/content 返回 markdown", content.content.includes("# 概览"));
 
 // ---------------------------------------------------------------------------
+// 1a) 界面语言 i18n：由 CLI 配置的 language 字段解析（夹具 = zh）
+// ---------------------------------------------------------------------------
+
+const configPath = join(home, ".zread-pi", "config.yaml");
+
+/** 写一份完整配置（只改 language / doc_language，其余字段保持夹具原样） */
+async function writeConfig(language: "zh" | "en"): Promise<void> {
+  await writeFile(
+    configPath,
+    [
+      `language: ${language}`,
+      `doc_language: ${language}`,
+      "llm:",
+      "  provider: openai-compatible",
+      "  model: mock-model",
+      "  api_key: sk-mock",
+      "  base_url: http://127.0.0.1:1/v1",
+      "concurrency:",
+      "  max_concurrent: 1",
+      "  max_retries: 0",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+}
+
+async function fetchLocale(): Promise<string> {
+  const response = await fetch(`${info.url}/api/i18n`);
+  const payload = (await response.json()) as { locale: string };
+  return payload.locale;
+}
+
+const i18nRes = await fetch(`${info.url}/api/i18n`);
+checkEqual("GET /api/i18n 状态码", i18nRes.status, 200);
+checkEqual("language: zh → locale zh-CN", await fetchLocale(), "zh-CN");
+
+// 改配置为 en：同一服务器进程按请求即时生效（loadConfigSync 每次读盘）
+await writeConfig("en");
+checkEqual("language: en → locale en-US", await fetchLocale(), "en-US");
+
+// 恢复 zh，避免影响后面 BrowsePage 的中文断言
+await writeConfig("zh");
+checkEqual("恢复 language: zh 后 locale 回到 zh-CN", await fetchLocale(), "zh-CN");
+
+// ---------------------------------------------------------------------------
 // 1b) 多档共存：variants API + ?detail= 解析 + 遗留回退
 // ---------------------------------------------------------------------------
 

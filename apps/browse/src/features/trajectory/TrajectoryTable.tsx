@@ -16,6 +16,7 @@ import {
   type TrajectoryCellProps,
   type TrajectoryTurnModel,
 } from '@zread-pi/trajectory';
+import { useT, type TranslateFn } from '@/i18n/I18nContext';
 
 export type RowKind = 'turn-header' | 'group-header' | 'cell' | 'collapsed-turn' | 'load-older';
 
@@ -46,10 +47,12 @@ interface BuildRowsOptions {
   focusIndexes: ReadonlySet<number> | null;
   matchSet: ReadonlySet<string> | null;
   hasMoreOlder: boolean;
+  /** 文案翻译（轮次标题 / 折叠摘要等前端文案走它） */
+  t: TranslateFn;
 }
 
 /** 折叠态的 turn：只保留头部 + 一条摘要行 */
-function buildCollapsedSummary(turn: TrajectoryTurnModel): TrajectoryRow {
+function buildCollapsedSummary(turn: TrajectoryTurnModel, t: TranslateFn): TrajectoryRow {
   const cells = turn.groups.flatMap((group) => group.cells);
   const tools = cells.filter((cell) => cell.kind === 'tool');
   const duration = cells.reduce((total, cell) => total + (cell.timeSeconds ?? 0), 0);
@@ -61,11 +64,11 @@ function buildCollapsedSummary(turn: TrajectoryTurnModel): TrajectoryRow {
     turn,
     cell: cells[0],
     group: {
-      title: `${cells.length} records`,
+      title: t('trajectory.recordsCount', { count: cells.length }),
       description:
         tools.length > 0
-          ? `${Math.round(duration * 1000)} ms · ${tools.length} tool calls`
-          : `${Math.round(duration * 1000)} ms`,
+          ? t('trajectory.collapsedTools', { ms: Math.round(duration * 1000), count: tools.length })
+          : t('trajectory.collapsedDuration', { ms: Math.round(duration * 1000) }),
       cells: [],
     },
   };
@@ -76,7 +79,7 @@ export function buildTrajectoryRows(
   options: BuildRowsOptions,
 ): TrajectoryRow[] {
   const rows: TrajectoryRow[] = [];
-  const { collapseTurns, collapsedTurnSet, collapseAssistant, focusIndexes, matchSet, hasMoreOlder } = options;
+  const { collapseTurns, collapsedTurnSet, collapseAssistant, focusIndexes, matchSet, hasMoreOlder, t } = options;
 
   for (const turn of turns) {
     const turnHasFocus =
@@ -96,7 +99,7 @@ export function buildTrajectoryRows(
     });
 
     if (isCollapsed) {
-      rows.push(buildCollapsedSummary(turn));
+      rows.push(buildCollapsedSummary(turn, t));
       continue;
     }
 
@@ -214,6 +217,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
   onScroll,
   containerRef,
 }: TrajectoryTableProps) {
+  const t = useT();
   const visible = useMemo(() => rows.slice(startIndex, endIndex), [rows, startIndex, endIndex]);
 
   const renderRow = useCallback(
@@ -226,7 +230,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
               onClick={onLoadOlder}
               className="mx-auto text-xs text-[#0075de] hover:underline"
             >
-              Load older events…
+              {t('trajectory.loadOlder')}
             </button>
           </div>
         );
@@ -237,8 +241,8 @@ export const TrajectoryTable = memo(function TrajectoryTable({
         const cells = turn.groups.flatMap((group) => group.cells);
         const label =
           turn.turn === null
-            ? 'Between turns'
-            : `Turn ${turn.turn} · ${turn.label}`;
+            ? t('trajectory.betweenTurns')
+            : t('trajectory.turnLabel', { turn: turn.turn, label: turn.label });
         return (
           <div
             key={row.key}
@@ -250,7 +254,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
           >
             <span className="text-xs font-semibold text-[#31302e] truncate">{label}</span>
             <span className="text-[10px] text-[#a39e98]">
-              {cells.length} records
+              {t('trajectory.recordsCount', { count: cells.length })}
             </span>
           </div>
         );
@@ -317,7 +321,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
               cell.isError ? 'text-[#e54847]' : 'text-[#31302e]'
             } ${isMatch && !isSelected ? 'bg-[#0075de]/20 rounded px-0.5' : ''}`}
           >
-            {cell.text || cell.result || '(empty)'}
+            {cell.text || cell.result || t('trajectory.emptyRecord')}
           </span>
           {cache !== null ? <span className="text-[10px] text-[#a39e98] shrink-0">{cache}</span> : null}
           {usage !== null ? <span className="text-[10px] text-[#615d59] shrink-0 font-mono">{usage}</span> : null}
@@ -329,13 +333,13 @@ export const TrajectoryTable = memo(function TrajectoryTable({
         </div>
       );
     },
-    [collapsedTurns, matchSet, onLoadOlder, onSelectCell, onToggleTurn, selectedIndex],
+    [collapsedTurns, matchSet, onLoadOlder, onSelectCell, onToggleTurn, selectedIndex, t],
   );
 
   if (totalHeight === 0) {
     return (
       <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto bg-white">
-        <div className="p-4 text-sm text-[#615d59]">No records yet.</div>
+        <div className="p-4 text-sm text-[#615d59]">{t('trajectory.noRecords')}</div>
       </div>
     );
   }
@@ -366,10 +370,14 @@ export const TrajectoryTable = memo(function TrajectoryTable({
           tabIndex={0}
         >
           <span className="text-xs font-semibold text-[#31302e] truncate">
-            {stickyMeta.turn.turn === null ? 'Between turns' : `Turn ${stickyMeta.turn.turn} · ${stickyMeta.turn.label}`}
+            {stickyMeta.turn.turn === null
+              ? t('trajectory.betweenTurns')
+              : t('trajectory.turnLabel', { turn: stickyMeta.turn.turn, label: stickyMeta.turn.label })}
           </span>
           <span className="text-[10px] text-[#a39e98]">
-            {stickyMeta.turn.groups.reduce((total, group) => total + group.cells.length, 0)} records
+            {t('trajectory.recordsCount', {
+              count: stickyMeta.turn.groups.reduce((total, group) => total + group.cells.length, 0),
+            })}
           </span>
         </div>
       ) : null}

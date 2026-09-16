@@ -16,6 +16,7 @@ import type { TrajectoryCellProps, TrajectoryTimelineMode, TrajectoryTurnModel }
 import { useTrajectoryEvents } from './useTrajectoryEvents';
 import { useTrajectoryLayout } from './useTrajectoryLayout';
 import { useVirtualList } from './useVirtualList';
+import { useT } from '@/i18n/I18nContext';
 import { buildTrajectoryRows, TrajectoryTable } from './TrajectoryTable';
 import { TrajectoryTimeline } from './TrajectoryTimeline';
 import { TrajectoryToolbar } from './TrajectoryToolbar';
@@ -26,6 +27,7 @@ interface TrajectoryViewProps {
 }
 
 export function TrajectoryView({ runId }: TrajectoryViewProps) {
+  const t = useT();
   const [query, setQuery] = useState('');
   const [collapseTurns, setCollapseTurns] = useState(false);
   const [collapseAssistant, setCollapseAssistant] = useState(true);
@@ -47,6 +49,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
         focusIndexes,
         matchSet: layout.matchSet,
         hasMoreOlder: events.hasMoreOlder,
+        t,
       }),
     [
       layout.turns,
@@ -56,6 +59,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
       collapseAssistant,
       focusIndexes,
       events.hasMoreOlder,
+      t,
     ],
   );
 
@@ -142,7 +146,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
         <Loader2 className="animate-spin text-[#0075de]" size={20} />
-        <span className="ml-2 text-sm text-[#615d59]">Loading trajectory…</span>
+        <span className="ml-2 text-sm text-[#615d59]">{t('trajectory.loading')}</span>
       </div>
     );
   }
@@ -150,9 +154,9 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
   if (events.status === 'not-found') {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 bg-white">
-        <p className="text-sm text-[#615d59]">Run not found or no events recorded yet.</p>
+        <p className="text-sm text-[#615d59]">{t('trajectory.notFound')}</p>
         <Link to="/" className="text-sm text-[#0075de] hover:underline">
-          Back to wiki
+          {t('trajectory.backToWiki')}
         </Link>
       </div>
     );
@@ -161,7 +165,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
   if (events.status === 'error') {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 bg-white">
-        <p className="text-sm text-[#e54847]">Failed to load run events</p>
+        <p className="text-sm text-[#e54847]">{t('trajectory.loadFailed')}</p>
         {events.errorMessage !== undefined ? (
           <p className="max-w-md text-xs text-[#615d59]">{events.errorMessage}</p>
         ) : null}
@@ -170,7 +174,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
           onClick={() => void events.reload()}
           className="text-sm text-[#0075de] hover:underline"
         >
-          Retry
+          {t('trajectory.retry')}
         </button>
       </div>
     );
@@ -183,10 +187,10 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-200">
         <Link to="/" className="flex items-center gap-1 text-sm text-[#615d59] hover:text-[#0075de]">
           <ArrowLeft size={14} />
-          Wiki
+          {t('trajectory.wiki')}
         </Link>
         <h1 className="text-sm font-semibold text-[#31302e]">
-          Trajectory
+          {t('trajectory.title')}
           {runId !== undefined ? <span className="ml-2 font-mono text-xs text-[#a39e98]">{runId}</span> : null}
         </h1>
         {headerRun?.startedAt !== undefined ? (

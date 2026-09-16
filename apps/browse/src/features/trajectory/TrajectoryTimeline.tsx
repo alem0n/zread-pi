@@ -21,6 +21,7 @@ import {
   type TrajectoryTimelineModel,
   type TrajectoryTurnModel,
 } from '@zread-pi/trajectory';
+import { useT } from '@/i18n/I18nContext';
 
 const LANE_COLORS: Record<number, string> = {
   0: '#a39e98', // system / user / context
@@ -49,7 +50,8 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
   onFocusChange,
   selectedIndexes,
   onSelectIndex,
-}: TrajectoryTimelineProps) {  const containerRef = useRef<HTMLDivElement | null>(null);
+}: TrajectoryTimelineProps) {  const t = useT();
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [selection, setSelection] = useState<TrajectoryTimeRange | null>(null);
   const [zoomOperations, setZoomOperations] = useState(0);
@@ -219,7 +221,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
   if (model === null) {
     return (
       <div className="px-3 py-1.5 text-xs text-[#a39e98] border-b border-gray-200 bg-white">
-        No timing data yet
+        {t('trajectory.noTiming')}
       </div>
     );
   }
@@ -307,7 +309,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
           }}
           className="absolute right-2 top-1 text-[10px] text-[#615d59] hover:text-[#0075de] bg-white/80 rounded px-1"
         >
-          reset zoom
+          {t('trajectory.resetZoom')}
         </button>
       ) : null}
 

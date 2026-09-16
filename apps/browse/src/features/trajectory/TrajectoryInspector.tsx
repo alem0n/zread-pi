@@ -20,6 +20,7 @@ import {
   type TrajectoryRequestNumber,
 } from '@zread-pi/trajectory';
 import { JsonTree } from './JsonTree';
+import { useT } from '@/i18n/I18nContext';
 
 interface TrajectoryInspectorProps {
   cell: TrajectoryCellProps | null;
@@ -55,6 +56,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
   width,
   onWidthChange,
 }: TrajectoryInspectorProps) {
+  const t = useT();
   const request = useMemo(
     () => (cell?.sourceSeq !== undefined ? requests.find((entry) => entry.seq === cell.sourceSeq) : undefined),
     [cell?.sourceSeq, requests],
@@ -82,7 +84,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
         style={{ width }}
         className="shrink-0 border-l border-gray-200 bg-white flex items-center justify-center text-sm text-[#a39e98]"
       >
-        Select a record to inspect
+        {t('trajectory.selectRecord')}
       </div>
     );
   }
@@ -106,7 +108,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-[#f6f5f4]">
         <span className="text-xs font-mono text-[#a39e98]">#{cell.index}</span>
         <span className="text-sm font-semibold text-[#31302e] uppercase">{cell.kind}</span>
-        {cell.isError ? <span className="text-xs text-[#e54847]">error</span> : null}
+        {cell.isError ? <span className="text-xs text-[#e54847]">{t('trajectory.error')}</span> : null}
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
@@ -118,7 +120,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
             }}
             disabled={request === undefined || requests.indexOf(request) <= 0}
             className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Previous request"
+            title={t('trajectory.prevRequest')}
           >
             <ChevronLeft size={14} />
           </button>
@@ -132,7 +134,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
             }}
             disabled={request === undefined || requests.indexOf(request) >= requests.length - 1}
             className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Next request"
+            title={t('trajectory.nextRequest')}
           >
             <ChevronRight size={14} />
           </button>
@@ -141,13 +143,13 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
 
       <div className="flex-1 overflow-y-auto">
         {cell.text !== '' ? (
-          <Section title="Summary">
+          <Section title={t('trajectory.sections.summary')}>
             <div className="text-sm text-[#31302e] whitespace-pre-wrap break-words">{cell.text}</div>
           </Section>
         ) : null}
 
         {cell.inputDetail !== undefined ? (
-          <Section title={cell.kind === 'user' ? 'Prompt' : 'Input'}>
+          <Section title={cell.kind === 'user' ? t('trajectory.sections.prompt') : t('trajectory.sections.input')}>
             <div className="text-xs font-mono whitespace-pre-wrap break-words text-[#31302e] max-h-64 overflow-y-auto">
               {cell.inputDetail}
             </div>
@@ -155,7 +157,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
         ) : null}
 
         {cell.outputDetail !== undefined ? (
-          <Section title={cell.kind === 'tool' ? 'Result' : 'Output'}>
+          <Section title={cell.kind === 'tool' ? t('trajectory.sections.result') : t('trajectory.sections.output')}>
             <div className="text-xs font-mono whitespace-pre-wrap break-words text-[#31302e] max-h-72 overflow-y-auto">
               {cell.outputDetail}
             </div>
@@ -163,7 +165,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
         ) : null}
 
         {cell.thinkingDetail !== undefined && cell.thinkingDetail !== '' ? (
-          <Section title="Thinking">
+          <Section title={t('trajectory.sections.thinking')}>
             <div className="text-xs font-mono whitespace-pre-wrap break-words text-[#615d59] max-h-64 overflow-y-auto">
               {cell.thinkingDetail}
             </div>
@@ -171,13 +173,13 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
         ) : null}
 
         {cell.schemaDetail !== undefined ? (
-          <Section title="Tool schema">
+          <Section title={t('trajectory.sections.toolSchema')}>
             <JsonTree value={safeParseJson(cell.schemaDetail)} defaultExpandedDepth={1} className="max-h-72 overflow-y-auto" />
           </Section>
         ) : null}
 
         {cell.sourceBlocks !== undefined && cell.sourceBlocks.length > 0 ? (
-          <Section title="Source blocks">
+          <Section title={t('trajectory.sections.sourceBlocks')}>
             <div className="space-y-1">
               {cell.sourceBlocks.map((block, index) => (
                 <div key={index} className="text-xs">
@@ -198,22 +200,22 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
           </Section>
         ) : null}
 
-        <Section title="Usage & timing">
-          <MetricRow label="Started" value={formatStartedAt(cell.startedAt ?? null)} />
-          <MetricRow label="Duration" value={cell.timeSeconds === null || cell.timeSeconds === undefined ? undefined : formatDurationMs(cell.timeSeconds * 1000)} />
-          {ttft !== undefined ? <MetricRow label="TTFT" value={ttft} /> : null}
-          {decode !== undefined ? <MetricRow label="Decode" value={decode} /> : null}
-          <MetricRow label="Input" value={formatTokens(cell.input)} />
-          <MetricRow label="Output" value={formatTokens(cell.output)} />
+        <Section title={t('trajectory.sections.usage')}>
+          <MetricRow label={t('trajectory.metrics.started')} value={formatStartedAt(cell.startedAt ?? null)} />
+          <MetricRow label={t('trajectory.metrics.duration')} value={cell.timeSeconds === null || cell.timeSeconds === undefined ? undefined : formatDurationMs(cell.timeSeconds * 1000)} />
+          {ttft !== undefined ? <MetricRow label={t('trajectory.metrics.ttft')} value={ttft} /> : null}
+          {decode !== undefined ? <MetricRow label={t('trajectory.metrics.decode')} value={decode} /> : null}
+          <MetricRow label={t('trajectory.metrics.input')} value={formatTokens(cell.input)} />
+          <MetricRow label={t('trajectory.metrics.output')} value={formatTokens(cell.output)} />
           {cell.cacheRead !== undefined && cell.cacheRead > 0 ? (
-            <MetricRow label="Cache read" value={formatTokens(cell.cacheRead)} />
+            <MetricRow label={t('trajectory.metrics.cacheRead')} value={formatTokens(cell.cacheRead)} />
           ) : null}
           {cell.cacheWrite !== undefined && cell.cacheWrite > 0 ? (
-            <MetricRow label="Cache write" value={formatTokens(cell.cacheWrite)} />
+            <MetricRow label={t('trajectory.metrics.cacheWrite')} value={formatTokens(cell.cacheWrite)} />
           ) : null}
           {cell.cacheRead !== undefined && cell.cacheRead > 0 ? (
             <MetricRow
-              label="Cache hit"
+              label={t('trajectory.metrics.cacheHit')}
               value={formatPercent(
                 cacheHitRatio({ input: cell.input, cacheRead: cell.cacheRead, cacheWrite: cell.cacheWrite }),
               )}
@@ -222,23 +224,23 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
         </Section>
 
         {request !== undefined ? (
-          <Section title="Request">
-            <MetricRow label="Request #" value={String(request.number)} />
-            <MetricRow label="Turn" value={request.turn === null ? '—' : String(request.turn)} />
-            <MetricRow label="Step" value={String(request.step)} />
-            <MetricRow label="Status" value={request.status} />
-            {request.provider !== undefined ? <MetricRow label="Provider" value={request.provider} /> : null}
-            {request.model !== undefined ? <MetricRow label="Model" value={request.model} /> : null}
+          <Section title={t('trajectory.sections.request')}>
+            <MetricRow label={t('trajectory.metrics.requestNumber')} value={String(request.number)} />
+            <MetricRow label={t('trajectory.metrics.turn')} value={request.turn === null ? '—' : String(request.turn)} />
+            <MetricRow label={t('trajectory.metrics.step')} value={String(request.step)} />
+            <MetricRow label={t('trajectory.metrics.status')} value={request.status} />
+            {request.provider !== undefined ? <MetricRow label={t('trajectory.metrics.provider')} value={request.provider} /> : null}
+            {request.model !== undefined ? <MetricRow label={t('trajectory.metrics.model')} value={request.model} /> : null}
             {request.contextWindow !== undefined ? (
-              <MetricRow label="Context win" value={formatTokens(request.contextWindow)} />
+              <MetricRow label={t('trajectory.metrics.contextWindow')} value={formatTokens(request.contextWindow)} />
             ) : null}
             {request.retry !== undefined ? (
-              <MetricRow label="Retry" value={`${request.retry}/${request.maxRetries} · ${request.retryDelayMs !== undefined ? formatDurationMillis(request.retryDelayMs) : '—'}`} />
+              <MetricRow label={t('trajectory.metrics.retry')} value={`${request.retry}/${request.maxRetries} · ${request.retryDelayMs !== undefined ? formatDurationMillis(request.retryDelayMs) : '—'}`} />
             ) : null}
-            {request.error !== undefined ? <MetricRow label="Error" value={request.error} /> : null}
+            {request.error !== undefined ? <MetricRow label={t('trajectory.metrics.error')} value={request.error} /> : null}
             {request.cumulativeUsage !== undefined ? (
               <MetricRow
-                label="Cumulative"
+                label={t('trajectory.metrics.cumulative')}
                 value={`↑${formatTokens(request.cumulativeUsage.input)} ↓${formatTokens(request.cumulativeUsage.output)}`}
               />
             ) : null}

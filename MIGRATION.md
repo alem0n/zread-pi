@@ -1847,3 +1847,47 @@ apps/browse  /trajectory 路由 + TrajectoryView（折叠全部在客户端完�
 - `polish.mode=full` 的 polish Agent 用量记在 `PageResult.polish.tokenUsage`，
   与生成页底部合计同口径（不进轨迹的 run 级用量合计，但事件流里有 polish Agent 的
   完整记录）。
+
+### 26.8 轨迹页中文化（logview 网页 i18n）
+
+CLI 早已支持中英双语（`language` 配置 + `apps/cli/src/i18n` 字典），但浏览站
+（含 logview 打开的轨迹页）之前是纯英文硬编码。本次让网页跟随 CLI 的界面语言。
+
+**机制**（两段，语言源唯一）：
+
+1. **后端下发语言**：`browse-server` 新增 `GET /api/i18n`，
+   `resolveBrowseLocale()` = `normalizeLanguageCode(getDefaultLanguage(loadConfigSync() ?? DEFAULT_CONFIG))`
+   → `zh-CN` / `en-US`。`loadConfigSync` 每次读盘，CLI 改完语言重开网页即生效；
+   任何异常回退 `en-US`，不阻塞渲染。
+2. **前端 i18n**：`apps/browse/src/i18n/`（`types.ts` / `zh-CN.ts` / `en-US.ts` / `index.ts`）
+   是**独立于 CLI 的第二套字典**（两套应用的文案本来就不重合），语义与 CLI 对齐：
+   点号分层 key、`{param}` 插值、未知 key 返回空字符串。`I18nContext.tsx` 的
+   `I18nProvider` 挂载时请求一次 `/api/i18n`，通过 Context 提供 `{ locale, t }`；
+   请求未完成前用默认语言（`en-US`，与改造前的英文 UI 一致，现有用户零变化），
+   到达后整页切换。`App.tsx` 在 `BrowserRouter` 内包了一层，全站可用。
+
+**覆盖范围**：轨迹页全部 UI 文案 —— 加载 / 空态 / 错误态、顶栏标题与返回链接、
+搜索框占位、时序模式按钮（Sequence/Duration/Time/Actual）与 title、
+`Turns`/`Steps` 折叠开关、运行状态徽标（Running/Completed/Failed/Interrupted/Unknown）
+与页面进度、表格的「加载更早的事件 / 第 N 轮 / N 条记录」、时间线的「暂无时序数据 / 重置缩放」、
+检查器的全部分区标题（Summary / Prompt / Output / Thinking / Tool schema / …）
+与指标行标签（Started / Duration / TTFT / Cache hit / Context win / …）。
+
+**有意不翻译**（保持英文）：
+
+- 记录种类徽标 `SYS/USER/CTX/CMP/MSG/TOOL/SUB`（等宽技术缩写，译成中文反而难读）；
+- **数据层派生的标签**：turn label 里的 `role · section · pageSlug`、
+  「Initial System Prompt」、`Run {status} · {ms} ms` 等 —— 这些是
+  `packages/trajectory` 从事件流派生的模型内容，不是界面文案；要译需把语言
+  透传进纯模型层（replay / layout），代价与收益不匹配。前端只译自己拼装的
+  「第 N 轮 ·」前缀与「N 条记录」计数；
+- JsonTree 的 `null` / `Array(n)` 等 JSON 原语表示。
+
+**兼容性**：新增的 `/api/i18n` 是纯新增端点；前端字典是新增文件；
+旧 `config.yaml`（`language: zh` / `en` / 缺省）都能工作 —— 缺省走
+`DEFAULT_CONFIG.language='en'` → `en-US`，与改造前的英文界面一致。
+
+**验证**：`bun run browse:build`（tsc + vite 打包，两份字典与 `/i18n` 调用都在产物里）；
+`bun run test:browse` 新增 4 项断言（`/api/i18n` 状态码、`zh→zh-CN`、改配置
+`en→en-US` 即时生效、恢复 `zh` 后回到 `zh-CN`；静态模式与 Vite 代理模式都覆盖）；
+字典核心（key 查找 / 插值 / 未知 key 空字符串）用 `createTranslate` 直接验证。

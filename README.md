@@ -329,6 +329,11 @@ your-project/
 结束后停止。单个目标仓库默认保留最近 20 次运行（`ZREAD_PI_RUNS_RETENTION` 覆盖，
 `<= 0` 不清理）；新运行开始时，残留的 `running` 状态旧运行会被自动标记为 `interrupted`。
 
+**界面语言**：轨迹页（及整个浏览站）跟随 CLI 配置的界面语言（`~/.zread-pi/config.yaml`
+的 `language` 字段，`zh` → 简体中文 / `en` → 英文）。服务端在打开网页时读取一次配置并
+下发给前端；CLI 里改完语言重新打开网页即生效。记录徽标（`TOOL` / `MSG` 等）与事件流里的
+原始文本保持原样不翻译。
+
 <p align="center">
   <img src="./static/index-browse.png" width="90%" alt="本地 Web 阅读器">
 </p>

@@ -10,6 +10,7 @@ import {
   type TrajectoryRunSummary,
   type TrajectoryTimelineMode,
 } from '@zread-pi/trajectory';
+import { useT } from '@/i18n/I18nContext';
 
 interface TrajectoryToolbarProps {
   query: string;
@@ -25,19 +26,19 @@ interface TrajectoryToolbarProps {
   runEnded: boolean;
 }
 
-const TIMELINE_MODES: Array<{ mode: TrajectoryTimelineMode; label: string; icon: React.ReactNode }> = [
-  { mode: 'sequence', label: 'Sequence', icon: <ListOrdered size={14} /> },
-  { mode: 'duration', label: 'Duration', icon: <Clock size={14} /> },
-  { mode: 'time', label: 'Time', icon: <AlignHorizontalDistributeCenter size={14} /> },
-  { mode: 'actual', label: 'Actual', icon: <Clock size={14} /> },
+const TIMELINE_MODES: Array<{ mode: TrajectoryTimelineMode; labelKey: string; icon: React.ReactNode }> = [
+  { mode: 'sequence', labelKey: 'trajectory.modes.sequence', icon: <ListOrdered size={14} /> },
+  { mode: 'duration', labelKey: 'trajectory.modes.duration', icon: <Clock size={14} /> },
+  { mode: 'time', labelKey: 'trajectory.modes.time', icon: <AlignHorizontalDistributeCenter size={14} /> },
+  { mode: 'actual', labelKey: 'trajectory.modes.actual', icon: <Clock size={14} /> },
 ];
 
-const STATUS_LABELS: Record<TrajectoryRunSummary['status'], { text: string; className: string }> = {
-  running: { text: 'Running', className: 'text-[#dd5b00]' },
-  completed: { text: 'Completed', className: 'text-[#2a9d99]' },
-  failed: { text: 'Failed', className: 'text-[#e54847]' },
-  interrupted: { text: 'Interrupted', className: 'text-[#a39e98]' },
-  unknown: { text: 'Unknown', className: 'text-[#a39e98]' },
+const STATUS_ENTRIES: Record<TrajectoryRunSummary['status'], { key: string; className: string }> = {
+  running: { key: 'trajectory.statuses.running', className: 'text-[#dd5b00]' },
+  completed: { key: 'trajectory.statuses.completed', className: 'text-[#2a9d99]' },
+  failed: { key: 'trajectory.statuses.failed', className: 'text-[#e54847]' },
+  interrupted: { key: 'trajectory.statuses.interrupted', className: 'text-[#a39e98]' },
+  unknown: { key: 'trajectory.statuses.unknown', className: 'text-[#a39e98]' },
 };
 
 export const TrajectoryToolbar = memo(function TrajectoryToolbar({
@@ -53,7 +54,8 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
   runSummary,
   runEnded,
 }: TrajectoryToolbarProps) {
-  const status = runSummary ? STATUS_LABELS[runSummary.status] : null;
+  const t = useT();
+  const status = runSummary ? STATUS_ENTRIES[runSummary.status] : null;
 
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-200 bg-[#f6f5f4]">
@@ -63,7 +65,7 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
           type="text"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search records (prompt / tool / output / args)…"
+          placeholder={t('trajectory.searchPlaceholder')}
           className="w-full pl-8 pr-3 py-1.5 text-sm bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0075de] focus:border-transparent"
         />
         {query.trim() !== '' ? (
@@ -79,7 +81,7 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
             key={entry.mode}
             type="button"
             onClick={() => onTimelineModeChange(entry.mode)}
-            title={`${entry.label} mode`}
+            title={t('trajectory.modeTitle', { label: t(entry.labelKey) })}
             className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
               timelineMode === entry.mode
                 ? 'bg-[#0075de] text-white border-[#0075de]'
@@ -87,7 +89,7 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
             }`}
           >
             {entry.icon}
-            <span className="hidden sm:inline">{entry.label}</span>
+            <span className="hidden sm:inline">{t(entry.labelKey)}</span>
           </button>
         ))}
       </div>
@@ -95,7 +97,7 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
       <button
         type="button"
         onClick={() => onCollapseTurnsChange(!collapseTurns)}
-        title="Collapse turns"
+        title={t('trajectory.collapseTurns')}
         className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
           collapseTurns
             ? 'bg-[#0075de] text-white border-[#0075de]'
@@ -103,13 +105,13 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
         }`}
       >
         {collapseTurns ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
-        <span className="hidden sm:inline">Turns</span>
+        <span className="hidden sm:inline">{t('trajectory.turns')}</span>
       </button>
 
       <button
         type="button"
         onClick={() => onCollapseAssistantChange(!collapseAssistant)}
-        title="Collapse consecutive assistant messages"
+        title={t('trajectory.collapseSteps')}
         className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
           collapseAssistant
             ? 'bg-[#0075de] text-white border-[#0075de]'
@@ -117,23 +119,23 @@ export const TrajectoryToolbar = memo(function TrajectoryToolbar({
         }`}
       >
         {collapseAssistant ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
-        <span className="hidden sm:inline">Steps</span>
+        <span className="hidden sm:inline">{t('trajectory.steps')}</span>
       </button>
 
       <div className="ml-auto flex items-center gap-3 text-xs text-[#615d59]">
         {runSummary ? (
           <>
             <span className={status?.className}>
-              {status?.text}
+              {status ? t(status.key) : ''}
               {runSummary.status === 'running' && !runEnded ? ' ●' : ''}
             </span>
             {runSummary.kind ? <span className="text-[#a39e98]">{runSummary.kind}</span> : null}
             {runSummary.detail ? <span className="text-[#a39e98]">{runSummary.detail}</span> : null}
             {runSummary.pages.total > 0 ? (
               <span>
-                pages {runSummary.pages.completed}/{runSummary.pages.total}
+                {t('trajectory.pages', { completed: runSummary.pages.completed, total: runSummary.pages.total })}
                 {runSummary.pages.failed > 0 ? (
-                  <span className="text-[#e54847]"> ·{runSummary.pages.failed} failed</span>
+                  <span className="text-[#e54847]">{t('trajectory.pagesFailed', { count: runSummary.pages.failed })}</span>
                 ) : null}
               </span>
             ) : null}

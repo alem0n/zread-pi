@@ -2,6 +2,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { WikiProvider } from '@/context/WikiContext';
+import { I18nProvider } from '@/i18n/I18nContext';
 import { useWiki } from '@/hooks/useWiki';
 import { MainLayout } from '@/layouts/MainLayout';
 import { HomePage, WikiPage, TrajectoryPage } from '@/pages';
@@ -31,9 +32,11 @@ function AppRoutes() {
 function App() {
   return (
     <BrowserRouter>
-      <WikiProvider>
-        <AppRoutes />
-      </WikiProvider>
+      <I18nProvider>
+        <WikiProvider>
+          <AppRoutes />
+        </WikiProvider>
+      </I18nProvider>
     </BrowserRouter>
   );
 }

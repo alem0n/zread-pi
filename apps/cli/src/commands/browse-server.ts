@@ -10,8 +10,10 @@ import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import type { Server } from "http";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant, listRuns, resolveRunId, readEvents, readRunMeta, isValidRunId } from "@zread-pi/utils";
+import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant, listRuns, resolveRunId, readEvents, readRunMeta, isValidRunId, getDefaultLanguage, DEFAULT_CONFIG } from "@zread-pi/utils";
 import type { BlueprintDetailLevel } from "@zread-pi/types";
+import { normalizeLanguageCode } from "../i18n/translations";
+import type { LanguageCode } from "../i18n/types";
 import { resolveBrowseChat, serializeBrowseChatError } from "./browse-chat";
 import {
   deleteBrowseChatSession,
@@ -257,6 +259,22 @@ const LEGACY_VARIANT_PARAM = "default";
 /** events 接口的默认每页条数（与 reader 的 DEFAULT_READ_LIMIT 对齐） */
 const DEFAULT_EVENTS_LIMIT = 2000;
 
+/** 浏览站界面语言回退值（与前端 DEFAULT_LANGUAGE 一致） */
+const FALLBACK_LOCALE: LanguageCode = "en-US";
+
+/**
+ * 解析浏览站界面语言：CLI 配置的 language 字段 → 标准语言代码（zh-CN / en-US）。
+ * 未初始化配置时用默认配置；任一环节异常都回退 FALLBACK_LOCALE，绝不阻塞页面渲染。
+ */
+function resolveBrowseLocale(): LanguageCode {
+  try {
+    const config = loadConfigSync() ?? DEFAULT_CONFIG;
+    return normalizeLanguageCode(getDefaultLanguage(config));
+  } catch {
+    return FALLBACK_LOCALE;
+  }
+}
+
 /** 解析后的请求变体（档位子目录或遗留目录） */
 interface ResolvedWikiVariant {
   /** 档位名；null = 遗留目录 */
@@ -325,6 +343,11 @@ function readVariantCatalog(variant: ResolvedWikiVariant): WikiCatalog {
 function createWikiApp(projectPath: string) {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+
+  // 界面语言（供浏览站前端 i18n）：CLI 配置的 language 字段归一化后下发
+  app.get("/api/i18n", (_req: Request, res: Response) => {
+    res.json({ locale: resolveBrowseLocale() });
+  });
 
   // 0. List available wiki variants (+ active variant for the switcher)
   app.get("/api/wiki/variants", (_req: Request, res: Response) => {
