@@ -412,6 +412,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
     <div className="relative flex-1 min-h-0">
       <div
         ref={containerRef}
+        data-testid="scroll-container"
         className="absolute inset-0 overflow-y-auto bg-white"
         onScroll={onScroll}
       >
@@ -422,6 +423,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
       {stickyMeta !== null ? (
         <div
           key={`sticky-${stickyMeta.key}`}
+          data-testid="sticky-turn-header"
           style={{ height: stickyMeta.height }}
           className="absolute top-0 inset-x-0 z-[1] flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
           onClick={() => onToggleTurn(stickyMeta.turn.turn)}

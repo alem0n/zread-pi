@@ -382,6 +382,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
           {segments.map((segment, index) => (
             <div
               key={`${lane}-${index}`}
+              data-testid="timeline-segment"
               className="absolute rounded-sm"
               style={{
                 left: segment.left,
@@ -409,6 +410,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
   return (
     <div
       ref={containerRef}
+      data-testid="timeline-container"
       className="relative select-none overflow-hidden border-b border-gray-200 bg-white"
       style={{ height: HEIGHT_PX }}
       onMouseDown={handleMouseDown}
