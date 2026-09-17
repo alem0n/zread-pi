@@ -189,17 +189,43 @@ interface TrajectoryTableProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
-/** 滚动位置上方最近的 turn 头（用于单条 sticky 条，避免多个 sticky header 重叠） */
-function activeTurnHeader(rows: TrajectoryRow[], scrollTop: number): { row: TrajectoryRow; offset: number } | null {
-  let active: { row: TrajectoryRow; offset: number } | null = null;
+/** turn 头的偏移量表（行高前缀和，只记 turn 头），供 sticky 条做 O(log N) 查找 */
+function buildTurnHeaderOffsets(rows: readonly TrajectoryRow[]): { index: number; offset: number }[] {
+  const entries: { index: number; offset: number }[] = [];
   let offset = 0;
-  for (const row of rows) {
-    // 严格在视口顶之上才需要 sticky 条（否则与仍在视口内的表头重复渲染）
-    if (row.kind === 'turn-header' && offset < scrollTop) active = { row, offset };
-    if (offset >= scrollTop) break;
-    offset += row.height;
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    if (row?.kind === 'turn-header') entries.push({ index, offset });
+    offset += row?.height ?? 0;
   }
-  return active;
+  return entries;
+}
+
+/** 滚动位置上方最近的 turn 头（二分查找；滚动事件每帧都调用，不能是 O(行数)） */
+function activeTurnHeader(
+  rows: readonly TrajectoryRow[],
+  offsets: readonly { index: number; offset: number }[],
+  scrollTop: number,
+): { row: TrajectoryRow; offset: number } | null {
+  if (offsets.length === 0) return null;
+  // 找最后一个 offset < scrollTop 的 turn 头（严格在视口顶之上）
+  let low = 0;
+  let high = offsets.length - 1;
+  let found = -1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if ((offsets[mid]?.offset ?? 0) < scrollTop) {
+      found = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (found === -1) return null;
+  const entry = offsets[found];
+  if (entry === undefined) return null;
+  const row = rows[entry.index];
+  return row === undefined ? null : { row, offset: entry.offset };
 }
 
 export const TrajectoryTable = memo(function TrajectoryTable({
@@ -354,15 +380,22 @@ export const TrajectoryTable = memo(function TrajectoryTable({
     [collapsedTurns, matchSet, onLoadOlder, onSelectCell, onToggleTurn, onToggleSession, selectedIndex, t],
   );
 
+  const turnHeaderOffsets = useMemo(() => buildTurnHeaderOffsets(rows), [rows]);
+  const sticky = useMemo(
+    () => (totalHeight === 0 ? null : activeTurnHeader(rows, turnHeaderOffsets, scrollTop)),
+    [rows, turnHeaderOffsets, scrollTop, totalHeight],
+  );
+
   if (totalHeight === 0) {
     return (
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto bg-white">
-        <div className="p-4 text-sm text-[#615d59]">{t('trajectory.noRecords')}</div>
+      <div className="relative flex-1 min-h-0">
+        <div ref={containerRef} className="absolute inset-0 overflow-y-auto bg-white">
+          <div className="p-4 text-sm text-[#615d59]">{t('trajectory.noRecords')}</div>
+        </div>
       </div>
     );
   }
 
-  const sticky = activeTurnHeader(rows, scrollTop);
   const stickyTurn = sticky?.row.kind === 'turn-header' ? sticky.row.turn : undefined;
   // 表头已完全滚出视口顶时才显示 sticky 条（部分可见时沿用文档流里的表头）
   const stickyVisible = sticky !== null && sticky.offset + sticky.row.height <= scrollTop;
@@ -371,18 +404,26 @@ export const TrajectoryTable = memo(function TrajectoryTable({
       ? { key: sticky.row.key, height: sticky.row.height, turn: stickyTurn }
       : null;
 
+  // sticky 条是滚动容器的「绝对定位兄弟」而非文档流内的 sticky 元素：
+  //  在流内时它会插入 top spacer 与可见行之间，既深陷 34px 高度使窗口数学
+  //  （topHeight / totalHeight / atBottom）失配，又在显示 / 隐藏切换时让整列
+  //  上下跳动。移出流后 DOM 几何与窗口数学逐字一致。
   return (
-    <div
-      ref={containerRef}
-      className="flex-1 min-h-0 overflow-y-auto bg-white"
-      onScroll={onScroll}
-    >
-      <div style={{ height: topHeight }} />
+    <div className="relative flex-1 min-h-0">
+      <div
+        ref={containerRef}
+        className="absolute inset-0 overflow-y-auto bg-white"
+        onScroll={onScroll}
+      >
+        <div style={{ height: topHeight }} />
+        {visible.map((row, offset) => renderRow(row, startIndex + offset))}
+        <div style={{ height: bottomHeight }} />
+      </div>
       {stickyMeta !== null ? (
         <div
           key={`sticky-${stickyMeta.key}`}
           style={{ height: stickyMeta.height }}
-          className="sticky top-0 z-[1] flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
+          className="absolute top-0 inset-x-0 z-[1] flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
           onClick={() => onToggleTurn(stickyMeta.turn.turn)}
           role="button"
           tabIndex={0}
@@ -413,8 +454,6 @@ export const TrajectoryTable = memo(function TrajectoryTable({
           ) : null}
         </div>
       ) : null}
-      {visible.map((row, offset) => renderRow(row, startIndex + offset))}
-      <div style={{ height: bottomHeight }} />
     </div>
   );
 });
