@@ -25,9 +25,8 @@ export const zhCN: TranslationKeys = {
   },
   versionGuard: {
     incompatible: '检测到不兼容的版本数据（{scope}）：目录由 {stored} 创建，当前版本 {current}。已备份到：',
-    degraded: '（降级备份：该目录正被其他程序占用无法整体重命名，已改为逐项迁出。建议关闭占用程序后重跑以获得干净结构。）',
-    unresolved: '（有 {count} 项数据未能迁出，仍保留在原目录：{entries}。备份目录已持有其余数据。）',
-    failed: '版本守卫未完成（{scope}）：目录正被其他程序占用（可能是当前工作目录被占用，或杀软/索引服务锁定）。旧数据已保持不动，请关闭相关程序后重试。错误：{error}',
+    failed: '版本守卫未完成（{scope}）：需要备份旧数据，但该目录正被其他程序占用，无法重命名。错误：{error}',
+    failedHint: '请关闭可能占用该目录的程序（例如以该目录为工作目录的编辑器 / 终端 / AI 编程助手，或正在扫描的杀毒软件），然后重新运行 zread-pi。旧数据已保持不动，不会丢失。',
     backupHint: '旧数据已完整保留在备份目录，请尽快处理（迁移需要的文件后删除该备份目录，避免占用磁盘）。',
     created: '已初始化 {scope}（版本 {current}）。',
     scopeHome: '项目家目录',

@@ -8,9 +8,13 @@
  * 不兼容时把目录备份为 `<dir>_bak` 并在终端给出醒目提示，然后重建空目录。
  * 首次安装（目录不存在）直接创建并写入版本。
  *
+ * 备份失败时**提示并退出进程**（不降级、不静默、不继续启动）：目录正被别的
+ * 进程当作 cwd 或被杀软 / 索引锁定时，Windows 拒绝重命名。此时用户应关闭占用
+ * 程序后重试，强行继续会留下混杂的目录结构。旧数据保持不动，不丢数据。
+ *
  * 输出走 stderr 且在 TUI 接管终端之前执行，保证用户一定能看到提示。
  *
- * 任何失败都只忽略：版本守卫本身不能阻断 CLI 启动（保留旧数据不动比强行重建安全）。
+ * 任何失败都只提示并退出：版本守卫本身不阻塞 CLI 启动（保留旧数据不动比强行重建安全）。
  */
 
 import { ensureVersionGuard, getOutputDir, getProjectHome, loadConfigLanguageSync } from "@zread-pi/utils";
@@ -40,27 +44,15 @@ function replace(text: string, pairs: Record<string, string>): string {
 
 function describe(outcome: VersionGuardOutcome, scope: string, t: TranslationKeys): string[] {
   if (outcome.status !== "incompatible") return [];
-  const lines = [
+  return [
     replace(t.versionGuard.incompatible, {
       scope,
       stored: outcome.stored ?? "(unknown)",
       current: outcome.version,
     }),
     `  ${outcome.backupPath}`,
+    t.versionGuard.backupHint,
   ];
-  if (outcome.degraded) {
-    lines.push(replace(t.versionGuard.degraded, {}));
-    if (outcome.unresolvedEntries && outcome.unresolvedEntries.length > 0) {
-      lines.push(
-        replace(t.versionGuard.unresolved, {
-          count: String(outcome.unresolvedEntries.length),
-          entries: outcome.unresolvedEntries.slice(0, 5).join(", "),
-        }),
-      );
-    }
-  }
-  lines.push(t.versionGuard.backupHint);
-  return lines;
 }
 
 /**
@@ -81,23 +73,25 @@ export async function runVersionGuard(options: VersionGuardOptions = {}): Promis
 
   const lines: string[] = [];
   for (const { name, dir } of scopes) {
+    let outcome: VersionGuardOutcome;
     try {
-      const outcome = await ensureVersionGuard(dir, current);
-      const messages = describe(outcome, name, t);
-      if (messages.length > 0) {
-        if (lines.length === 0) lines.push(""); // 首条提示前空一行，与正常输出隔开
-        lines.push(...messages);
-      }
+      outcome = await ensureVersionGuard(dir, current);
     } catch (error) {
-      // 不再静默吞掉：守卫失败时用户必须能看到原因（否则会误以为已备份）。
-      // 仍不阻断启动——这里只告警，「保留旧数据不动」比「强行重建」更安全。
-      if (lines.length === 0) lines.push("");
-      lines.push(
-        replace(t.versionGuard.failed, {
-          scope: name,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      // 守卫失败（目录被别的进程当作 cwd / 被杀软或索引锁定，rename 被拒绝）：
+      // 不降级、不静默、不继续启动。明确提示用户原因与解法，然后退出进程——
+      // 用户关闭占用程序后重跑即可获得干净结构（旧数据保持不动，不丢数据）。
+      const failure = replace(t.versionGuard.failed, {
+        scope: name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      process.stderr.write(`\n${failure}\n${t.versionGuard.failedHint}\n`);
+      process.exit(1);
+      return lines; // 不会被走到（process.exit 不返回）；仅为满足类型
+    }
+    const messages = describe(outcome, name, t);
+    if (messages.length > 0) {
+      if (lines.length === 0) lines.push(""); // 首条提示前空一行，与正常输出隔开
+      lines.push(...messages);
     }
   }
 

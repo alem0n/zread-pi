@@ -39,7 +39,8 @@ async function tempDir(prefix: string): Promise<string> {
  * 启动一个子进程，把它的工作目录（cwd）设为 target 并保持运行，直到 release()。
  *
  * Windows 上任何进程的 cwd 都不能被重命名（rename 抛 EBUSY/EPERM）——这正是
- * 版本守卫降级路径要处理的场景。真实场景就是 node/bun 进程 chdir 到数据目录。
+ * 版本守卫「失败即提示并退出」要处理的场景。真实场景就是 node/bun 进程
+ * chdir 到数据目录。
  */
 function holdAsCwd(target: string): { release: () => Promise<void> } {
   const childCode = `
@@ -182,34 +183,38 @@ checkEqual('仓库目录首次 = created', repoResult.status, 'created');
 checkEqual('版本文件在仓库目录内', await readVersionFile(repoDir), '1.13.0');
 
 // ---------------------------------------------------------------------------
-// 8) 降级路径：目录被别的进程当作 cwd，整体重命名被拒绝
+// 8) 目录被别的进程当作 cwd：备份失败 → 直接抛错，旧数据不动
 // ---------------------------------------------------------------------------
 
-console.log('▶ 目录被占用时降级备份（cwd 锁）');
+console.log('▶ 目录被占用时备份失败抛错（cwd 锁）');
 
 const home4 = join(await tempDir('zread-vg-home4-'), '.zread-pi');
 await mkdir(join(home4, 'wiki', 'high'), { recursive: true });
 await writeFile(join(home4, 'config.yaml'), 'language: zh\n', 'utf-8');
 await writeFile(join(home4, 'wiki', 'high', 'wiki.json'), '{}', 'utf-8');
 
-// 先让子进程把 cwd 切过去（chdir 后目录被锁，rename 会报 EBUSY）
+// 子进程把 cwd 设为家目录 → Windows 拒绝整体重命名 → ensureVersionGuard 应抛错
 const holder = holdAsCwd(home4);
 await new Promise((resolve) => setTimeout(resolve, 800));
 
-const degraded = await ensureVersionGuard(home4, '1.13.0');
-checkEqual('结果仍是 incompatible', degraded.status, 'incompatible');
-checkEqual('带 degraded 标记', (degraded as { degraded?: boolean }).degraded, true);
-const backup4 = (degraded as { backupPath: string }).backupPath;
-check('备份目录被创建', (await stat(backup4)).isDirectory());
-check('旧数据完整迁入备份（config.yaml）', (await stat(join(backup4, 'config.yaml'))).isFile());
-check('旧产物也迁入备份（wiki/high/wiki.json）', (await stat(join(backup4, 'wiki', 'high', 'wiki.json'))).isFile());
-checkEqual('原目录已写入当前版本', await readVersionFile(home4), '1.13.0');
+let threw: Error | undefined;
+try {
+  await ensureVersionGuard(home4, '1.13.0');
+} catch (error) {
+  threw = error as Error;
+}
+check('占用时 ensureVersionGuard 抛错', threw !== undefined, threw?.message);
+check('未生成备份目录（不降级）', !(await stat(`${home4}${BACKUP_SUFFIX}`).catch(() => null)));
+check('旧数据保持原位（config.yaml 未动）', (await stat(join(home4, 'config.yaml'))).isFile());
+check('未写入 version 文件', (await readVersionFile(home4)) === null);
 
 await holder.release();
 
-// 降级后旧版本标记不再留在原目录（被迁入备份），再跑应判兼容
-const afterDegraded = await ensureVersionGuard(home4, '1.13.5');
-checkEqual('降级后同主版本再跑 = compatible', afterDegraded.status, 'compatible');
+// 释放占用后重跑：应成功完成备份（用户解决问题后重试的路径）
+const afterRelease = await ensureVersionGuard(home4, '1.13.0');
+checkEqual('释放占用后重跑 = incompatible', afterRelease.status, 'incompatible');
+checkEqual('重跑后写入当前版本', await readVersionFile(home4), '1.13.0');
+check('旧数据进备份', (await stat(join(`${home4}${BACKUP_SUFFIX}`, 'config.yaml'))).isFile());
 
 // ---------------------------------------------------------------------------
 // 结果
