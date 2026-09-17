@@ -25,6 +25,8 @@ export const enUS: TranslationKeys = {
   },
   versionGuard: {
     incompatible: 'Incompatible version data detected ({scope}): the directory was created by {stored}, current version is {current}. Backed up to:',
+    failed: 'Version guard could not complete ({scope}): old data needs to be backed up, but the directory is in use by another program and cannot be renamed. Error: {error}',
+    failedHint: 'Please close any program that may be using that directory (e.g. an editor / terminal / AI coding assistant running with it as the working directory, or an antivirus scan in progress), then re-run zread-pi. Your old data is left untouched and will not be lost.',
     backupHint: 'Your old data is fully preserved in the backup directory. Please handle it ASAP (migrate any files you need, then delete the backup to free disk space).',
     created: 'Initialized {scope} (version {current}).',
     scopeHome: 'project home',

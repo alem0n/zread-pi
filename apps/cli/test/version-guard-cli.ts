@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getVersionFilePath, readVersionFile, writeVersionFile } from "@zread-pi/utils";
 import { runVersionGuard } from "../src/commands/version-guard";
+import { spawn } from "node:child_process";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -156,6 +157,57 @@ await mkdir(join(repo2, ".zread-pi"), { recursive: true });
 process.chdir(repo2);
 await runVersionGuard({ repo: false });
 check("repo:false 不写仓库目录的版本标记", (await readVersionFile(join(repo2, ".zread-pi"))) === null);
+
+// ---------------------------------------------------------------------------
+// 6) 家目录被别的进程当作 cwd → 提示并退出进程（不降级、不继续启动）
+// ---------------------------------------------------------------------------
+
+console.log("▶ 家目录被占用时提示并退出");
+
+const busyHome = await tempHome(false, ["config.yaml", "language: zh\ndoc_language: zh\n"]);
+process.env.HOME = busyHome;
+process.env.USERPROFILE = busyHome;
+delete process.env.ZREAD_PI_HOME;
+delete process.env.ZREAD_PI_VERSION_GUARD;
+
+const busyDir = join(busyHome, ".zread-pi");
+// 子进程把 cwd 设为家目录 → Windows 拒绝整体重命名 → 触发「提示并退出」
+const holderCode = `process.chdir(${JSON.stringify(busyDir)}); setTimeout(() => process.exit(0), 20000);`;
+const holder = spawn(process.execPath, ["-e", holderCode], { stdio: "ignore" });
+await new Promise((resolve) => setTimeout(resolve, 800));
+
+// 拦截 process.exit：记录退出码但不真的退出（测试进程还要继续）；同时抓 stderr
+let exitCode: number | undefined;
+const stderrChunks: Buffer[] = [];
+const originalExit = process.exit;
+const originalWrite = process.stderr.write.bind(process.stderr);
+process.exit = ((code?: number) => {
+  exitCode = code ?? 0;
+}) as typeof process.exit;
+process.stderr.write = (chunk: Buffer | string) => {
+  stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return true;
+};
+
+let guardError: unknown;
+try {
+  await runVersionGuard({ repo: false });
+} catch (error) {
+  guardError = error; // process.exit 被拦截后函数应已 return，这里不应被走到
+}
+process.exit = originalExit;
+process.stderr.write = originalWrite;
+
+const busyErr = Buffer.concat(stderrChunks).toString("utf-8");
+check("请求退出码 = 1（提示后退出）", exitCode === 1, `exitCode=${exitCode}`);
+check("未抛错给调用方（由 runVersionGuard 内部处理退出）", guardError === undefined);
+check("stderr 含失败原因（占用 / 无法重命名）", busyErr.includes("占用") || busyErr.includes("in use"));
+check("stderr 含重试指引（关闭程序后重跑）", busyErr.includes("重新运行") || busyErr.includes("re-run"));
+check("旧数据保持原位（未备份、未降级）", !!(await readFile(join(busyHome, ".zread-pi", "config.yaml"), "utf-8").catch(() => null)));
+check("未写入 version 文件", (await readVersionFile(join(busyHome, ".zread-pi"))) === null);
+
+try { holder.kill(); } catch { /* 已退出 */ }
+await new Promise((resolve) => setTimeout(resolve, 200));
 
 // ---------------------------------------------------------------------------
 // 结果

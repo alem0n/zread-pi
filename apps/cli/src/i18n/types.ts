@@ -27,6 +27,8 @@ export interface TranslationKeys {
   };
   versionGuard: {
     incompatible: string;
+    failed: string;
+    failedHint: string;
     backupHint: string;
     created: string;
     scopeHome: string;

@@ -14,6 +14,11 @@
  * 作为备份，然后重建空目录并写入当前版本。**旧数据完整保留在备份目录里**，
  * 由用户自行决定如何迁移；界面上提示备份路径并建议尽快处理。
  *
+ * 备份失败（目录正被别的进程当作 cwd——Windows 拒绝重命名任何进程的工作目录；
+ * 或被杀软 / 索引服务锁定）时**不降级、不静默**：直接抛错，由调用方提示用户
+ * 「关闭占用程序后重试」并退出进程。守卫无法完成时停下来比勉强继续更安全，
+ * 用户解决占用后重跑即可获得干净结构。
+ *
  * 兼容判定口径 = **主版本号相同**（语义化版本的兼容性约定）。
  * 无法解析的版本字符串一律视为不兼容（保守：宁可备份，不可误读旧格式）。
  *
@@ -109,10 +114,14 @@ export type VersionGuardOutcome =
  *
  * - 目录不存在 → 创建 + 写当前版本 → `created`（首次安装）
  * - 版本兼容 → `compatible`
- * - 不兼容（无版本文件 / 主版本不同）→ 备份 + 重建 + 写当前版本 → `incompatible`
+ * - 不兼容（无版本文件 / 主版本不同）→ 备份（整体重命名）+ 重建 + 写当前版本
+ *   → `incompatible`
  *
- * 任何意外错误都向上抛（调用方负责不阻断启动：版本守卫失败时
- * 「保留旧数据不动」比「强行重建」更安全）。
+ * 备份失败（例如目录正被别的进程当作 cwd，Windows 拒绝重命名任何进程的工作目录，
+ * 报 EPERM/EBUSY；或被杀软 / 索引服务锁定）时**直接向上抛错**：不做降级处理，
+ * 由调用方提示用户「关闭占用程序后重试」并退出进程。理由：守卫无法完成时
+ * 「保留旧数据不动并停下来」比「用别的方式勉强继续」更安全，用户解决占用后
+ * 重跑即可获得干净的目录结构。
  */
 export async function ensureVersionGuard(
   dir: string,
@@ -140,6 +149,7 @@ export async function ensureVersionGuard(
     return { status: 'created', dir, version: currentVersion };
   }
   const backupPath = nextBackupPath(dir);
+  // 整体重命名（原子、干净）：失败直接抛，由调用方提示并退出，不做降级
   await rename(dir, backupPath);
   await mkdir(dir, { recursive: true });
   await writeVersionFile(dir, currentVersion);
