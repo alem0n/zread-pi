@@ -251,6 +251,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
         onFocusChange={setFocusIndexes}
         selectedIndexes={selectedIndexes}
         onSelectIndex={selectByIndex}
+        onTimelineModeChange={setTimelineMode}
       />
 
       <div className="flex flex-1 min-h-0">
