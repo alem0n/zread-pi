@@ -1,4 +1,11 @@
 {
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@zread-pi/trajectory": ["../../packages/trajectory/src/index.ts"],
+      "@zread-pi/types": ["../../packages/types/src/index.ts"]
+    }
+  },
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },

@@ -1,0 +1,8 @@
+# 组件级测试配置（bun:test + happy-dom + @testing-library/react）
+# 运行：bun run test:components（等价于在本目录执行 bun test）
+
+[test]
+# .tsx 用 React 17+ 的自动运行时（import react/jsx-runtime），与 Vite 构建一致
+jsxRuntime = "automatic"
+# happy-dom 全局注册 + jest-dom matcher 注册（先于测试文件执行）
+preload = ["./test/setup.ts"]

@@ -12,7 +12,7 @@
     "vendor/pi/packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/browse/tsconfig.test.json",
     "test": "bun run typecheck && bun run test:catalog && bun run test:agent && bun run test:tools && bun run test:installer && bun run test:history && bun run test:lock && bun run test:version-guard && bun run test:logger && bun run test:agent:http && bun run test:provider && bun run test:analyzer && bun run test:blueprint && bun run test:pages && bun run test:context && bun run test:trajectory && bun run test:tui",
     "test:catalog": "bun run packages/agent-runtime/test/provider-catalog-smoke.ts",
     "test:agent": "bun run packages/agent-runtime/test/smoke-agent.ts",
@@ -35,7 +35,8 @@
     "browse:dev": "cd apps/browse && bun run dev",
     "test:blueprint": "bun run packages/orchestrator/test/e2e-blueprint.ts && bun run packages/orchestrator/test/blueprint-detail.ts && bun run packages/orchestrator/test/e2e-sync.ts && bun run packages/orchestrator/test/context-files.ts && bun run packages/orchestrator/test/style-discipline.ts",
     "test:trajectory": "bun run packages/trajectory/test/trajectory-model.ts && bun run packages/utils/test/trajectory-store.ts && bun run packages/utils/test/run-dir-order.ts",
-    "test:browse": "bun run apps/cli/test/browse-server.ts",
+    "test:browse": "bun run apps/cli/test/browse-server.ts && bun run test:components",
+"test:components": "cd apps/browse && bun test",
     "test:tui": "bun run apps/cli/test/smoke-tui.ts && bun run apps/cli/test/render-all-routes.ts && bun run apps/cli/test/real-run-check.ts && bun run apps/cli/test/output-guard.ts && bun run apps/cli/test/cli-target-dir.ts && bun test apps/cli/src/views/wiki-generate/__tests__ && bun run apps/cli/test/mock-generate.ts && bun run test:browse",
     "mock:wiki": "bun run tools/mock-wiki-run.ts",
     "tools:install": "bun run tools/tool-install.ts",
