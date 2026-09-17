@@ -304,11 +304,28 @@ function summarizeAssistantActivity(blocks: ReadonlyArray<{ type: string }>): st
   return tools.size > 0 ? 'Tool call only' : '';
 }
 
+/** 全部 cell 索引的最大值（流式 partial 的续号用；循环实现，避免额外的 flatMap 分配） */
+function maxCellIndex(turns: readonly TrajectoryTurnModel[]): number {
+  let max = 0;
+  for (const turn of turns) {
+    for (const group of turn.groups) {
+      for (const cell of group.cells) {
+        if (cell.index > max) max = cell.index;
+      }
+    }
+  }
+  return max;
+}
+
+/** 该 turn 首条记录的序号（turn 排序用；循环实现，不展开参数栈） */
 function firstCellIndex(turn: TrajectoryTurnModel): number {
-  return Math.min(
-    ...turn.groups.flatMap((group) => group.cells.map((cell) => cell.index)),
-    Number.POSITIVE_INFINITY,
-  );
+  let min = Number.POSITIVE_INFINITY;
+  for (const group of turn.groups) {
+    for (const cell of group.cells) {
+      if (cell.index < min) min = cell.index;
+    }
+  }
+  return min;
 }
 
 function toTurnModel(
@@ -340,7 +357,13 @@ function groupDescription(laid: readonly LaidCell[]): string | undefined {
     }
   }
   if (times.length >= 2) {
-    parts.push(formatElapsedSeconds((Math.max(...times) - Math.min(...times)) / 1000));
+    let earliest = times[0]!;
+    let latest = times[0]!;
+    for (const value of times) {
+      if (value < earliest) earliest = value;
+      if (value > latest) latest = value;
+    }
+    parts.push(formatElapsedSeconds((latest - earliest) / 1000));
   } else if (times.length === 1) {
     const own = laid.find((item) => item.absTime === times[0])?.cell.timeSeconds;
     if (own !== null && own !== undefined && Number.isFinite(own)) {
@@ -352,6 +375,8 @@ function groupDescription(laid: readonly LaidCell[]): string | undefined {
     if (item.toolName === undefined || item.cell.kind !== 'tool') continue;
     tools.set(item.toolName, (tools.get(item.toolName) ?? 0) + 1);
   }
+  // 注：上面的 times 求极值用循环而非 Math.max(...times)：不展开参数栈、
+  // 也不多分配一个中间数组（单个 Agent 的分组可能积累成千上万条记录）。
   for (const [name, count] of tools) {
     parts.push(count > 1 ? `${name}×${count}` : name);
   }
@@ -360,16 +385,19 @@ function groupDescription(laid: readonly LaidCell[]): string | undefined {
 
 /**
  * 把流式中的助手单元格追加到已完成的布局（共享未受影响的 turn / group）。
+ *
+ * `lastIndex` 省略时由本函数遍历现有布局推导续号（调用方不必再扫一遍全量布局，
+ * 也不必把整列索引展开成 Math.max 的参数栈）。
  */
 export function appendTrajectoryPartialLayout(
   turns: readonly TrajectoryTurnModel[],
   partial: TrajectorySnapshot['partial'],
-  lastIndex: number,
+  lastIndex?: number,
 ): readonly TrajectoryTurnModel[] {
   if (partial === null) return turns;
   const preview = partial.preview;
   const cell: TrajectoryCellProps = {
-    index: lastIndex + 1,
+    index: (lastIndex ?? maxCellIndex(turns)) + 1,
     recordId: `message\u0000partial\u0000${partial.turn ?? 'run'}\u0000${partial.step}`,
     kind: 'message',
     text: preview,

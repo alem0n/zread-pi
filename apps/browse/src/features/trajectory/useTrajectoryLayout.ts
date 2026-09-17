@@ -2,7 +2,8 @@
  * useTrajectoryLayout —— 事件流 → 展示模型的派生（replay → layout → 请求编号 → 搜索索引）。
  *
  * 折叠在客户端完成（对齐 dsh）：服务端只给原始事件。
- * 搜索索引按 3 秒节流提交（SEARCH_INDEX_THROTTLE_MS），匹配集合在提交后刷新。
+ * 搜索索引按「领先 + 尾随」节流提交（SEARCH_INDEX_THROTTLE_MS），匹配集合在提交后刷新；
+ * 纯尾随会在运行中的 run 上饿死（每轮轮询都重置定时器）。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -36,40 +37,45 @@ export function useTrajectoryLayout(
   const [matchSet, setMatchSet] = useState<ReadonlySet<string> | null>(null);
   const [indexVersion, setIndexVersion] = useState(0);
   const indexRef = useRef(new TrajectorySearchIndex());
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // ① replay：事件 → 快照（记录 / 请求 / 进行中的消息 / run 摘要）
   const snapshot = useMemo(() => replayRunEvents(events), [events]);
 
   // ② layout：快照 → turn / group / cell（含流式 partial 的追加）
   const baseTurns = useMemo(() => deriveTrajectoryLayout(snapshot), [snapshot]);
+  // partial 的续号由模型层遍历现有布局推导（不在调用侧把全量索引展开成参数栈）
   const turns = useMemo(
-    () =>
-      snapshot.partial === null
-        ? baseTurns
-        : appendTrajectoryPartialLayout(
-            baseTurns,
-            snapshot.partial,
-            Math.max(0, ...baseTurns.flatMap((turn) => turn.groups.flatMap((group) => group.cells.map((cell) => cell.index)))),
-          ),
+    () => (snapshot.partial === null ? baseTurns : appendTrajectoryPartialLayout(baseTurns, snapshot.partial)),
     [baseTurns, snapshot.partial],
   );
 
-  // ③ 搜索索引：节流提交（流式事件高频到达时不会每帧重建）
+  // ③ 搜索索引：「领先 + 尾随」节流（leading & trailing throttle）。
+  //  纯尾随（debounce）在事件高频到达（运行中每 1.5s 一轮轮询）时会饿死——
+  //  每次 turns 变化都重置定时器，匹配集合永远不刷新。领先沿保证首屏立即可用，
+  //  尾随保证流式期间最多每 SEARCH_INDEX_THROTTLE_MS 重建一次。
+  const lastFlushAtRef = useRef(0);
   useEffect(() => {
-    if (flushTimerRef.current !== undefined) clearTimeout(flushTimerRef.current);
-    flushTimerRef.current = setTimeout(
-      () => {
-        indexRef.current.update([turns]);
-        setIndexVersion((current) => current + 1);
-      },
-      partialThrottle ? SEARCH_INDEX_THROTTLE_MS : 0,
-    );
+    const flush = (): void => {
+      indexRef.current.update([turns]);
+      setIndexVersion((current) => current + 1);
+    };
+    if (!partialThrottle) {
+      flush();
+      return;
+    }
+    const now = Date.now();
+    const elapsed = now - lastFlushAtRef.current;
+    if (elapsed >= SEARCH_INDEX_THROTTLE_MS) {
+      lastFlushAtRef.current = now;
+      flush();
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastFlushAtRef.current = Date.now();
+      flush();
+    }, SEARCH_INDEX_THROTTLE_MS - elapsed);
     return () => {
-      if (flushTimerRef.current !== undefined) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = undefined;
-      }
+      clearTimeout(timer);
     };
   }, [turns, partialThrottle]);
 

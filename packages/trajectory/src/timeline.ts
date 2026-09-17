@@ -131,24 +131,30 @@ function deriveTimedTimeline(
 
   const spans: TrajectoryTimelineSpan[] = [];
   const turnBoundaries: TrajectoryTimelineTurnBoundary[] = [];
+  // 极值用循环而非 Math.min/max(...spread)：一次 run 的 span 数可达数万，
+  // 展开参数栈既有引擎上限风险，也多分配一个中间数组（每轮流式 tick 都跑）。
+  let rangeStart = Number.POSITIVE_INFINITY;
+  let rangeEnd = Number.NEGATIVE_INFINITY;
   for (const turn of timedTurns) {
-    const projected = turn.rawSpans.map((span): TrajectoryTimelineSpan => {
+    let turnStart = Number.POSITIVE_INFINITY;
+    for (const span of turn.rawSpans) {
       const offset = removedIdleBySpan.get(span) ?? 0;
-      return {
-        ...span,
-        start: span.start - offset,
-        end: (actualDuration ? span.end : span.start) - offset,
-      };
-    });
-    spans.push(...projected);
-    if (turn.turn !== null) {
-      turnBoundaries.push({ turn: turn.turn, time: Math.min(...projected.map((span) => span.start)) });
+      const start = span.start - offset;
+      const end = (actualDuration ? span.end : span.start) - offset;
+      const projected: TrajectoryTimelineSpan = { ...span, start, end };
+      spans.push(projected);
+      if (start < rangeStart) rangeStart = start;
+      if (end > rangeEnd) rangeEnd = end;
+      if (start < turnStart) turnStart = start;
+    }
+    if (turn.turn !== null && turn.rawSpans.length > 0) {
+      turnBoundaries.push({ turn: turn.turn, time: turnStart });
     }
   }
 
   return {
-    start: Math.min(...spans.map((span) => span.start)),
-    end: Math.max(...spans.map((span) => span.end)),
+    start: rangeStart,
+    end: rangeEnd,
     spans,
     turnBoundaries,
   };

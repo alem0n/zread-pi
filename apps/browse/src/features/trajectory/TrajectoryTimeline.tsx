@@ -3,9 +3,16 @@
  *
  * 移植自 dsh 的 TrajectoryTimeline，但渲染用绝对定位的 div（不引入 canvas）。
  * - 拖拽选择区间 → 过滤出台账里高亮 / 保留的记录（onFocusChange）；
- * - 滚轮缩放（time / duration / actual 模式；sequence 模式滚轮切换到 duration）；
+ * - 滚轮缩放（time / duration / actual 模式；sequence 模式滚轮先切到 duration）；
  * - 右键清除选区；
  * - 悬停 500ms 显示该区间的摘要提示。
+ *
+ * 渲染要点：
+ * - 滚轮缩放用原生非被动监听（React 的 onWheel 是被动监听，preventDefault 无效，
+ *   缩放时整个台账会跟着滚动）；
+ * - 宽度不足 2 CSS px 的 span 合并成一条（一次 run 的 span 可达数万，逐条画 div
+ *   会让浏览器卡死；合并后每泳道的条数被视口宽度封顶）；
+ * - 泳道树单独 memo：拖拽选区时只有选区遮罩重绘，泳道不重绘。
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +26,7 @@ import {
   type TrajectoryTimeRange,
   type TrajectoryTimelineMode,
   type TrajectoryTimelineModel,
+  type TrajectoryTimelineSpan,
   type TrajectoryTurnModel,
 } from '@zread-pi/trajectory';
 import { useT } from '@/i18n/I18nContext';
@@ -32,6 +40,9 @@ const LANE_COLORS: Record<number, string> = {
 const HEIGHT_PX = 64;
 const LANE_HEIGHT_PX = 16;
 const LANE_GAP_PX = 4;
+const LANES = [0, 1, 2];
+/** 宽度小于此值（CSS px）的 span 与相邻薄 span 合并成一条，避免视口内出现成千上万条 div */
+const SPAN_MERGE_PX = 2;
 
 interface TrajectoryTimelineProps {
   turns: readonly TrajectoryTurnModel[];
@@ -41,6 +52,105 @@ interface TrajectoryTimelineProps {
   onFocusChange: (indexes: ReadonlySet<number> | null) => void;
   selectedIndexes: ReadonlySet<number>;
   onSelectIndex: (index: number) => void;
+  /** 滚轮在 sequence 轴上触发模式切换（sequence 无时长，缩放无意义） */
+  onTimelineModeChange: (mode: TrajectoryTimelineMode) => void;
+}
+
+/** 一条合并后的泳道色块（可能由多个 sub-pixel span 聚合而成） */
+interface LaneSegment {
+  left: number;
+  width: number;
+  isError: boolean;
+  focused: boolean;
+  selected: boolean;
+}
+
+interface SegmentFlags {
+  isError: boolean;
+  focused: boolean;
+  selected: boolean;
+  count: number;
+}
+
+/** 把同一泳道里连续的 sub-pixel span 合并；色块条数被视口宽度封顶 */
+function mergeLaneSpans(
+  spans: readonly TrajectoryTimelineSpan[],
+  positionOf: (value: number) => number,
+  width: number,
+  focusIndexes: ReadonlySet<number> | null,
+  selectedIndexes: ReadonlySet<number>,
+): LaneSegment[] {
+  const segments: LaneSegment[] = [];
+  let bucketLeft = 0;
+  let bucketRight = 0;
+  let bucket: SegmentFlags | null = null;
+
+  const flagsOf = (span: TrajectoryTimelineSpan): SegmentFlags => ({
+    isError: span.isError,
+    focused: focusIndexes === null || focusIndexes.has(span.index),
+    selected: selectedIndexes.has(span.index),
+    count: 1,
+  });
+  const mergeInto = (target: SegmentFlags, span: TrajectoryTimelineSpan): SegmentFlags => {
+    target.isError = target.isError || span.isError;
+    target.focused = target.focused || focusIndexes === null || focusIndexes.has(span.index);
+    target.selected = target.selected || selectedIndexes.has(span.index);
+    target.count += 1;
+    return target;
+  };
+  const emit = (left: number, right: number, flags: SegmentFlags): void => {
+    segments.push({
+      left,
+      width: Math.max(1, right - left),
+      isError: flags.isError,
+      focused: flags.focused,
+      selected: flags.selected,
+    });
+  };
+
+  for (const span of spans) {
+    const left = Math.max(0, positionOf(span.start));
+    const right = Math.min(width, positionOf(span.end));
+    if (right - left >= SPAN_MERGE_PX) {
+      // 宽 span：若与待合并的薄 span 相接 / 重叠则并成一条（避免紧贴的缝隙）
+      if (bucket !== null && bucketRight > left - SPAN_MERGE_PX) {
+        emit(Math.min(bucketLeft, left), Math.max(bucketRight, right), mergeInto(bucket, span));
+        bucket = null;
+      } else {
+        if (bucket !== null) {
+          emit(bucketLeft, bucketRight, bucket);
+          bucket = null;
+        }
+        emit(left, right, flagsOf(span));
+      }
+      continue;
+    }
+    if (bucket === null) {
+      bucket = flagsOf(span);
+      bucketLeft = left;
+      bucketRight = right;
+    } else {
+      mergeInto(bucket, span);
+      bucketLeft = Math.min(bucketLeft, left);
+      bucketRight = Math.max(bucketRight, right);
+    }
+  }
+  if (bucket !== null) emit(bucketLeft, bucketRight, bucket);
+  return segments;
+}
+
+/** 模型边界漂移（流式新事件到达）时把缩放视口钳到新边界内，而不是丢弃 */
+function clampViewport(current: TrajectoryTimeRange, model: TrajectoryTimeRange): TrajectoryTimeRange {
+  if (current.start >= model.start && current.end <= model.end) return current;
+  const span = Math.max(1, current.end - current.start);
+  let start = Math.max(model.start, current.start);
+  let end = start + span;
+  if (end > model.end) {
+    end = model.end;
+    start = Math.max(model.start, end - span);
+  }
+  if (start >= end) return { start: model.start, end: model.end };
+  return { start, end };
 }
 
 export const TrajectoryTimeline = memo(function TrajectoryTimeline({
@@ -50,7 +160,9 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
   onFocusChange,
   selectedIndexes,
   onSelectIndex,
-}: TrajectoryTimelineProps) {  const t = useT();
+  onTimelineModeChange,
+}: TrajectoryTimelineProps) {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [selection, setSelection] = useState<TrajectoryTimeRange | null>(null);
@@ -75,11 +187,23 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
 
   // 缩放态：把模型区间映射到视口的一个子区间（平移用）
   const [viewport, setViewport] = useState<TrajectoryTimeRange | null>(null);
+  const modeRef = useRef(mode);
   useEffect(() => {
-    // 模型变化（新事件 / 模式切换）时重置视口
-    setViewport(null);
-    setSelection(null);
-  }, [model?.start, model?.end, mode]);
+    if (model === null) {
+      setViewport(null);
+      setSelection(null);
+      return;
+    }
+    // 模式切换会改变坐标轴语义，必须丢弃旧的缩放 / 选区
+    if (mode !== modeRef.current) {
+      modeRef.current = mode;
+      setViewport(null);
+      setSelection(null);
+      return;
+    }
+    // 模型边界漂移（运行中的 run 每轮轮询都会增长）：钳进新边界，保留用户的缩放
+    setViewport((current) => (current === null ? null : clampViewport(current, model)));
+  }, [model, mode]);
 
   const effective = viewport ?? (model === null ? null : { start: model.start, end: model.end });
   const span = effective === null ? 1 : Math.max(1, effective.end - effective.start);
@@ -156,13 +280,16 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
     [onFocusChange],
   );
 
-  // 滚轮缩放（以光标位置为中心）
+  // 滚轮缩放（以光标位置为中心）。用原生非被动监听：React 的 onWheel 走被动委托，
+  // preventDefault() 不生效，缩放时父级台账会跟着滚动。
   const handleWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
+    (event: WheelEvent): void => {
       if (model === null || effective === null) return;
-      // sequence 模式下滚轮先切到 duration（它有真实时长）
       if (mode === 'sequence') {
+        // sequence 轴没有时长可缩放：滚轮先切到 duration（它有真实墙钟跨度）。
         if (Math.abs(event.deltaY) < 1) return;
+        event.preventDefault();
+        onTimelineModeChange('duration');
         return;
       }
       event.preventDefault();
@@ -177,10 +304,21 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
       setViewport({ start, end: start + nextSpan });
       setZoomOperations((current) => current + 1);
     },
-    [model, effective, span, mode, valueAt],
+    [model, effective, span, mode, valueAt, onTimelineModeChange],
   );
+  const wheelHandlerRef = useRef(handleWheel);
+  useEffect(() => {
+    wheelHandlerRef.current = handleWheel;
+  }, [handleWheel]);
+  useEffect(() => {
+    const element = containerRef.current;
+    if (element === null) return;
+    const listener = (event: WheelEvent): void => wheelHandlerRef.current(event);
+    element.addEventListener('wheel', listener, { passive: false });
+    return () => element.removeEventListener('wheel', listener);
+  }, []);
 
-  // 缩放操作数达到阈值后自动切到 actual 模式（dsh 的渐进式缩放语义）
+  // 缩放操作数达到阈值后重置计数（渐进式缩放语义）
   useEffect(() => {
     if (zoomOperations >= MINIMUM_ZOOM_OPERATIONS && mode === 'duration') {
       setZoomOperations(0);
@@ -218,6 +356,48 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
     setTooltip(null);
   }, []);
 
+  // 泳道色块：sub-pixel span 合并后按泳道分组。依赖里不含 selection，
+  // 拖拽选区时泳道树不重绘（只有选区遮罩重绘）。
+  const lanes = useMemo(() => {
+    if (model === null || effective === null) return [];
+    return LANES.map((lane) => {
+      const laneSpans = model.spans.filter(
+        (entry) => entry.lane === lane && entry.end >= effective.start && entry.start <= effective.end,
+      );
+      return mergeLaneSpans(laneSpans, positionOf, width, focusIndexes, selectedIndexes);
+    });
+  }, [model, effective, positionOf, width, focusIndexes, selectedIndexes]);
+
+  const lanesElement = useMemo(
+    () =>
+      lanes.map((segments, lane) => (
+        <div
+          key={lane}
+          className="absolute left-0 right-0"
+          style={{
+            top: 6 + lane * (LANE_HEIGHT_PX + LANE_GAP_PX),
+            height: LANE_HEIGHT_PX,
+          }}
+        >
+          {segments.map((segment, index) => (
+            <div
+              key={`${lane}-${index}`}
+              className="absolute rounded-sm"
+              style={{
+                left: segment.left,
+                width: segment.width,
+                height: LANE_HEIGHT_PX,
+                backgroundColor: segment.isError ? '#e54847' : LANE_COLORS[lane] ?? '#a39e98',
+                opacity: segment.focused ? (segment.selected ? 1 : 0.75) : 0.12,
+                outline: segment.selected ? '1.5px solid #31302e' : 'none',
+              }}
+            />
+          ))}
+        </div>
+      )),
+    [lanes],
+  );
+
   if (model === null) {
     return (
       <div className="px-3 py-1.5 text-xs text-[#a39e98] border-b border-gray-200 bg-white">
@@ -225,9 +405,6 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
       </div>
     );
   }
-
-  const visibleSpans = model.spans.filter((span) => span.end >= effective!.start && span.start <= effective!.end);
-  const lanes = [0, 1, 2];
 
   return (
     <div
@@ -238,44 +415,9 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onContextMenu={handleContextMenu}
-      onWheel={handleWheel}
     >
       {/* 泳道 */}
-      {lanes.map((lane) => (
-        <div
-          key={lane}
-          className="absolute left-0 right-0"
-          style={{
-            top: 6 + lane * (LANE_HEIGHT_PX + LANE_GAP_PX),
-            height: LANE_HEIGHT_PX,
-          }}
-        >
-          {visibleSpans
-            .filter((span) => span.lane === lane)
-            .map((span) => {
-              const left = Math.max(0, positionOf(span.start));
-              const right = Math.min(width, positionOf(span.end));
-              const w = Math.max(2, Math.min(width - left, right - left));
-              const isFocused = focusIndexes === null || focusIndexes.has(span.index);
-              const isSelected = selectedIndexes.has(span.index);
-              return (
-                <div
-                  key={`${span.index}-${span.lane}`}
-                  title={span.label.slice(0, 120)}
-                  className="absolute rounded-sm transition-opacity"
-                  style={{
-                    left,
-                    width: w,
-                    height: LANE_HEIGHT_PX,
-                    backgroundColor: span.isError ? '#e54847' : LANE_COLORS[span.lane],
-                    opacity: isFocused ? (isSelected ? 1 : 0.75) : 0.12,
-                    outline: isSelected ? '1.5px solid #31302e' : 'none',
-                  }}
-                />
-              );
-            })}
-        </div>
-      ))}
+      {lanesElement}
 
       {/* turn 边界刻度 */}
       {model.turnBoundaries.map((boundary) => {
@@ -298,7 +440,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
         />
       ) : null}
 
-      {/* 缩放态的平移：拖动空白处平移视口 */}
+      {/* 缩放态的重置入口 */}
       {viewport !== null ? (
         <button
           type="button"

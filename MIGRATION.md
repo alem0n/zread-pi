@@ -1987,6 +1987,88 @@ sessionId 并把它与 Agent 身份（key / role / pageSlug）一起绑定进每
 
 ---
 
+### 26.10 渲染健壮性：sticky 表头 / 被动滚轮 / sub-pixel span / 流式抖动（v1.13.2）
+
+纯模型层（`test:trajectory`）与浏览站构建（`browse:build`）都绿，但 26.6 的
+浏览器实测集中在「能不能看」，几处**多记录规模下才暴露的绘制问题**是在通读
+渲染路径时发现的。这一节记录问题与修法，都走「让 DOM 几何与窗口数学一致」
+或「去掉无谓的 O(N) 热路径」两条路，不改变任何数据语义。
+
+#### sticky turn 表头：从文档流里搬出来
+
+旧实现把 sticky 条作为 `sticky top-0` 的**流内元素**插在顶部 spacer 与可见行
+之间。两个后果：
+
+1. **几何失配**：它占 34px，但 `trajectoryViewportWindow` 算 spacer 时没算它，
+   于是窗口内行的真实文档位置比窗口数学认为的低 34px；`totalHeight` 也差 34px，
+   连带 `atBottom`（尾部跟随判据）失真。
+2. **边界处双表头**：`stickyVisible` 的判据是「真实表头完全滚出视口顶」，但
+   `activeTurnHeader` 用 `scrollTop` 查找时没扣除那 34px——真实表头半可见时，
+   sticky 条已显示，于是同一时刻出现**两条 turn 表头**；显隐切换时整列还上下跳 34px。
+
+改为**滚动容器的绝对定位兄弟**（容器外包一层 `relative flex-1 min-h-0`，
+scroller `absolute inset-0`，sticky 条 `absolute top-0 inset-x-0`）：sticky 条
+完全不进文档流，DOM 高度与 `topHeight/totalHeight` 逐字一致，显隐不再牵动任何行。
+
+#### activeTurnHeader：O(行数) → O(log 表头数)
+
+旧实现在每次 `onScroll` 里从头累加行高直到越过 `scrollTop`——深滚动时每帧都是
+O(视口上方行数)（10 万行滚到底就是每帧 10 万次）。改为对 `rows` 预计算
+**turn 头偏移量表**（`useMemo`，随 `rows` 变化，不随 `scrollTop` 变化），
+滚动时二分查找。
+
+#### 滚轮缩放：原生非被动监听
+
+React 的 `onWheel` 走根节点的**被动**委托，`preventDefault()` 不生效（只留一行
+console 警告），于是缩放时父级台账会**同时滚动**。改为在 `containerRef` 上原生
+`addEventListener('wheel', fn, { passive: false })`（处理器经 ref 拿最新闭包，
+只挂一次）。顺带把 sequence 模式的「滚轮先切到 duration」从注释里的意图实现成
+真的（原来是无操作的 `return`）。
+
+> 未实现 `MINIMUM_ZOOM_OPERATIONS` 的 duration → actual 自动切换：一次触控板手势
+> 就会产生远超阈值的 wheel 事件，会在用户第一次缩放时就把空闲压缩掉，体感更像
+> bug。计数器保留但只重置（见 26.7 的未决清单）。
+
+#### 时间线 span：sub-pixel 合并
+
+一次中等规模的 generate run（蓝图 + N 个页面 Agent）能产生上万条 span；缩到
+全览视图时每条不足 1 CSS px，但旧代码强制 `Math.max(2, ...)` 最小宽度，结果是
+**上万条互相重叠的 2px div**，且每轮流式轮询都全部重绘。现在宽度 < 2px 的 span
+与相邻薄 span **合并成一条**（相接的宽 span 也并进去，避免接缝），每泳道条数被
+视口宽度封顶；泳道树单独 `useMemo`（依赖不含拖拽选区），拖拽时只有选区遮罩重绘。
+合并条的聚焦 / 选中态取**任一组成部分**命中即点亮（错误优先标红）。
+
+#### 流式期间的三个「悄悄失效」
+
+- **搜索匹配冻结**：搜索索引原是**纯尾随** debounce，而运行中的 run 每 1.5s
+  就让 `turns` 换引用、重置定时器 → 3s 定时器在流式期间**永远不触发**，匹配集合
+  停在首屏。改为「领先 + 尾随」节流：首屏立即可用，流式期间最多每
+  `SEARCH_INDEX_THROTTLE_MS` 重建一次。
+- **缩放 / 选区被丢弃**：模型边界漂移时旧代码直接 `setViewport(null)`，
+  运行中的 run 每轮轮询都增长边界 → 用户的缩放与拖拽选区每轮被清掉。改为
+  `clampViewport()` 钳进新边界（只有模式切换这种改变坐标轴语义的操作才丢弃）。
+- **参数栈展开**：`useTrajectoryLayout` 里 `Math.max(0, ...全量 cell 索引)`、
+  模型层 `firstCellIndex` / `groupDescription` / 时间线极值里的
+  `Math.min/max(...spread)` 全部换成循环——既是每轮流式 tick 的 O(N) 分配，
+  也依赖 JS 引擎的 apply 参数上限（本机 V8 二十万参数仍不抛，但这是无谓的
+  热路径，且不是所有引擎都宽松）。`appendTrajectoryPartialLayout` 的
+  `lastIndex` 改为**可选**，省略时由模型层自己遍历续号，调用侧不再扫第二遍。
+
+#### 其余小项
+
+- `JsonTree` 的原始值节点加 `break-all`：解析失败的巨型 JSON 字符串不再横向溢出；
+- 检查器拖宽期间禁用文本选区，避免划过台账文本时划出高亮。
+
+### 26.10.1 验证
+
+- `bun run typecheck`：0 错误；`bun run browse:build`：通过（含前端 `tsc -b`）
+- `bun run test:trajectory`：模型层 **97**（新增 7 项大规模回归：10 万 cell 的
+  布局追加 partial 不抛错 / 续号 = 最大索引 + 1 / 时间线 span 数与范围 / 显式
+  `lastIndex` 向后兼容）+ store **47** + run 顺序 **7/7**
+- `bun run test`：全部套件通过；`bun run mock:wiki`：completed=5 failed=0
+
+---
+
 ## 27. 版本守卫：按主版本隔离数据目录（v1.13.0）
 
 ### 背景
