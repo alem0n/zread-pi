@@ -29,6 +29,7 @@ import {
 } from '../src/index.js';
 import type { RunEvent, RunTokenUsage } from '@zread-pi/types';
 import { RUN_LEVEL_AGENT } from '@zread-pi/types';
+import type { TrajectoryCellProps, TrajectoryTurnModel } from '../src/index.js';
 
 let passed = 0;
 let failed = 0;
@@ -446,6 +447,60 @@ const timelineAfter = deriveTrajectoryTimeline(visibleTurns, 'sequence');
 check('隐藏前时间线非空', timelineBefore !== null);
 check('隐藏后时间线非空', timelineAfter !== null);
 checkEqual('隐藏后时间线 span 数减少', (timelineAfter?.spans.length ?? 1) < (timelineBefore?.spans.length ?? 0), true);
+
+// ---------------------------------------------------------------------------
+// 11) 大规模布局：极值计算不依赖 apply 参数栈，partial 续号正确
+// ---------------------------------------------------------------------------
+
+console.log('▶ 大规模布局（参数栈 / 续号）');
+
+// 真实 run 里一个长页面 Agent 会积累成千上万条记录；旧实现在调用侧把全量 cell 索引
+// 展开成 Math.max(...args)，并在时间线里用 Math.min/max(...spans) —— 既是大对象的
+// apply 参数栈风险，也是每轮流式 tick 的全量分配。
+const BIG_CELLS = 100_000;
+const bigCells: TrajectoryCellProps[] = Array.from({ length: BIG_CELLS }, (_, i) => ({
+  index: i + 1,
+  kind: 'message',
+  text: `cell ${i}`,
+  sourceSeq: i + 1,
+  timeSeconds: 0.001,
+  startedAt: 1_000 + i,
+}));
+const bigTurn: TrajectoryTurnModel = {
+  turn: 1,
+  label: 'big',
+  sessionId: 'session-big',
+  groups: [{ title: 'Message', cells: bigCells }],
+};
+
+let bigAppended: readonly TrajectoryTurnModel[] = [];
+try {
+  // lastIndex 省略时由模型层遍历现有布局推导续号
+  bigAppended = appendTrajectoryPartialLayout(
+    [bigTurn],
+    { turn: 1, step: 2, preview: 'streaming', blocks: [{ type: 'text', text: 'streaming' }] },
+  );
+  check('大规模布局追加 partial 不抛错', bigAppended.length === 1);
+} catch (error) {
+  check('大规模布局追加 partial 不抛错', false, error instanceof Error ? error.message : String(error));
+}
+const bigLast = bigAppended[0]?.groups.at(-1)?.cells.at(-1);
+checkEqual('partial 续号 = 最大索引 + 1', bigLast?.index, BIG_CELLS + 1);
+checkEqual('partial 单元格内容正确', bigLast?.text, 'streaming');
+
+// 时间线极值同样走循环（span 数 = cell 数量级）
+const bigTimeline = deriveTrajectoryTimeline([bigTurn], 'duration');
+check('大规模时间线投影非空', bigTimeline !== null);
+checkEqual('大规模时间线 span 数 = cell 数', bigTimeline?.spans.length ?? 0, BIG_CELLS);
+checkEqual('大规模时间线范围覆盖全部记录', bigTimeline?.end ?? 0, 1_000 + BIG_CELLS);
+
+// 显式 lastIndex 仍然生效（向后兼容）
+const explicitIndex = appendTrajectoryPartialLayout(
+  [bigTurn],
+  { turn: 1, step: 3, preview: 'explicit', blocks: [] },
+  5,
+);
+checkEqual('显式 lastIndex 仍生效', explicitIndex[0]?.groups.at(-1)?.cells.at(-1)?.index, 6);
 
 // ---------------------------------------------------------------------------
 // 结果
