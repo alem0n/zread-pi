@@ -40,15 +40,27 @@ function replace(text: string, pairs: Record<string, string>): string {
 
 function describe(outcome: VersionGuardOutcome, scope: string, t: TranslationKeys): string[] {
   if (outcome.status !== "incompatible") return [];
-  return [
+  const lines = [
     replace(t.versionGuard.incompatible, {
       scope,
       stored: outcome.stored ?? "(unknown)",
       current: outcome.version,
     }),
     `  ${outcome.backupPath}`,
-    t.versionGuard.backupHint,
   ];
+  if (outcome.degraded) {
+    lines.push(replace(t.versionGuard.degraded, {}));
+    if (outcome.unresolvedEntries && outcome.unresolvedEntries.length > 0) {
+      lines.push(
+        replace(t.versionGuard.unresolved, {
+          count: String(outcome.unresolvedEntries.length),
+          entries: outcome.unresolvedEntries.slice(0, 5).join(", "),
+        }),
+      );
+    }
+  }
+  lines.push(t.versionGuard.backupHint);
+  return lines;
 }
 
 /**
@@ -76,8 +88,16 @@ export async function runVersionGuard(options: VersionGuardOptions = {}): Promis
         if (lines.length === 0) lines.push(""); // 首条提示前空一行，与正常输出隔开
         lines.push(...messages);
       }
-    } catch {
-      // 忽略单处失败，继续守卫下一处；不阻断启动
+    } catch (error) {
+      // 不再静默吞掉：守卫失败时用户必须能看到原因（否则会误以为已备份）。
+      // 仍不阻断启动——这里只告警，「保留旧数据不动」比「强行重建」更安全。
+      if (lines.length === 0) lines.push("");
+      lines.push(
+        replace(t.versionGuard.failed, {
+          scope: name,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
   }
 

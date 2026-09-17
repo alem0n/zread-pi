@@ -14,6 +14,11 @@
  * 作为备份，然后重建空目录并写入当前版本。**旧数据完整保留在备份目录里**，
  * 由用户自行决定如何迁移；界面上提示备份路径并建议尽快处理。
  *
+ * 该目录被别的进程当作 cwd（当前工作目录）时，Windows 会拒绝整体重命名
+ * （EPERM/EBUSY）。此时自动降级为「把目录内条目逐个迁入新备份目录」——
+ * 迁移条目不需要重命名被占用的父目录，通常仍能完成等价的备份，结果带
+ * `degraded: true` 标记。两种方式都失败时向上抛，由调用方告警（不静默）。
+ *
  * 兼容判定口径 = **主版本号相同**（语义化版本的兼容性约定）。
  * 无法解析的版本字符串一律视为不兼容（保守：宁可备份，不可误读旧格式）。
  *
@@ -24,7 +29,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir, rename, readFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { writeTextFileAtomic } from './file-io.js';
@@ -90,6 +95,33 @@ export function nextBackupPath(dir: string): string {
   }
 }
 
+/**
+ * 把源目录内的所有条目移动到目标目录（不重命名源目录本身）。
+ *
+ * 这是「目录被别的进程当作 cwd」时的降级路径：Windows 不允许重命名任何进程的
+ * 当前工作目录，{@link rename} 会抛 EPERM/EBUSY。但把目录**内部的条目**逐个
+ * move 出去不需要重命名被占用的父目录，因此可以绕过该限制，达到同等效果
+ * （旧数据整体迁出、源目录被清空）。
+ *
+ * 返回未能迁移的条目（相对名）。全部成功时返回空数组。
+ */
+async function moveContents(source: string, destination: string): Promise<string[]> {
+  await mkdir(destination, { recursive: true });
+  const entries = await readdir(source, { withFileTypes: true });
+  const failed: string[] = [];
+  for (const entry of entries) {
+    const from = join(source, entry.name);
+    const to = join(destination, entry.name);
+    try {
+      await rename(from, to);
+    } catch {
+      // 单个条目迁移失败（可能被单独占用）：记录下来交给调用方决定，不丢数据
+      failed.push(entry.name);
+    }
+  }
+  return failed;
+}
+
 /** 守卫结果 */
 export type VersionGuardOutcome =
   | { status: 'created'; dir: string; version: string }
@@ -102,6 +134,14 @@ export type VersionGuardOutcome =
       /** 备份目录的绝对路径（旧数据完整保留于此） */
       backupPath: string;
       version: string;
+      /**
+       * 是否以降级方式完成备份：目录被别的进程当作 cwd 时无法整体重命名，
+       * 改为把内部条目逐个迁入新备份目录。语义等价（旧数据完整迁出、原目录清空），
+       * 但调用方可据此给出不同的提示（建议关闭占用程序后重跑以获得干净结构）。
+       */
+      degraded?: boolean;
+      /** 降级时未能迁出的条目（相对名）；非降级或全部成功时为 undefined */
+      unresolvedEntries?: string[];
     };
 
 /**
@@ -110,6 +150,10 @@ export type VersionGuardOutcome =
  * - 目录不存在 → 创建 + 写当前版本 → `created`（首次安装）
  * - 版本兼容 → `compatible`
  * - 不兼容（无版本文件 / 主版本不同）→ 备份 + 重建 + 写当前版本 → `incompatible`
+ *
+ * 备份优先走「整体重命名」（原子、干净）；当目录被别的进程当作 cwd 导致
+ * `rename` 被拒绝时，自动降级为「逐条目迁出」，依然把旧数据完整移入备份目录。
+ * 两种方式都失败时向上抛（调用方负责告警：保留旧数据不动比强行重建更安全）。
  *
  * 任何意外错误都向上抛（调用方负责不阻断启动：版本守卫失败时
  * 「保留旧数据不动」比「强行重建」更安全）。
@@ -140,7 +184,28 @@ export async function ensureVersionGuard(
     return { status: 'created', dir, version: currentVersion };
   }
   const backupPath = nextBackupPath(dir);
-  await rename(dir, backupPath);
+
+  // 3a) 首选：整体重命名（原子、干净，一步到位）
+  try {
+    await rename(dir, backupPath);
+  } catch {
+    // 3b) 降级：目录被别的进程当作 cwd（Windows 拒绝重命名任何进程的工作目录）
+    //      或被以其他方式占用。改为把内部条目逐个迁入新的备份目录——
+    //      迁移条目不需要重命名被占用的父目录，通常可以成功。
+    const unresolved = await moveContents(dir, backupPath);
+    // 原目录现已清空（或残留未能迁出的条目），写入当前版本标记。
+    // 残留条目的数据仍在原目录内、且备份目录已持有其余数据，不丢数据。
+    await writeVersionFile(dir, currentVersion);
+    return {
+      status: 'incompatible',
+      dir,
+      stored,
+      backupPath,
+      version: currentVersion,
+      degraded: true,
+      unresolvedEntries: unresolved.length > 0 ? unresolved : undefined,
+    };
+  }
   await mkdir(dir, { recursive: true });
   await writeVersionFile(dir, currentVersion);
   return { status: 'incompatible', dir, stored, backupPath, version: currentVersion };

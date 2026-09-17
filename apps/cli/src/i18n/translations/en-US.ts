@@ -25,6 +25,9 @@ export const enUS: TranslationKeys = {
   },
   versionGuard: {
     incompatible: 'Incompatible version data detected ({scope}): the directory was created by {stored}, current version is {current}. Backed up to:',
+    degraded: '(Degraded backup: the directory is in use by another program and could not be renamed as a whole, so entries were moved out one by one. Close the program and re-run for a clean structure.)',
+    unresolved: '({count} entries could not be moved out and remain in the original directory: {entries}. The backup directory holds the rest.)',
+    failed: 'Version guard did not complete ({scope}): the directory is in use by another program (it may be a running process working directory, or locked by antivirus/indexing). Old data is left untouched. Close the relevant programs and retry. Error: {error}',
     backupHint: 'Your old data is fully preserved in the backup directory. Please handle it ASAP (migrate any files you need, then delete the backup to free disk space).',
     created: 'Initialized {scope} (version {current}).',
     scopeHome: 'project home',

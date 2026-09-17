@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getVersionFilePath, readVersionFile, writeVersionFile } from "@zread-pi/utils";
 import { runVersionGuard } from "../src/commands/version-guard";
+import { spawn } from "node:child_process";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -156,6 +157,36 @@ await mkdir(join(repo2, ".zread-pi"), { recursive: true });
 process.chdir(repo2);
 await runVersionGuard({ repo: false });
 check("repo:false 不写仓库目录的版本标记", (await readVersionFile(join(repo2, ".zread-pi"))) === null);
+
+// ---------------------------------------------------------------------------
+// 6) 家目录被别的进程当作 cwd → 降级备份，且提示可见
+// ---------------------------------------------------------------------------
+
+console.log("▶ 家目录被占用时降级备份且提示可见");
+
+const busyHome = await tempHome(false, ["config.yaml", "language: zh\ndoc_language: zh\n"]);
+process.env.HOME = busyHome;
+process.env.USERPROFILE = busyHome;
+delete process.env.ZREAD_PI_HOME;
+delete process.env.ZREAD_PI_VERSION_GUARD;
+
+const busyDir = join(busyHome, ".zread-pi");
+// 子进程把 cwd 设为家目录 → Windows 拒绝整体重命名 → 触发降级路径
+const holderCode = `process.chdir(${JSON.stringify(busyDir)}); setTimeout(() => process.exit(0), 20000);`;
+const holder = spawn(process.execPath, ["-e", holderCode], { stdio: "ignore" });
+await new Promise((resolve) => setTimeout(resolve, 800));
+
+const { lines: degradedLines, stderr: degradedErr } = await captureStderr(() =>
+  runVersionGuard({ repo: false }),
+);
+check("降级也返回提示行", degradedLines.length > 0, JSON.stringify(degradedLines));
+check("stderr 含备份路径", degradedErr.includes("_bak"));
+check("stderr 含降级说明（占用）", degradedErr.includes("占用") || degradedErr.includes("in use"));
+check("旧 config.yaml 保留在备份目录", !!(await readFile(join(busyHome, ".zread-pi_bak", "config.yaml"), "utf-8").catch(() => null)));
+check("新目录已写入当前版本", await readVersionFile(join(busyHome, ".zread-pi")) === currentVersion);
+
+try { holder.kill(); } catch { /* 已退出 */ }
+await new Promise((resolve) => setTimeout(resolve, 200));
 
 // ---------------------------------------------------------------------------
 // 结果
