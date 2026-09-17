@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "types": ["node", "bun-types", "vite/client"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@zread-pi/trajectory": ["../../packages/trajectory/src/index.ts"],
+      "@zread-pi/types": ["../../packages/types/src/index.ts"]
+    }
+  },
+  "include": ["test/**/*.ts", "src/**/*.test.ts", "src/**/*.test.tsx"]
+}

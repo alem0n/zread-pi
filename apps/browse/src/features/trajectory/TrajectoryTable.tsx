@@ -7,7 +7,7 @@
  */
 
 import { memo, useCallback, useMemo } from 'react';
-import { Eye } from 'lucide-react';
+import { ChevronDown, Eye } from 'lucide-react';
 import {
   formatDurationMs,
   formatPercent,
@@ -412,6 +412,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
     <div className="relative flex-1 min-h-0">
       <div
         ref={containerRef}
+        data-testid="scroll-container"
         className="absolute inset-0 overflow-y-auto bg-white"
         onScroll={onScroll}
       >
@@ -422,12 +423,22 @@ export const TrajectoryTable = memo(function TrajectoryTable({
       {stickyMeta !== null ? (
         <div
           key={`sticky-${stickyMeta.key}`}
+          data-testid="sticky-turn-header"
           style={{ height: stickyMeta.height }}
-          className="absolute top-0 inset-x-0 z-[1] flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 cursor-pointer hover:bg-[#ecebe9]"
-          onClick={() => onToggleTurn(stickyMeta.turn.turn)}
-          role="button"
-          tabIndex={0}
+          // sticky 条是绝对定位覆盖层，盖在视口顶部首行之上（34px > 30px 行高，
+          // 会整条盖住）。背景必须透传点击，否则点击被盖住的记录行会落到这里
+          // （折叠 turn）而不是选中该记录。交互只保留在显式按钮上。
+          className="absolute top-0 inset-x-0 z-[1] flex items-center gap-2 px-3 bg-[#f6f5f4] border-b border-gray-200 pointer-events-none"
         >
+          <button
+            type="button"
+            title={t('trajectory.toggleTurn')}
+            aria-label={t('trajectory.toggleTurn')}
+            onClick={() => onToggleTurn(stickyMeta.turn.turn)}
+            className="pointer-events-auto shrink-0 p-0.5 rounded text-[#a39e98] hover:text-[#0075de] hover:bg-white"
+          >
+            <ChevronDown size={12} />
+          </button>
           <span className="text-xs font-semibold text-[#31302e] truncate">
             {stickyMeta.turn.turn === null
               ? t('trajectory.betweenTurns')
@@ -447,7 +458,7 @@ export const TrajectoryTable = memo(function TrajectoryTable({
                 event.stopPropagation();
                 onToggleSession?.(stickyMeta.turn.sessionId);
               }}
-              className="ml-auto p-0.5 rounded text-[#a39e98] hover:text-[#0075de] hover:bg-white"
+              className="pointer-events-auto ml-auto p-0.5 rounded text-[#a39e98] hover:text-[#0075de] hover:bg-white"
             >
               <Eye size={12} />
             </button>

@@ -36,6 +36,7 @@ export const zhCN: TranslationKeys = {
     modeTitle: '{label} 模式',
     resetZoom: '重置缩放',
     hideSession: '隐藏此会话（从台账与时间线移除）',
+    toggleTurn: '折叠 / 展开此 turn',
     hiddenSessions: '已隐藏 {count} 个会话',
     showAllSessions: '显示全部被隐藏的会话',
     error: '错误',

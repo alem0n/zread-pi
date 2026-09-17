@@ -382,6 +382,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
           {segments.map((segment, index) => (
             <div
               key={`${lane}-${index}`}
+              data-testid="timeline-segment"
               className="absolute rounded-sm"
               style={{
                 left: segment.left,
@@ -409,6 +410,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
   return (
     <div
       ref={containerRef}
+      data-testid="timeline-container"
       className="relative select-none overflow-hidden border-b border-gray-200 bg-white"
       style={{ height: HEIGHT_PX }}
       onMouseDown={handleMouseDown}
@@ -435,6 +437,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
       {/* 拖拽中的选区 */}
       {selection !== null ? (
         <div
+          data-testid="timeline-selection"
           className="absolute top-0 bottom-0 bg-[#0075de]/15 border-x border-[#0075de]"
           style={{ left: positionOf(selection.start), width: Math.max(2, positionOf(selection.end) - positionOf(selection.start)) }}
         />
@@ -457,6 +460,7 @@ export const TrajectoryTimeline = memo(function TrajectoryTimeline({
 
       {tooltip !== null ? (
         <div
+          data-testid="timeline-tooltip"
           className="absolute z-10 max-w-[220px] truncate rounded bg-[#31302e] px-2 py-1 text-[11px] text-white pointer-events-none shadow"
           style={{ left: tooltip.left, top: Math.min(tooltip.top, HEIGHT_PX - 24) }}
         >

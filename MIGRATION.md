@@ -2069,6 +2069,87 @@ console 警告），于是缩放时父级台账会**同时滚动**。改为在 `
 
 ---
 
+### 26.11 浏览站组件级测试基建（v1.13.3）
+
+26.10 的渲染修复只在「构建 + 模型层单测」层面验证过，组件的渲染 / 交互契约
+（sticky 表头位置、span 合并、折叠与选中态）**没有任何组件测试**——浏览站
+此前只有 `browse:build`（能编译）和服务端 API 测试。本次补上基建，并把
+「测试先行」写进流程（AGENTS.md §2 / §3）。
+
+#### 选型
+
+- **`bun:test`**：仓库已在用（`apps/cli/src/views/wiki-generate/__tests__`、
+  `packages/repo-analyzer/src/repo-map`），不引入第二个测试运行器。
+- **`happy-dom`** 而非 `jsdom`：无原生依赖、启动快；但**不做布局**，
+  `clientWidth/clientHeight` 恒为 0（用布局桩解决，见下）。
+- **`@testing-library/react` + `@testing-library/jest-dom`**：与 React 19 兼容的
+  RTL 16；jest-dom 只为 jest/vitest 提供 globals 类型，bun:test 需要手动桥接。
+
+#### 基建（`apps/browse/test/`）
+
+| 文件 | 作用 |
+| --- | --- |
+| `setup.ts` | `bunfig.toml` 的 preload：happy-dom 全局注册 → jest-dom matcher 注册 → `afterEach(cleanup)`。**全局 DOM 必须先于 `@testing-library/dom` 的求值**，否则它的 `screen` 会缓存「无 document」；所以 matcher / RTL 都用**动态导入**挂在注册之后 |
+| `jest-dom-matchers.d.ts` | `declare module 'bun:test'` 把 jest-dom 的 `TestingLibraryMatchers` 合并进 bun:test 的 `Matchers`（运行时由 `expect.extend` 注册，只缺类型） |
+| `bunfig.toml` | `jsxRuntime = "automatic"` + `preload` |
+| `README.md` | 写法与踩坑清单（测试先行的落地文档） |
+
+配置拆分：生产构建 `tsconfig.app.json` **排除**测试文件（`__tests__/**`、
+`*.test.*`），另建 `tsconfig.test.json` 专门类型检查测试（`types` 加
+`bun-types`），并进根 `typecheck`。`@/` 与 `@zread-pi/*` 的路径解析沿用
+`tsconfig.json` 的 `paths`（工作区没有 node_modules 包，全靠路径别名）。
+
+#### 踩过的六个坑（都写进 README）
+
+1. **RTL 的 `getByText` 只匹配元素的直接文本子节点**：键名冒号在嵌套 span 里
+   时不能拼成 `"name":`；
+2. **触发状态变更必须用 `fireEvent`**：`el.click()` 不走 act，读到旧 DOM；
+3. **`afterEach(cleanup)` 必须显式注册**：RTL 的自动 cleanup 在 bun:test 下
+   不生效，不清理则 `screen` 查询全部变成「找到多个元素」（单文件跑过、
+   整目录跑挂的典型症状）；
+4. **布局桩 `stubElementLayout({width,height})`**：happy-dom 无布局，依赖
+   `clientWidth` 的时间线宽度 / 虚拟化视口高度需要非零值，且要在 render 之前设；
+   **`getBoundingClientRect` 也要一起桩**，否则时间线的 `valueAt(clientX)` 把
+   比例钳到 0/1，光标恒在边缘，缩放几何不可复现；
+5. **happy-dom 的 `WheelEvent` 不从 init 读 `clientX`**（MouseEvent 会）：
+   `valueAt(undefined)` 算出 NaN 会把缩放视口设成 NaN，**整条时间线的 span 全部
+   塌成一条 left:NaN 的色块**。测试里用 `new WheelEvent(...) +
+   Object.defineProperty(event, 'clientX', ...)` 手动塞值（真实浏览器的
+   WheelEvent 恒有数值 clientX，这是环境限制不是生产 bug）；
+6. **原生 `dispatchEvent` 不走 act**：setState 不会同步刷新，必须包
+   `@testing-library/react` 的 `act(...)`（`fireEvent` 自带包裹）。
+
+> 坑 5 / 6 的价值在于：在修掉之前，缩放相关用例是「假绿」的——断言只看「重置缩放」
+> 按钮是否出现，而 NaN 视口同样能让按钮出现。补上「缩放后段数不变」的断言后，
+> 假绿路径才被真正拦住。
+
+#### 首批用例（49 项，3 个文件；行覆盖率 JsonTree 95% / TrajectoryTable 93% / TrajectoryTimeline 97%）
+
+- `JsonTree`（9 项）：递归渲染 / 折叠展开 / `break-all` 长字符串换行（26.10 的小项回归）；
+- `TrajectoryTable`（19 项）：`buildTrajectoryRows` 行模型 9 项（折叠 / assistant 合并 ×N /
+  focus / match / load-older / 行高）+ 渲染与点击事件 6 项 + **sticky 表头结构回归 4 项**
+  （scrollTop=0 与半可见时不显示 / 完全滚出后显示 / **不在滚动容器流内**）；
+- `TrajectoryTimeline`（21 项）：**sub-pixel span 合并**（1000 条 → 1 条色块；窄视口下
+  宽 span 也合并；三泳道各自合并；duration 空闲压缩下薄包进宽；actual 保留空隙时
+  先 flush 薄桶再单独画宽；聚焦降透明度）+ 滚轮交互（sequence→duration 切换、
+  小幅度不切换、duration 进入缩放态且**缩放后段不塌陷**、计数器到阈值重置）+
+  **拖拽与点击**（MINIMUM_DRAG_PX 阈值内算点击选中最近记录 / 超阈值产生选区过滤 /
+  非左键不启动 / 选区遮罩渲染）+ 悬停提示（延迟后出现）+ **视口生命周期**
+  （模型边界漂移时钳进新边界保留缩放 / 模式切换重置视口与选区）+ 右键清除选区。
+
+组件测试的定位：**覆盖会回归的视觉与交互契约**，不追求覆盖率数字；纯逻辑
+继续走 `packages/trajectory` 的模型层单测（无 DOM、更快）。
+
+#### 验证
+
+- `bun run test:components`：49/49（3 个文件）；组件行覆盖率
+  JsonTree 95% / TrajectoryTable 93% / TrajectoryTimeline 97%
+- `bun run typecheck`（含 `tsconfig.test.json`）：0 错误
+- `bun run browse:build`：生产构建排除测试文件，照常通过
+- `bun run test` / `bun run test:browse`：组件测试已并入链路
+
+---
+
 ## 27. 版本守卫：按主版本隔离数据目录（v1.13.0）
 
 ### 背景
