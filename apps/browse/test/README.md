@@ -60,9 +60,29 @@ describe('MyComponent', () => {
 5. **虚拟化开关**：行数低于 `VIRTUALIZATION_THRESHOLD`（100）时不窗口化，
    小数据集测窗口行为会失真；要测窗口数学去 `packages/trajectory` 的模型层单测。
 
-6. **原生事件**：组件用 `addEventListener('wheel', …, { passive: false })` 挂的
+6. **happy-dom 的 `WheelEvent` 不从 init 读 `clientX`**（MouseEvent 会读）。
+   时间线的缩放以光标位置为中心，`valueAt(undefined)` 会算出 NaN 把缩放视口
+   设成 NaN——**整条时间线的 span 塌成一条 `left: NaN` 的色块**。真实浏览器的
+   WheelEvent 恒有数值 clientX，这是 happy-dom 的限制。滚轮事件这样发：
+
+   ```ts
+   const event = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true });
+   Object.defineProperty(event, 'clientX', { value: 400 });
+   act(() => { container.dispatchEvent(event); });
+   ```
+
+   `dispatchEvent` 不走 act，不包的话 setState 不会同步刷新（`fireEvent` 自带包裹，
+   所以 mouse 系列事件没有这个问题）。
+
+7. **布局桩包含 `getBoundingClientRect`**：`stubElementLayout` 现在同时桩
+   `clientWidth/clientHeight` 与 `getBoundingClientRect`。只桩前者的话，
+   `valueAt` 的光标比例会被 `Math.min(1, x/0)` 钳到 1，光标恒在右缘，
+   缩放几何不可复现。
+
+8. **原生事件**：组件用 `addEventListener('wheel', …, { passive: false })` 挂的
    监听（时间线缩放）用 `fireEvent.wheel(el, { deltaY: 120 })` 触发即可，
-   `dispatchEvent` 同样走原生监听。
+   `dispatchEvent` 同样走原生监听——但见第 6 条，WheelEvent 的 clientX 要手动塞、
+   且必须包 `act`。
 
 ## 测试先行（TDD）
 

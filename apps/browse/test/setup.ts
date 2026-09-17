@@ -41,23 +41,47 @@ if (target.getComputedStyle === undefined) {
 }
 
 /**
- * happy-dom 不做布局，clientWidth / clientHeight 恒为 0，依赖测量的组件
- * （时间线宽度 / 虚拟化视口高度）无法测。默认给 800×600；需要别的尺寸时
- * 在 render 之前调用 stubElementLayout({ width: 200 }) 覆盖。
+ * happy-dom 不做布局，clientWidth / clientHeight / getBoundingClientRect 恒为 0，
+ * 依赖测量的组件（时间线宽度 / 虚拟化视口高度 / 光标坐标换算）无法测。
+ * 默认给 800×600；需要别的尺寸时在 render 之前调用
+ * stubElementLayout({ width: 200 }) 覆盖。getBoundingClientRect 同步返回该尺寸，
+ * 否则 valueAt(clientX) 的 ratio 会被钳到 0/1，缩放总是贴到边缘。
  */
 export function stubElementLayout(dimensions: { width?: number; height?: number }): void {
-  if (dimensions.width !== undefined) {
+  const width = dimensions.width;
+  const height = dimensions.height;
+  if (width !== undefined) {
     Object.defineProperty(globalThis.HTMLElement.prototype, 'clientWidth', {
       get(): number {
-        return dimensions.width as number;
+        return width;
       },
       configurable: true,
     });
   }
-  if (dimensions.height !== undefined) {
+  if (height !== undefined) {
     Object.defineProperty(globalThis.HTMLElement.prototype, 'clientHeight', {
       get(): number {
-        return dimensions.height as number;
+        return height;
+      },
+      configurable: true,
+    });
+  }
+  if (width !== undefined || height !== undefined) {
+    Object.defineProperty(globalThis.HTMLElement.prototype, 'getBoundingClientRect', {
+      value(): DOMRect {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: width ?? 0,
+          bottom: height ?? 0,
+          width: width ?? 0,
+          height: height ?? 0,
+          toJSON(): unknown {
+            return this;
+          },
+        };
       },
       configurable: true,
     });
