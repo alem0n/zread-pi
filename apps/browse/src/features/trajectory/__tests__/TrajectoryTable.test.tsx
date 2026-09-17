@@ -342,4 +342,56 @@ describe('sticky turn 表头（结构回归）', () => {
     // sticky 条与滚动容器是兄弟（同一个包装容器的直接子节点）
     expect(sticky.parentElement).toBe(scroller.parentElement);
   });
+
+  it('sticky 条背景透传点击，不截获被盖住的首行记录', () => {
+    // sticky 条高 34px 覆盖整个 30px 的首行：背景必须 pointer-events:none，
+    // 否则点击首行会落到 sticky 条（折叠 turn）而不是选中记录
+    renderAt(50);
+    const sticky = screen.getByTestId('sticky-turn-header');
+    expect(sticky.className).toContain('pointer-events-none');
+    expect(sticky.className).not.toContain('cursor-pointer');
+  });
+
+  it('sticky 条的折叠按钮仍可交互（背景透传不等于失去功能）', () => {
+    const calls: Array<number | null> = [];
+    const turns = [
+      makeTurn(1, [makeCell(1, 'message', 'first message')]),
+      makeTurn(2, [makeCell(2, 'message', 'second message')]),
+    ];
+    const rows = buildTrajectoryRows(turns, {
+      collapseTurns: false,
+      collapsedTurnSet: new Set(),
+      collapseAssistant: false,
+      focusIndexes: null,
+      matchSet: null,
+      hasMoreOlder: false,
+      t,
+    });
+    const containerRef = { current: null } as React.ComponentProps<typeof TrajectoryTable>['containerRef'];
+    render(
+      <TrajectoryTable
+        rows={rows}
+        startIndex={0}
+        endIndex={rows.length}
+        topHeight={0}
+        bottomHeight={0}
+        totalHeight={rows.reduce((total, row) => total + row.height, 0)}
+        scrollTop={50}
+        selectedIndex={null}
+        matchSet={null}
+        collapsedTurns={false}
+        onToggleTurn={(turn) => calls.push(turn)}
+        onSelectCell={() => {}}
+        onLoadOlder={() => {}}
+        onScroll={() => {}}
+        containerRef={containerRef}
+      />,
+    );
+    // 背景透传后，折叠 / 隐藏会话是 sticky 条内唯二的按钮；折叠按钮是第一个
+    const sticky = screen.getByTestId('sticky-turn-header');
+    const buttons = sticky.querySelectorAll('button');
+    expect(buttons[0]!.className).toContain('pointer-events-auto');
+    fireEvent.click(buttons[0]!);
+    expect(calls).toEqual([1]);
+  });
 });

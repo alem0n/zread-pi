@@ -35,6 +35,7 @@ export const enUS: TranslationKeys = {
     modeTitle: '{label} mode',
     resetZoom: 'reset zoom',
     hideSession: 'Hide this session (remove from table and timeline)',
+    toggleTurn: 'Collapse / expand this turn',
     hiddenSessions: '{count} sessions hidden',
     showAllSessions: 'Show all hidden sessions',
     error: 'error',
