@@ -52,14 +52,14 @@ function Node({
 
   if (!isObject) {
     return (
-      <div className="flex gap-2 py-0.5 font-mono text-xs leading-relaxed">
+      <div className="flex gap-2 py-0.5 font-mono text-xs leading-relaxed break-all">
         {name !== undefined ? (
-          <span className="text-gray-500">
+          <span className="text-gray-500 shrink-0">
             {JSON.stringify(name)}
             <span className="text-gray-400">:</span>
           </span>
         ) : null}
-        <span className={classNameOf(value)}>{formatPrimitive(value)}</span>
+        <span className={`break-all ${classNameOf(value)}`}>{formatPrimitive(value)}</span>
       </div>
     );
   }

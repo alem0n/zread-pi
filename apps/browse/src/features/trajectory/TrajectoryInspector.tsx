@@ -66,6 +66,9 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = width;
+    // 拖动期间禁用选区，否则拖到台账文本上会划出一串高亮
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
     const move = (moveEvent: MouseEvent): void => {
       const delta = startX - moveEvent.clientX;
       onWidthChange(Math.max(DETAILS_MIN_WIDTH, Math.min(DETAILS_MAX_WIDTH, startWidth + delta)));
@@ -73,6 +76,7 @@ export const TrajectoryInspector = memo(function TrajectoryInspector({
     const up = (): void => {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
+      document.body.style.userSelect = previousUserSelect;
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
