@@ -449,7 +449,62 @@ check('隐藏后时间线非空', timelineAfter !== null);
 checkEqual('隐藏后时间线 span 数减少', (timelineAfter?.spans.length ?? 1) < (timelineBefore?.spans.length ?? 0), true);
 
 // ---------------------------------------------------------------------------
-// 11) 大规模布局：极值计算不依赖 apply 参数栈，partial 续号正确
+// 11) 旧日志兼容（sessionId 引入前）：回退 agent.key 归属，事件不丢
+// ---------------------------------------------------------------------------
+
+console.log('▶ 旧日志兼容（无 sessionId → 回退 agent.key）');
+
+// v1.13.0 之前落盘的事件没有 sessionId。若 replay 不回退 agent.key，这些日志
+// 在轨迹视图里会整段不可见（agent_start 建不出 turn，消息 / 工具全部因
+// 「未知 Agent」被丢弃）。文档（MIGRATION.md / AGENTS.md）承诺的是回退 key。
+const LEGACY_PAGE: RunEvent['agent'] = { key: 'page:legacy', role: 'page', pageSlug: 'legacy' };
+const LEGACY_TOPICS: RunEvent['agent'] = { key: 'topics:core', role: 'topics', section: 'core' };
+
+const legacyEvents: RunEvent[] = [
+  event({ kind: 'run_start', agent: RUN_LEVEL_AGENT, runKind: 'generate', targetDir: '/repo' }),
+  agentStart(LEGACY_PAGE),
+  event({ kind: 'message_start', agent: LEGACY_PAGE, preview: 'legacy…' }),
+  msgEnd(LEGACY_PAGE, 'call-legacy', 'legacy text'),
+  event({ kind: 'tool_start', agent: LEGACY_PAGE, callId: 'call-legacy', name: 'read', input: { path: 'x' } }),
+  event({ kind: 'tool_end', agent: LEGACY_PAGE, callId: 'call-legacy', name: 'read', output: 'legacy file' }),
+  event({ kind: 'agent_end', agent: LEGACY_PAGE, subtype: 'success', durationMs: 100, usage: USAGE }),
+  agentStart(LEGACY_TOPICS),
+  event({ kind: 'message_start', agent: LEGACY_TOPICS, preview: 'topics…' }),
+  msgEnd(LEGACY_TOPICS, 'call-topics', 'topics text'),
+  event({ kind: 'agent_end', agent: LEGACY_TOPICS, subtype: 'success', durationMs: 50, usage: USAGE }),
+  event({ kind: 'run_end', agent: RUN_LEVEL_AGENT, status: 'completed', durationMs: 1000 }),
+];
+
+const legacySnapshot = replayRunEvents(legacyEvents);
+const legacyLayout = deriveTrajectoryLayout(legacySnapshot);
+
+// turn 建得出来（修复前的行为：0 个 turn，内容全部丢弃）
+checkEqual('旧日志也建出 2 个 turn', legacySnapshot.turns.length, 2);
+// 归属键回退到 agent.key（不是 undefined）
+checkEqual('turn[0] 的 sessionId 回退为 agent.key', legacySnapshot.turns[0]?.sessionId, 'page:legacy');
+checkEqual('turn[1] 的 sessionId 回退为 agent.key', legacySnapshot.turns[1]?.sessionId, 'topics:core');
+// layout 的 turn 也带回退键（前端「隐藏会话」按 sessionId 过滤，缺键会漏过）
+checkEqual('layout 的 turn 带回退键', legacyLayout.find((turn) => turn.turn === 1)?.sessionId, 'page:legacy');
+// 消息 / 工具 / 请求编号都保留，不因缺 sessionId 被丢弃
+checkEqual('旧日志的消息全部保留', legacySnapshot.records.filter((r) => r.kind === 'message').length, 2);
+checkEqual('旧日志的工具保留', legacySnapshot.records.filter((r) => r.kind === 'tool').length, 1);
+checkEqual('旧日志的请求编号 = 2', legacySnapshot.requests.length, 2);
+// 消息按 Agent 分组（page:legacy → turn 1，topics:core → turn 2）
+check(
+  '旧日志消息归属正确',
+  legacySnapshot.records
+    .filter((r) => r.kind === 'message')
+    .every((r) => r.turn === (r.turnKey === 'page:legacy' ? 1 : 2)),
+);
+// run 级事件仍归独立段（turn = null，不与任何 Agent 混淆）
+checkEqual(
+  'run 收尾归独立段',
+  legacySnapshot.records.filter((r) => r.kind === 'context' && r.text.includes('Run completed'))[0]?.turn,
+  null,
+);
+
+// ---------------------------------------------------------------------------
+// 12) 大规模布局：极值计算不依赖 apply 参数栈，partial 续号正确
 // ---------------------------------------------------------------------------
 
 console.log('▶ 大规模布局（参数栈 / 续号）');
