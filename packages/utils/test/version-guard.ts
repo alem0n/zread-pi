@@ -13,7 +13,9 @@ import {
   getVersionFilePath,
   isVersionCompatible,
   nextBackupPath,
-  parseMajorVersion,
+  parseVersion,
+  compareVersions,
+  INCOMPATIBLE_BEFORE,
   readVersionFile,
   writeVersionFile,
   BACKUP_SUFFIX,
@@ -62,19 +64,28 @@ setTimeout(() => process.exit(0), 20000);
 
 console.log('▶ 版本号解析与兼容判定');
 
-checkEqual('parseMajorVersion("1.12.2") = 1', parseMajorVersion('1.12.2'), 1);
-checkEqual('parseMajorVersion("2.0.0") = 2', parseMajorVersion('2.0.0'), 2);
-checkEqual('parseMajorVersion("0.0.0-dev") = 0', parseMajorVersion('0.0.0-dev'), 0);
-checkEqual('parseMajorVersion("v3.1.0") = 3', parseMajorVersion('v3.1.0'), 3);
-checkEqual('parseMajorVersion(带空白) = 1', parseMajorVersion('  1.5.0  '), 1);
-checkEqual('parseMajorVersion(非法) = undefined', parseMajorVersion('abc'), undefined);
-checkEqual('parseMajorVersion(空) = undefined', parseMajorVersion(''), undefined);
+checkEqual('parseVersion("1.12.2")', JSON.stringify(parseVersion('1.12.2')), JSON.stringify([1, 12, 2]));
+checkEqual('parseVersion("v3.1.0")', JSON.stringify(parseVersion('v3.1.0')), JSON.stringify([3, 1, 0]));
+checkEqual('parseVersion("1") 缺段补 0', JSON.stringify(parseVersion('1')), JSON.stringify([1, 0, 0]));
+checkEqual('parseVersion(带空白)', JSON.stringify(parseVersion('  1.5.0  ')), JSON.stringify([1, 5, 0]));
+checkEqual('parseVersion("0.0.0-dev")', JSON.stringify(parseVersion('0.0.0-dev')), JSON.stringify([0, 0, 0]));
+checkEqual('parseVersion(非法) = undefined', parseVersion('abc'), undefined);
+checkEqual('parseVersion(空) = undefined', parseVersion(''), undefined);
 
-check('同主版本兼容（1.12.2 vs 1.13.0）', isVersionCompatible('1.12.2', '1.13.0'));
-check('同版本兼容', isVersionCompatible('1.12.2', '1.12.2'));
-check('跨主版本不兼容（1.x vs 2.0）', !isVersionCompatible('1.12.2', '2.0.0'));
-check('旧版本不可解析时不兼容', !isVersionCompatible('garbage', '1.12.2'));
-check('当前版本不可解析时不兼容', !isVersionCompatible('1.12.2', 'garbage'));
+checkEqual('compareVersions(1.12.2, 1.13.0) = -1', compareVersions('1.12.2', '1.13.0'), -1);
+checkEqual('compareVersions(1.13.0, 1.13.0) = 0', compareVersions('1.13.0', '1.13.0'), 0);
+checkEqual('compareVersions(1.13.5, 1.13.0) = 1', compareVersions('1.13.5', '1.13.0'), 1);
+checkEqual('compareVersions(2.0.0, 1.13.0) = 1（未来版本更新）', compareVersions('2.0.0', '1.13.0'), 1);
+checkEqual('compareVersions(无法解析视为最旧) = -1', compareVersions('garbage', '1.13.0'), -1);
+
+// 兼容判定：只有早于 INCOMPATIBLE_BEFORE 的版本才不兼容
+console.log(`  （不兼容分界版本 = ${INCOMPATIBLE_BEFORE}）`);
+check('分界版本本身兼容', isVersionCompatible(INCOMPATIBLE_BEFORE));
+check('分界之后的版本兼容（1.13.5）', isVersionCompatible('1.13.5'));
+check('未来的主版本也兼容（2.0.0）——数据格式未变不备份', isVersionCompatible('2.0.0'));
+check('早于分界的版本不兼容（1.12.2）', !isVersionCompatible('1.12.2'));
+check('无法解析的版本不兼容（保守）', !isVersionCompatible('garbage'));
+check('空版本不兼容', !isVersionCompatible(''));
 
 // ---------------------------------------------------------------------------
 // 2) 版本标记文件读写
@@ -121,10 +132,11 @@ checkEqual('结果 = created', first.status, 'created');
 checkEqual('版本文件 = 当前版本', await readVersionFile(home1), '1.13.0');
 check('目录存在', (await stat(home1)).isDirectory());
 
-// 再跑一次：兼容，无变化（幂等）
+// 再跑一次：兼容 → 只更新版本标记（不备份、不重建）
 const again = await ensureVersionGuard(home1, '1.13.5');
-checkEqual('同主版本再跑 = compatible', again.status, 'compatible');
-checkEqual('版本文件不被改写（仍是 1.13.0）', await readVersionFile(home1), '1.13.0');
+checkEqual('兼容版本再跑 = compatible', again.status, 'compatible');
+checkEqual('兼容时版本标记更新为当前版本', await readVersionFile(home1), '1.13.5');
+check('未生成备份目录', !(await stat(`${home1}${BACKUP_SUFFIX}`).catch(() => null)));
 
 // ---------------------------------------------------------------------------
 // 5) ensureVersionGuard：目录存在但无版本文件 → 不兼容 → 备份
@@ -148,39 +160,41 @@ checkEqual('新目录已重建并写入当前版本', await readVersionFile(home
 check('新目录是空的（旧数据没留在原位）', (await readFile(join(home2, 'version'), 'utf-8')).trim() === '1.13.0');
 
 // ---------------------------------------------------------------------------
-// 6) ensureVersionGuard：跨主版本 → 备份
+// 6) ensureVersionGuard：早于不兼容分界的版本 → 备份；分界之后 → 只更新标记
 // ---------------------------------------------------------------------------
 
-console.log('▶ 跨主版本不兼容');
+console.log('▶ 不兼容分界附近的处理');
 
+// 6a) 早于分界的旧版本（1.12.2 < INCOMPATIBLE_BEFORE）→ 备份重建
 const home3 = join(await tempDir('zread-vg-home3-'), '.zread-pi');
 await mkdir(home3, { recursive: true });
 await writeVersionFile(home3, '1.12.2');
 await writeFile(join(home3, 'auth.json'), '{}', 'utf-8');
 
 const crossed = await ensureVersionGuard(home3, '2.0.0');
-checkEqual('结果 = incompatible', crossed.status, 'incompatible');
+checkEqual('早于分界 = incompatible', crossed.status, 'incompatible');
 checkEqual('stored 读到旧版本', (crossed as { stored: string }).stored, '1.12.2');
 const backup3 = (crossed as { backupPath: string }).backupPath;
 checkEqual('备份名带 _bak', backup3, `${home3}${BACKUP_SUFFIX}`);
 check('旧凭据保留在备份里', (await stat(join(backup3, 'auth.json'))).isFile());
 checkEqual('新目录写入新版本', await readVersionFile(home3), '2.0.0');
 
-// 再次不兼容升级：备份名追加序号
-const crossed2 = await ensureVersionGuard(home3, '3.0.0');
+// 再次遇到早于分界的旧版本：备份名追加序号
+await writeVersionFile(home3, '1.12.2');
+const crossed2 = await ensureVersionGuard(home3, '2.0.0');
 checkEqual('第二次备份用 _bak-2', (crossed2 as { backupPath: string }).backupPath, `${home3}${BACKUP_SUFFIX}-2`);
 
-// ---------------------------------------------------------------------------
-// 7) 目标仓库目录（与家目录同逻辑，独立路径）
-// ---------------------------------------------------------------------------
+// 6b) 分界之后的版本（含未来主版本）→ 兼容，只更新标记，绝不备份
+const home3b = join(await tempDir('zread-vg-home3b-'), '.zread-pi');
+await mkdir(home3b, { recursive: true });
+await writeVersionFile(home3b, INCOMPATIBLE_BEFORE);
+await writeFile(join(home3b, 'config.yaml'), 'language: zh\n', 'utf-8');
 
-console.log('▶ 目标仓库数据目录');
-
-const repo = join(await tempDir('zread-vg-repo-'), 'my-repo');
-const repoDir = join(repo, '.zread-pi');
-const repoResult = await ensureVersionGuard(repoDir, '1.13.0');
-checkEqual('仓库目录首次 = created', repoResult.status, 'created');
-checkEqual('版本文件在仓库目录内', await readVersionFile(repoDir), '1.13.0');
+const future = await ensureVersionGuard(home3b, '2.0.0');
+checkEqual('分界之后的版本升级 = compatible', future.status, 'compatible');
+checkEqual('版本标记更新为新版本', await readVersionFile(home3b), '2.0.0');
+check('数据目录未被备份（config.yaml 仍在原位）', (await stat(join(home3b, 'config.yaml'))).isFile());
+check('未生成备份目录', !(await stat(`${home3b}${BACKUP_SUFFIX}`).catch(() => null)));
 
 // ---------------------------------------------------------------------------
 // 8) 目录被别的进程当作 cwd：备份失败 → 直接抛错，旧数据不动

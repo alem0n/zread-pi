@@ -24,13 +24,11 @@ export const zhCN: TranslationKeys = {
     failed: '历史记录读取失败: {error}',
   },
   versionGuard: {
-    incompatible: '检测到不兼容的版本数据（{scope}）：目录由 {stored} 创建，当前版本 {current}。已备份到：',
-    failed: '版本守卫未完成（{scope}）：需要备份旧数据，但该目录正被其他程序占用，无法重命名。错误：{error}',
+    incompatible: '检测到不兼容的版本数据：项目家目录由 {stored} 创建，当前版本 {current}。已备份到：',
+    failed: '版本守卫未完成：需要备份旧数据，但该目录正被其他程序占用，无法重命名。错误：{error}',
     failedHint: '请关闭可能占用该目录的程序（例如以该目录为工作目录的编辑器 / 终端 / AI 编程助手，或正在扫描的杀毒软件），然后重新运行 zread-pi。旧数据已保持不动，不会丢失。',
     backupHint: '旧数据已完整保留在备份目录，请尽快处理（迁移需要的文件后删除该备份目录，避免占用磁盘）。',
-    created: '已初始化 {scope}（版本 {current}）。',
-    scopeHome: '项目家目录',
-    scopeRepo: '仓库数据目录',
+    created: '已初始化项目家目录（版本 {current}）。',
   },
   layout: {
     model: '模型',

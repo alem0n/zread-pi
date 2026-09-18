@@ -3,10 +3,10 @@
  *
  * 覆盖包装层独有的逻辑（核心逻辑见 packages/utils/test/version-guard.ts）：
  *  - 家目录不兼容 → 备份 + stderr 输出含备份路径
- *  - 兼容 → 无输出（幂等，不刷屏）
+ *  - 兼容 → 无输出（幂等，不刷屏），只更新 version 标记
  *  - 首次安装 → 静默生成（无提示）
  *  - ZREAD_PI_VERSION_GUARD=0 → 整体跳过
- *  - repo: false → 不碰目标仓库目录
+ *  - 只守卫家目录（不再碰目标仓库目录）
  *
  * 运行：bun run apps/cli/test/version-guard-cli.ts
  */
@@ -72,7 +72,7 @@ delete process.env.ZREAD_PI_HOME;
 delete process.env.ZREAD_PI_VERSION_GUARD;
 
 const { lines: incompatibleLines, stderr: incompatibleErr } = await captureStderr(() =>
-  runVersionGuard({ repo: false }),
+  runVersionGuard(),
 );
 check("返回提示行", incompatibleLines.length > 0, JSON.stringify(incompatibleLines));
 check("stderr 含备份路径", incompatibleErr.includes("_bak"), JSON.stringify(incompatibleErr.split("\n")[0]));
@@ -83,16 +83,20 @@ check("新目录已写入当前版本", await readVersionFile(join(incompatibleH
 check("提示语言随旧配置（zh）", incompatibleErr.includes("不兼容"));
 
 // ---------------------------------------------------------------------------
-// 2) 兼容 → 无输出（幂等）
+// 2) 兼容 → 无输出（幂等），但版本标记会更新为当前版本
 // ---------------------------------------------------------------------------
 
 console.log("▶ 兼容时无输出");
 
+// 造一个「分界之后」的标记：当前版本一定 >= 不兼容分界，故兼容
+await writeVersionFile(join(incompatibleHome, ".zread-pi"), "1.13.0");
+
 const { lines: compatLines, stderr: compatErr } = await captureStderr(() =>
-  runVersionGuard({ repo: false }),
+  runVersionGuard(),
 );
 check("无提示行", compatLines.length === 0, JSON.stringify(compatLines));
 check("stderr 为空", compatErr === "");
+check("版本标记更新为当前版本", await readVersionFile(join(incompatibleHome, ".zread-pi")) === currentVersion);
 
 // ---------------------------------------------------------------------------
 // 3) 首次安装 → 静默生成
@@ -106,7 +110,7 @@ process.env.HOME = freshHome;
 process.env.USERPROFILE = freshHome;
 
 const { lines: freshLines, stderr: freshErr } = await captureStderr(() =>
-  runVersionGuard({ repo: false }),
+  runVersionGuard(),
 );
 check("无提示行（直接生成，不打扰）", freshLines.length === 0, JSON.stringify(freshLines));
 check("stderr 为空", freshErr === "");
@@ -124,17 +128,17 @@ roots.push(skipHome);
 process.env.HOME = skipHome;
 process.env.USERPROFILE = skipHome;
 
-const { lines: skipLines } = await captureStderr(() => runVersionGuard({ repo: false }));
+const { lines: skipLines } = await captureStderr(() => runVersionGuard());
 check("跳过：无提示行", skipLines.length === 0, JSON.stringify(skipLines));
 check("跳过：旧数据保持原样（未备份）", !!(await readFile(join(skipHome, ".zread-pi", "config.yaml"), "utf-8").catch(() => null)));
 check("跳过：未写入 version 文件", (await readVersionFile(join(skipHome, ".zread-pi"))) === null);
 delete process.env.ZREAD_PI_VERSION_GUARD;
 
 // ---------------------------------------------------------------------------
-// 5) repo: true → 同时守卫目标仓库目录
+// 5) 只守卫家目录：不再碰目标仓库目录（不为其写版本标记、不备份）
 // ---------------------------------------------------------------------------
 
-console.log("▶ 同时守卫目标仓库目录");
+console.log("▶ 只守卫家目录");
 
 const repoHome = await tempHome(true);
 roots.push(repoHome);
@@ -147,16 +151,9 @@ await mkdir(join(repoDir, ".zread-pi", "wiki", "high"), { recursive: true });
 await writeFile(join(repoDir, ".zread-pi", "wiki", "high", "wiki.json"), "{}", "utf-8");
 process.chdir(repoDir);
 
-await runVersionGuard({ repo: true });
-check("仓库目录已写入版本标记", await readVersionFile(join(repoDir, ".zread-pi")) === currentVersion);
-check("仓库旧产物保留在备份里", !!(await readFile(join(repoDir, ".zread-pi_bak", "wiki", "high", "wiki.json"), "utf-8").catch(() => null)));
-
-// repo: false 时不碰仓库目录（换一个仓库验证）
-const repo2 = join(repoWorkspace, "my-repo-2");
-await mkdir(join(repo2, ".zread-pi"), { recursive: true });
-process.chdir(repo2);
-await runVersionGuard({ repo: false });
-check("repo:false 不写仓库目录的版本标记", (await readVersionFile(join(repo2, ".zread-pi"))) === null);
+await runVersionGuard();
+check("仓库目录不写版本标记", (await readVersionFile(join(repoDir, ".zread-pi"))) === null);
+check("仓库旧产物不被备份", !(await readFile(join(repoDir, ".zread-pi_bak", "wiki", "high", "wiki.json"), "utf-8").catch(() => null)));
 
 // ---------------------------------------------------------------------------
 // 6) 家目录被别的进程当作 cwd → 提示并退出进程（不降级、不继续启动）
@@ -191,7 +188,7 @@ process.stderr.write = (chunk: Buffer | string) => {
 
 let guardError: unknown;
 try {
-  await runVersionGuard({ repo: false });
+  await runVersionGuard();
 } catch (error) {
   guardError = error; // process.exit 被拦截后函数应已 return，这里不应被走到
 }

@@ -63,11 +63,13 @@ export { Time } from './logger/time.js';
 // 配置 / 凭据 / 日志 / 解析器缓存 / 托管二进制 / 全局记忆 history 全部经由这里取路径
 export { ZREAD_PI_DIR_NAME, ZREAD_PI_HOME_ENV, getProjectHome, projectHomePath } from './project-home.js';
 
-// 版本守卫（隔离不同大版本的数据目录：~/.zread-pi 与 <repo>/.zread-pi）
+// 版本守卫（只守卫家目录 ~/.zread-pi；不兼容版本才备份重建）
 export {
   VERSION_FILE_NAME,
   BACKUP_SUFFIX,
-  parseMajorVersion,
+  INCOMPATIBLE_BEFORE,
+  parseVersion,
+  compareVersions,
   isVersionCompatible,
   getVersionFilePath,
   readVersionFile,

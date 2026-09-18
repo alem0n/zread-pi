@@ -80,7 +80,7 @@ program
   .option("-c, --concurrency <n>", t.cli.historyConcurrencyDesc)
   .action(async (options: { concurrency?: string }) => {
     // 只守卫家目录：history 不读写目标仓库的数据目录
-    await runVersionGuard({ repo: false });
+    await runVersionGuard();
     await runHistory({ concurrency: parseHistoryConcurrency(options.concurrency) });
   });
 

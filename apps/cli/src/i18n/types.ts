@@ -31,8 +31,6 @@ export interface TranslationKeys {
     failedHint: string;
     backupHint: string;
     created: string;
-    scopeHome: string;
-    scopeRepo: string;
   };
   layout: {
     model: string;
