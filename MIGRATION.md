@@ -2185,37 +2185,44 @@ AGENTS.md）描述的都是同一份既定设计，`indexRequests` 里还留着
 
 ---
 
-## 27. 版本守卫：按主版本隔离数据目录（v1.13.0）
+## 27. 版本守卫：按不兼容版本分界隔离数据目录（v1.13.0；v1.13.6 改判）
 
 ### 背景
 
-跨大版本升级时，数据目录的结构可能不兼容（字段、布局、事件格式都会演化）。
+不同版本的数据目录结构可能不兼容（字段、布局、事件格式都会演化）。
 与其让新版本强行读写旧数据导致损坏，或者写一堆「识别旧格式并迁移」的分支代码，
-不如直接按主版本隔离：不兼容就把旧目录整体备份，让两个版本的数据互不影响。
+不如在不兼容时把旧目录整体备份，让不兼容版本的数据互不影响。
 
-### 设计
+**但不是每个版本都互相不兼容**——数据格式只在个别版本发生不兼容变更。
+v1.13.0 的初版用「主版本号相同」作为兼容口径，导致只要主版本变化
+（例如 1.13 → 2.0）就把整个 `~/.zread-pi` 备份重建，用户的配置 / 凭据 /
+历史被移到 `_bak` 需手动迁回，而数据格式其实并未改变。v1.13.6 改为
+**显式不兼容分界**：只有真正发生不兼容变更的版本才触发隔离。
 
-两处数据目录各自维护一个 `version` 标记文件：
+### 设计（v1.13.6 起）
 
-| 位置 | 内容 |
-| --- | --- |
-| `~/.zread-pi/version` | 项目家目录（config / auth / history / logs / 托管二进制 …） |
-| `<repo>/.zread-pi/version` | 目标仓库输出目录（wiki 产物 / runs 轨迹 / cache …） |
+只守卫**项目家目录** `~/.zread-pi` 的 `version` 标记文件
+（config / auth / history / logs / 托管二进制 …）；仓库输出目录
+`<repo>/.zread-pi`（wiki 产物 / runs / cache …）不再守卫——都是可再生产物，
+且旧实现为它们写 version 标记、做备份没有实际收益。
 
 - 纯逻辑：`packages/utils/src/version-guard.ts`（`ensureVersionGuard(dir, currentVersion)`）
-- CLI 包装：`apps/cli/src/commands/version-guard.ts`（`runVersionGuard`）
+- CLI 包装：`apps/cli/src/commands/version-guard.ts`（`runVersionGuard()`，无参数）
 - 调用点：`runApp()`（wiki / config / browse / logview，**在 TUI 接管终端之前**，
-  且在 `adoptExistingProject()` 之前）与 `index.ts` 的 `history` 命令（只守卫家目录）
+  且在 `adoptExistingProject()` 之前）与 `index.ts` 的 `history` 命令
 
-兼容口径 = **主版本号相同**（语义化版本约定）；无法解析的版本号一律视为不兼容（保守：
-宁可备份，不可误读旧格式）。判定与处理矩阵：
+兼容口径 = **来源版本 >= `INCOMPATIBLE_BEFORE`**（常量 = `1.13.0`，
+最后一次不兼容数据格式变更的版本；三段版本号比较，无法解析视为最旧）。判定与处理矩阵：
 
 | 情形 | 结果 |
 | --- | --- |
 | 目录不存在 | `created`：创建 + 写版本，**无提示**（首次安装不打扰用户） |
-| 版本标记存在且主版本相同 | `compatible`：无操作（幂等，不重写标记） |
+| 来源版本 >= 分界（含未来主版本） | `compatible`：**只把 version 标记更新为当前版本**，数据不动、不备份 |
 | 目录存在但无标记 | `incompatible`：备份 → 重建 → 写版本 |
-| 主版本不同 | `incompatible`：备份 → 重建 → 写版本 |
+| 来源版本早于分界 / 无法解析 | `incompatible`：备份 → 重建 → 写版本 |
+
+**以后再发生不兼容的数据目录变更时，把 `INCOMPATIBLE_BEFORE` 常量改成那个
+版本号即可**，无需改动判定代码。
 
 备份命名 `<dir>_bak`，已占用依次 `<dir>_bak-2` / `-3`。旧数据**完整保留**在备份目录，
 提示信息（stderr，接管终端前输出，用户一定看得到）含备份路径与「尽快处理」建议。
@@ -2237,19 +2244,27 @@ AGENTS.md）描述的都是同一份既定设计，`indexRequests` 里还留着
 
 ### 破坏性（升级注意）
 
-**首次运行新主版本 = 现有 `~/.zread-pi` 与 `<repo>/.zread-pi` 被移到 `_bak`，
-配置需要重做。** 这是 v1.13.0 的明确行为（见 `.github/release-notes/v1.13.0.md`）。
-`_bak` / `_bak-N` 与 `.zread-pi` 同级，**不会被用户仓库的 `.gitignore` 覆盖**
-（`.gitignore` 只忽略 `.zread-pi/`）；本仓库自己的 `.gitignore` 已补 `.zread-pi_bak/` 规则。
+- v1.13.6 起，**只有家目录 `~/.zread-pi` 的来源版本早于 `INCOMPATIBLE_BEFORE`
+  （`1.13.0`）或无 version 标记时**才会被备份重建；分界之后的所有版本互相兼容，
+  升级只静默更新 version 标记。v1.13.0–1.13.5 的「主版本不同即隔离」行为已废弃。
+- 从 v1.13.0 之前升级上来的用户（家目录无 version 标记）仍会触发一次备份重建，
+  与 v1.13.0 初版行为一致。
+- 仓库目录不再被守卫：之前版本创建的 `<repo>/.zread-pi/version` 文件成为
+  残留（无人读取，可安全手动删除）。
+- `_bak` / `_bak-N` 与 `.zread-pi` 同级，**不会被用户仓库的 `.gitignore` 覆盖**
+  （`.gitignore` 只忽略 `.zread-pi/`）；本仓库自己的 `.gitignore` 已补 `.zread-pi_bak/` 规则。
 
 ### 测试
 
-- `packages/utils/test/version-guard.ts`（46 项）：解析与兼容判定、标记读写、
-  备份路径命名、`ensureVersionGuard` 四条路径（含「旧数据完整保留在备份里」断言）
+- `packages/utils/test/version-guard.ts`（55 项）：三段版本号解析与比较
+  （`parseVersion` / `compareVersions`，无法解析视为最旧）、兼容判定
+  （分界本身 / 分界之后 / 未来主版本兼容；早于分界 / 无法解析不兼容）、
+  标记读写、备份路径命名、`ensureVersionGuard` 全路径（含「分界之后含未来主版本
+  → 只更新标记不备份」「早于分界 → 备份且旧数据完整保留」断言）
   **+ 目录被 chdir 占用 → 抛错且旧数据不动（不降级），释放后重跑成功**。
-- `apps/cli/test/version-guard-cli.ts`（17 项）：stderr 提示含备份路径、兼容时无输出、
-  首次安装静默、`ZREAD_PI_VERSION_GUARD=0` 跳过、`repo:false` 不碰仓库目录、
-  提示语言随旧配置。
+- `apps/cli/test/version-guard-cli.ts`（23 项）：stderr 提示含备份路径、
+  兼容时无输出且静默更新标记、首次安装静默、`ZREAD_PI_VERSION_GUARD=0` 跳过、
+  **不再碰仓库目录**（不写标记、不备份）、提示语言随旧配置、占用时提示并退出。
 - spawn 型 CLI 测试（`cli-target-dir` / `history-adopt` / `history-command` /
   `real-run-check`）统一设 `ZREAD_PI_VERSION_GUARD=0`：它们的临时家目录没有版本标记，
   否则会被当成不兼容数据备份掉，断言随之失效。
