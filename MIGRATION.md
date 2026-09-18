@@ -2123,7 +2123,7 @@ console 警告），于是缩放时父级台账会**同时滚动**。改为在 `
 > 按钮是否出现，而 NaN 视口同样能让按钮出现。补上「缩放后段数不变」的断言后，
 > 假绿路径才被真正拦住。
 
-#### 首批用例（49 项，3 个文件；行覆盖率 JsonTree 95% / TrajectoryTable 93% / TrajectoryTimeline 97%）
+#### 首批用例（51 项，3 个文件；行覆盖率 JsonTree 95% / TrajectoryTable 93% / TrajectoryTimeline 97%）
 
 - `JsonTree`（9 项）：递归渲染 / 折叠展开 / `break-all` 长字符串换行（26.10 的小项回归）；
 - `TrajectoryTable`（19 项）：`buildTrajectoryRows` 行模型 9 项（折叠 / assistant 合并 ×N /
@@ -2142,7 +2142,7 @@ console 警告），于是缩放时父级台账会**同时滚动**。改为在 `
 
 #### 验证
 
-- `bun run test:components`：49/49（3 个文件）；组件行覆盖率
+- `bun run test:components`：51/51（3 个文件）；组件行覆盖率
   JsonTree 95% / TrajectoryTable 93% / TrajectoryTimeline 97%
 - `bun run typecheck`（含 `tsconfig.test.json`）：0 错误
 - `bun run browse:build`：生产构建排除测试文件，照常通过
