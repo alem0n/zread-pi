@@ -38,8 +38,11 @@ export interface RunEventAgentMeta {
    * 折叠（replay）按它把事件归属到对应的 turn / 活跃会话：并发 Agent 的
    * 事件在日志里交错，单凭 key 与「最近 agent_start」指针会互相吞掉，
    * session id 是每个事件自带的、全局唯一的归属键。
+   *
+   * 可选：该字段在 v1.13.0 引入，之前的旧日志没有它；replay 对缺省值
+   * 回退 `agent.key` 归属（见 `identityOf`），旧日志仍可读取展示。
    */
-  sessionId: string;
+  sessionId?: string;
 }
 
 /** run 级事件的占位元信息（复用对象，避免每条事件重复构造）。

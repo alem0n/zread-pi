@@ -80,10 +80,10 @@ function usageOf(usage: RunTokenUsage | undefined): TrajectoryUsage | undefined 
   };
 }
 
-/** 事件的归属键：session id（全局唯一） */
+/** 事件的归属键：session id 优先；旧日志（无 sessionId）回退 agent.key */
 function identityOf(agent: RunEventAgentMeta | undefined): string | undefined {
   if (agent === undefined) return undefined;
-  return agent.sessionId;
+  return agent.sessionId ?? agent.key;
 }
 
 /** turn 标签：角色 + 分类 / 页面 */

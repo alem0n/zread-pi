@@ -2150,6 +2150,41 @@ console 警告），于是缩放时父级台账会**同时滚动**。改为在 `
 
 ---
 
+### 26.12 旧日志的 key 回退从「只在文档里」到真正实现（v1.13.4）
+
+**现象**：§26.9 缺陷 1 的修复文案、`replay.ts` 的注释以及 AGENTS.md §1.2
+第二十二步都写的是归属键为 `agent.sessionId ?? agent.key`，但
+`identityOf()` 的实现只有 `return agent.sessionId`——**`?? agent.key`
+这条旧日志回退从未被写进代码，也没有任何测试覆盖**。
+
+**影响**：v1.13.0（sessionId 引入）之前落盘的 `events.jsonl` 里事件
+的 `agent` 没有 `sessionId`，replay 时 `identityOf` 返回 `undefined`，
+于是 `agent_start` 建不出 turn、消息 / 工具全部走进「未知 / 已结束的
+Agent：丢弃」分支——旧 run 在轨迹视图里**整段不可见**。降级是优雅的
+（不误归给别人），但内容丢失。当前日志不受影响（sink 一定生成 sessionId）。
+
+**修复**：`identityOf()` 改为 `return agent.sessionId ?? agent.key`，
+并顺手把 `RunEventAgentMeta.sessionId` 从必填放宽为**可选**——它本来就
+是「新增可选」字段（第二十二步），且磁盘上的旧数据确实没有它。放宽后
+`TrajectoryTurnInfo.sessionId` 仍是必填：有 `agent` 的事件经 `?? key`
+后归属键恒为字符串，只有 run 级事件（无 agent）不建 turn。
+
+**为什么是修代码而不是修文档**：三处文档（§26.9 / replay 注释 /
+AGENTS.md）描述的都是同一份既定设计，`indexRequests` 里还留着
+`keyToIdentity.get(record.turnKey) ?? record.turnKey` 这条只有 key 归属
+存在时才有意义的回退路径——意图是明确的，是实现漏了。
+
+**验证**（测试先行：先加断言确认红灯，再改实现）：
+
+- 红灯：旧日志段 7 项失败（`turns.length` 实际 0 ≠ 期望 2 等）
+- 绿灯：`bun run test:trajectory` 模型层 **106 项**（97 + 新增 9），
+  覆盖 turn 建立 / 回退键 = `agent.key` / layout 回填 / 消息与工具不丢 /
+  请求编号 / 分组归属 / run 级事件仍归独立段
+- `bun run typecheck` / `bun run test:browse`（78 + 组件 51）/ 
+  `bun run mock:wiki`（completed=5 failed=0）/ `bun run test` 全绿
+
+---
+
 ## 27. 版本守卫：按主版本隔离数据目录（v1.13.0）
 
 ### 背景
