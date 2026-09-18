@@ -24,6 +24,19 @@ export type LlmAuthType = 'api_key' | 'oauth';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /**
+ * ThinkingLevelMap - 思考等级映射（与 pi-ai 的 `ThinkingLevelMap` 同形）
+ *
+ * 键为 pi 的思考等级，值为三态（与 pi 的 models.json 语义一致）：
+ * - 缺省：`off`~`high` 使用 provider 默认映射；`xhigh`/`max` 视为**不支持**
+ * - string：该等级受支持，且此字符串就是发送给 provider 的值
+ * - null：该等级显式不支持（UI 隐藏，请求时由 pi 钳制到最近的受支持等级）
+ *
+ * zread-pi 的配置界面只暴露 `xhigh` / `max` 两个扩展档（值写等级名本身）；
+ * 需要自定义发送值或调整标准档时，可直接编辑 config.yaml。
+ */
+export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
+
+/**
  * CustomModelConfig - 用户为某个 Provider 追加的自定义模型
  *
  * 与 pi 的 models.json 语义一致：id 与内置模型相同则覆盖，否则新增。
@@ -43,6 +56,14 @@ export interface CustomModelConfig {
   max_tokens?: number;
   /** 是否支持思考/推理 */
   reasoning?: boolean;
+  /**
+   * 思考等级映射（pi 的 thinkingLevelMap；仅 `reasoning: true` 时有意义）。
+   *
+   * 缺省时不写入，自定义模型在 pi 眼里是「普通推理模型」：
+   * 最高只到 `high`，`xhigh`/`max` 会在请求时被 pi 钳制掉（pi 的 opt-in 语义）。
+   * 声明例如 `{ max: "max" }` 后，`/config/thinking` 才会把 `max` 列为受支持等级。
+   */
+  thinking_level_map?: ThinkingLevelMap;
   /** 是否支持图片输入 */
   supports_vision?: boolean;
 }

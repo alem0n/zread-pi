@@ -9,7 +9,7 @@
 
 import { matchesKey } from "@earendil-works/pi-tui";
 import { setZreadCatalogConfig } from "@zread-pi/agent-runtime";
-import type { CustomModelConfig } from "@zread-pi/types";
+import type { CustomModelConfig, ThinkingLevelMap } from "@zread-pi/types";
 import { TextField } from "../../tui/components/text-field";
 import { style } from "../../tui/ansi";
 import { Screen } from "../../tui/screen";
@@ -29,6 +29,9 @@ export default class ConfigCustomModelPage extends Screen {
   private maxTokens = "";
   private reasoning = false;
   private supportsVision = false;
+  /** pi 的扩展思考等级（xhigh / max）：仅 reasoning 开启时出现，opt-in */
+  private extendedHigh = false;
+  private extendedMax = false;
 
   private idField = new TextField();
   private nameField = new TextField();
@@ -85,11 +88,28 @@ export default class ConfigCustomModelPage extends Screen {
     if (this.step === "flags") {
       if (data === "t") {
         this.reasoning = !this.reasoning;
+        // 关闭思考时同步清掉扩展档：pi 在 reasoning=false 时本就忽略 thinkingLevelMap，
+        // 这里保持配置干净，避免存下永不生效的映射。
+        if (!this.reasoning) {
+          this.extendedHigh = false;
+          this.extendedMax = false;
+        }
         this.refresh();
         return true;
       }
       if (data === "v") {
         this.supportsVision = !this.supportsVision;
+        this.refresh();
+        return true;
+      }
+      // 扩展思考等级只在开启思考后才有意义（pi 的 opt-in 语义）
+      if (this.reasoning && data === "x") {
+        this.extendedHigh = !this.extendedHigh;
+        this.refresh();
+        return true;
+      }
+      if (this.reasoning && data === "m") {
+        this.extendedMax = !this.extendedMax;
         this.refresh();
         return true;
       }
@@ -166,15 +186,28 @@ export default class ConfigCustomModelPage extends Screen {
 
     // 能力开关
     const flag = (enabled: boolean) => style(enabled ? "[x]" : "[ ]", { color: enabled ? "green" : "gray" });
-    lines.push(
+    const flagsLines = [
       "",
       clampLine(
         `  ${flag(this.reasoning)} ${this.t("customModel.reasoning")}    ${flag(this.supportsVision)} ${this.t("customModel.vision")}`,
         width,
       ),
       style(`  ${this.t("customModel.toggleHint")}`, { dim: true }),
-      this.error && this.step === "flags" ? this.renderError(this.error, width) : "",
-    );
+    ];
+
+    // 扩展思考等级（xhigh / max）：只在开启思考后出现，且需模型支持
+    if (this.reasoning) {
+      flagsLines.push(
+        clampLine(
+          `  ${flag(this.extendedHigh)} ${this.t("customModel.xhigh")}    ${flag(this.extendedMax)} ${this.t("customModel.max")}`,
+          width,
+        ),
+        style(`  ${this.t("customModel.extendedHint")}`, { dim: true }),
+      );
+    }
+
+    if (this.error && this.step === "flags") flagsLines.push(this.renderError(this.error, width));
+    lines.push(...flagsLines);
 
     lines.push("", style(this.t("customModel.footer"), { dim: true }));
     return lines;
@@ -302,7 +335,16 @@ export default class ConfigCustomModelPage extends Screen {
     if (this.name.trim()) model.name = this.name.trim();
     model.context_window = Number.parseInt(this.contextWindow.trim() || "128000", 10);
     model.max_tokens = Number.parseInt(this.maxTokens.trim() || "16384", 10);
-    if (this.reasoning) model.reasoning = true;
+    if (this.reasoning) {
+      model.reasoning = true;
+      // pi 的 opt-in：只有显式声明的扩展等级才会出现在 /config/thinking 的支持列表里，
+      // 值取等级名本身（即发送给 provider 的 reasoning_effort 值）。
+      // 需要自定义发送值或调整标准档（off..high）时，可直接编辑 config.yaml。
+      const map: ThinkingLevelMap = {};
+      if (this.extendedHigh) map.xhigh = "xhigh";
+      if (this.extendedMax) map.max = "max";
+      if (Object.keys(map).length > 0) model.thinking_level_map = map;
+    }
     if (this.supportsVision) model.supports_vision = true;
 
     this.app.config.upsertCustomModel(this.providerId, model);

@@ -88,6 +88,9 @@ function toPiModel(
     provider: providerId,
     baseUrl: model.base_url ?? defaultBaseUrl,
     reasoning: model.reasoning ?? false,
+    // pi 的 opt-in 语义：缺省时自定义模型只是「普通推理模型」(最高 high)。
+    // 只有显式声明 xhigh/max，getSupportedThinkingLevels 才会放出这两档。
+    ...(model.thinking_level_map ? { thinkingLevelMap: model.thinking_level_map } : {}),
     input: model.supports_vision ? ['text', 'image'] : ['text'],
     cost: zeroCost(),
     contextWindow: model.context_window ?? DEFAULT_CONTEXT_WINDOW,

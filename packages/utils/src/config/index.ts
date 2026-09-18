@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, ThinkingLevel, ToolsConfig } from '@zread-pi/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, ThinkingLevel, ThinkingLevelMap, ToolsConfig } from '@zread-pi/types';
 import { ensureDir, writeTextFileAtomic } from '../file-io';
 import { withFileLock } from '../lockfile.js';
 import { getProjectHome, projectHomePath } from '../project-home.js';
@@ -234,6 +234,30 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
 };
 
+/**
+ * 归一化思考等级映射（pi 的 thinkingLevelMap 三态语义）。
+ *
+ * 只保留「键是合法 ThinkingLevel 且值为 string 或 null」的条目；
+ * 一条都没有时返回 undefined（不写入配置，保持 pi 的「普通推理模型」默认语义：
+ * 最高只到 high，xhigh/max 被钳制掉）。
+ */
+function normalizeThinkingLevelMap(value: unknown): ThinkingLevelMap | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result: ThinkingLevelMap = {};
+  let hasEntry = false;
+  for (const [level, mapped] of Object.entries(value as Record<string, unknown>)) {
+    if (!isThinkingLevel(level)) continue;
+    if (typeof mapped === 'string') {
+      result[level] = mapped;
+      hasEntry = true;
+    } else if (mapped === null) {
+      result[level] = null;
+      hasEntry = true;
+    }
+  }
+  return hasEntry ? result : undefined;
+}
+
 /** 判断一个值是否是合法的自定义模型配置 */
 function normalizeCustomModel(value: unknown): CustomModelConfig | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -251,6 +275,8 @@ function normalizeCustomModel(value: unknown): CustomModelConfig | null {
     model.max_tokens = raw.max_tokens;
   }
   if (typeof raw.reasoning === 'boolean') model.reasoning = raw.reasoning;
+  const thinkingLevelMap = normalizeThinkingLevelMap(raw.thinking_level_map);
+  if (thinkingLevelMap) model.thinking_level_map = thinkingLevelMap;
   if (typeof raw.supports_vision === 'boolean') model.supports_vision = raw.supports_vision;
   return model;
 }

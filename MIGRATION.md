@@ -2277,3 +2277,72 @@ v1.13.0 的初版用「主版本号相同」作为兼容口径，导致只要主
   `real-run-check`）统一设 `ZREAD_PI_VERSION_GUARD=0`：它们的临时家目录没有版本标记，
   否则会被当成不兼容数据备份掉，断言随之失效。
 
+## 28. 自定义模型的 max / xhigh 思考深度：接上 pi 的 opt-in（v1.13.7）
+
+### 背景
+
+pi 的思考深度有 7 档（off → max），但 **`xhigh` / `max` 是 opt-in 的**：
+pi-ai 的 `getSupportedThinkingLevels(model)` 对这两档要求模型在
+`thinkingLevelMap` 里**显式声明**（`string` = 支持且该值发给 provider，
+`null` = 显式禁用，缺省 = 不支持）。pi 的 models.json 文档（
+`docs/models.md` 的 *Thinking Level Map* 一节）把这套三态语义开放给自定义模型。
+
+迁移到 pi 内核时，zread-pi 的自定义模型配置（`llm.providers.<id>.models[]`）
+**只搬了 `reasoning` 布尔，漏了 `thinkingLevelMap`**：
+`toPiModel()` 生成的 pi Model 里该字段恒为 `undefined`。后果是自定义模型
+在 pi 眼里永远是「ordinary reasoning model」——`max` / `xhigh` 在请求时被
+`clampThinkingLevel` 钳到 `high`（`reasoning: false` 时直接钳到 `off`），
+`/config/thinking` 里这两档也永远标注「不支持」。内置模型不受影响
+（如 `claude-opus-4-6` 在目录元数据里声明了 `thinkingLevelMap.max`）。
+
+### 改动
+
+对齐 pi 的三态语义，四处：
+
+1. `packages/types/src/config.ts`：新增 `ThinkingLevelMap`
+（`Partial<Record<ThinkingLevel, string | null>>`，与 pi-ai 同形），
+`CustomModelConfig` 新增可选 `thinking_level_map`；从包根导出新类型。
+2. `packages/utils/src/config/index.ts`：`normalizeCustomModel` 透传
+`thinking_level_map`（`normalizeThinkingLevelMap` 只保留「合法等级键 +
+`string`/`null` 值」的条目，过滤后全空则不写该字段）。
+3. `packages/agent-runtime/src/pi/provider-catalog.ts`：`toPiModel()`
+把 `thinking_level_map` 透传为 pi 的 `thinkingLevelMap`。
+4. CLI：`/config/provider/:id/model-new` 的能力开关步骤，在**开启思考后**
+追加 `xhigh` / `max` 两个开关（`x` / `m` 键），保存时写入
+`thinking_level_map: { xhigh: 'xhigh', max: 'max' }`（值取等级名本身，
+即发送给 provider 的 `reasoning_effort`）；Provider 详情页的模型行
+追加扩展档徽标便于确认。
+
+### 行为差异
+
+- 旧行为：自定义模型 `max` → 请求时钳为 `high`（或 `off`）。
+- 新行为：勾选 `max` 后 `getZreadThinkingLevels` 含 `max`，
+  `/config/thinking` 显示 `max` 为受支持，请求时 `reasoning_effort` 原样发送 `max`。
+- pi 的「洞」语义同样成立：只声明 `max`（不声明 `xhigh`）时，
+  选 `xhigh` 会被 `clampThinkingLevel` **向上**钳到 `max`。
+- 有意**不做**的两件事（与 pi 一致，避免过度设计）：
+  ① 不在 `reasoning: true` 时自动补默认 `max` 映射——opt-in 是有意的
+  （max 更贵、且未必被端点支持），必须用户显式开启；
+  ② UI 只暴露 `xhigh` / `max` 两个扩展档，标准档（off..high）仍走 pi 的
+  默认映射；需要自定义发送值 / 调整标准档 / 用 `null` 显式禁用某档时，
+  直接编辑 config.yaml（类型注释里写明了这一逃逸口）。
+
+### 兼容性
+
+- 纯新增可选字段：旧 config.yaml 无 `thinking_level_map` 照常读取，
+  行为与改动前完全一致（普通推理模型）。
+- `validateConfig` 对非法等级键 / 非法值做过滤，全空时不写字段，
+  不会把脏数据写回 config.yaml。
+
+### 验证（实际执行结果）
+
+- `bun run test:catalog`：52/52（新增 7 项——
+  `thinking_level_map` 透传、支持列表含 max 且含洞（不含 xhigh）、
+  `clampThinkingLevel(max)` 原样保留、`clampThinkingLevel(xhigh)` 钳到 max、
+  未声明时仍钳到 high、`validateConfig` 三态保留与非法键值过滤）。
+- `bun run test:tui`：291 项（+4）——开启思考后出现扩展档开关、
+  快捷键提示、`thinking_level_map` 写入 config、详情页 `max` 徽标。
+- `bun run test`：全量 14 个套件绿；`bun run typecheck` 0 错误。
+- config.yaml 落盘 → `loadConfig` 读回的往返实测保留 `{ xhigh: null, max: 'max' }`
+  三态。
+
