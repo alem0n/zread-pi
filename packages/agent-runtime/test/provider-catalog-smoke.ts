@@ -15,7 +15,8 @@
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "@zread-pi/utils";
+import { loadConfig, validateConfig } from "@zread-pi/utils";
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	createRuntimeModel,
 	getZreadModel,
@@ -314,6 +315,13 @@ try {
 							reasoning: true,
 							supports_vision: true,
 						},
+						{
+							id: "my-max-model",
+							name: "My Max Model",
+							reasoning: true,
+							// pi 的 opt-in：显式声明 max 才会出现在支持列表里（值取等级名本身）
+							thinking_level_map: { xhigh: null, max: "max" },
+						},
 					],
 				},
 			},
@@ -333,6 +341,70 @@ try {
 	);
 	check("自定义模型支持图片输入", custom?.input.includes("image") === true, JSON.stringify(custom?.input));
 	check("getZreadModel 能查到自定义模型", getZreadModel("anthropic", "my-local-model")?.id === "my-local-model");
+
+	// 自定义模型显式声明 max：pi 的 opt-in 语义生效
+	const maxModel = getZreadModel("anthropic", "my-max-model");
+	check(
+		"自定义模型透传 thinkingLevelMap",
+		maxModel?.thinkingLevelMap?.max === "max" && maxModel?.thinkingLevelMap?.xhigh === null,
+		JSON.stringify(maxModel?.thinkingLevelMap),
+	);
+	const maxLevels = getZreadThinkingLevels("anthropic", "my-max-model");
+	check(
+		"声明 max 的自定义模型：支持列表含 max 且不含 xhigh（洞）",
+		maxLevels.includes("max") && !maxLevels.includes("xhigh") && maxLevels.includes("high"),
+		maxLevels.join(","),
+	);
+	check(
+		"声明 max 的自定义模型：pi-ai clampThinkingLevel(max) 原样保留",
+		clampThinkingLevel(maxModel!, "max") === "max",
+		String(clampThinkingLevel(maxModel!, "max")),
+	);
+	check(
+		"声明 max 的自定义模型：请求 xhigh 被钳制到 max（洞的向上钳制）",
+		clampThinkingLevel(maxModel!, "xhigh") === "max",
+		String(clampThinkingLevel(maxModel!, "xhigh")),
+	);
+	check(
+		"未声明扩展档的自定义模型仍是「普通推理模型」（max→high）",
+		clampThinkingLevel(getZreadModel("anthropic", "my-local-model")!, "max") === "high",
+		String(clampThinkingLevel(getZreadModel("anthropic", "my-local-model")!, "max")),
+	);
+
+	// ---- 4b) thinking_level_map 的配置归一化（往返 + 容错）----
+	const normalized = validateConfig({
+		language: "zh",
+		doc_language: "zh",
+		concurrency: { max_concurrent: 1, max_retries: 0 },
+		llm: {
+			provider: "anthropic",
+			model: "m",
+			api_key: null,
+			base_url: null,
+			providers: {
+				anthropic: {
+					models: [
+						// 合法三态：string = 支持，null = 显式不支持
+						{ id: "ok", reasoning: true, thinking_level_map: { max: "max", minimal: null } },
+						// 非法等级键 / 非法值被过滤；过滤后全空则不写字段
+						{ id: "junk", reasoning: true, thinking_level_map: { bogus: "x", high: 123, medium: {} } },
+					],
+				},
+			},
+		},
+	});
+	const okModel = normalized.llm.providers.anthropic?.models.find((m) => m.id === "ok");
+	check(
+		"validateConfig 保留 thinking_level_map（string + null 三态）",
+		okModel?.thinking_level_map?.max === "max" && okModel?.thinking_level_map?.minimal === null,
+		JSON.stringify(okModel?.thinking_level_map),
+	);
+	const junkModel = normalized.llm.providers.anthropic?.models.find((m) => m.id === "junk");
+	check(
+		"validateConfig 过滤非法等级键/值，全空时不写字段",
+		Boolean(junkModel && junkModel.thinking_level_map === undefined),
+		JSON.stringify(junkModel?.thinking_level_map),
+	);
 
 	// ---- 5) 未内置的自定义 Provider ----
 	const customProviderConfig = {
