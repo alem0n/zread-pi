@@ -274,7 +274,6 @@ API Key 与模型列表都在其详情页里维护）；也能为任意 Provider
 ```
 your-project/
 └── .zread-pi/
-    ├── version                        # 创建该目录的 zread-pi 版本（版本守卫用）
     ├── wiki/
     │   ├── minimal/                    # 每个档位一套独立完整产物（互不覆盖）
     │   ├── low/
@@ -295,9 +294,11 @@ your-project/
 
 每页都是内嵌 Mermaid 图表的纯 Markdown —— GitHub、GitLab、Docusaurus、Notion、你自己的静态站点都能直接渲染。
 
-> **版本隔离**：`.zread-pi/version` 与家目录的 `~/.zread-pi/version` 记录创建它的版本。
-> 升级到**不同主版本**后首次运行，旧目录会被原样改名为 `.zread-pi_bak`（完整保留），
-> 然后重建新目录 —— 需要的文件请从备份里拷回。环境变量 `ZREAD_PI_VERSION_GUARD=0` 可跳过该检查。
+> **版本隔离**：只有项目家目录 `~/.zread-pi/version` 记录创建它的版本，
+> 仓库输出目录 `.zread-pi/` 都是可再生产物、不守卫。
+> 家目录的来源版本若**早于最后一次不兼容变更**（或没有版本标记），旧目录会被原样改名
+> 为 `.zread-pi_bak`（完整保留）然后重建新目录 —— 需要的文件请从备份里拷回；
+> 兼容版本只静默更新版本标记、不动数据。环境变量 `ZREAD_PI_VERSION_GUARD=0` 可跳过该检查。
 > 本项目仍在初期快速迭代，不保证跨版本兼容，升级前请自行备份 `~/.zread-pi`。
 
 ### 轨迹检查视图（Trajectory）
