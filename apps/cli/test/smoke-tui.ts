@@ -1111,6 +1111,12 @@ console.log("▶ TUI 冒烟测试");
 
   terminal.send("t"); // 打开「支持思考」
   await settle(20);
+  text = screenText(app);
+  checkContains("开启思考后出现扩展思考等级行", text, "max 最大思考");
+  checkContains("扩展思考等级快捷键提示", text, "x 切换 xhigh");
+
+  terminal.send("m"); // 打开「max」
+  await settle(20);
   terminal.send("\r"); // 保存
   await settle(40);
 
@@ -1120,9 +1126,17 @@ console.log("▶ TUI 冒烟测试");
     customModels.some((model) => model.id === "my-custom-model" && model.reasoning === true),
     JSON.stringify(customModels),
   );
+  check(
+    "自定义模型写入 thinking_level_map（pi opt-in 生效）",
+    customModels.some(
+      (model) => model.id === "my-custom-model" && model.thinking_level_map?.max === "max",
+    ),
+    JSON.stringify(customModels),
+  );
   text = screenText(app);
   checkContains("返回详情页并显示自定义模型", text, "my-custom-model");
   checkContains("自定义模型带标记", text, "[自定义]");
+  checkContains("详情页模型行显示 max 徽标", text, "[思考 max]");
 
   // 回到模型区后刷新（静态目录：给出说明且不报错）
   terminal.send("\t");

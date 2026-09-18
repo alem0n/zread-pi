@@ -35,6 +35,8 @@ interface CatalogModel {
   maxTokens: number;
   contextWindow: number;
   reasoning: boolean;
+  /** 用户在自定义模型里显式声明的扩展思考等级（xhigh / max） */
+  extendedThinkingLevels: string[];
   input: readonly string[];
 }
 
@@ -326,8 +328,12 @@ export default class ConfigProviderDetailPage extends Screen {
     if (model.reasoning || supportsVision) {
       let tags = style("[", { dim: true });
       if (model.reasoning) tags += style(this.t("model.reasoning"), { dim: true, color: "magenta" });
+      for (const level of model.extendedThinkingLevels) {
+        if (model.reasoning || supportsVision) tags += " ";
+        tags += style(level, { dim: true, color: "magenta" });
+      }
       if (supportsVision) {
-        if (model.reasoning) tags += " ";
+        if (model.reasoning || model.extendedThinkingLevels.length > 0) tags += " ";
         tags += style(this.t("model.vision"), { dim: true, color: "blue" });
       }
       tags += style("]", { dim: true });
@@ -413,6 +419,9 @@ export default class ConfigProviderDetailPage extends Screen {
       maxTokens: model.maxTokens,
       contextWindow: model.contextWindow,
       reasoning: model.reasoning,
+      // pi 的三态：string = 支持且该值发送给 provider；null / 缺省 = 不支持
+      extendedThinkingLevels: (["xhigh", "max"] as const)
+        .filter((level) => typeof model.thinkingLevelMap?.[level] === "string"),
       input: model.input,
     }));
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.displayItems.length - 1));

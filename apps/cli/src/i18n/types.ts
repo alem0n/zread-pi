@@ -151,6 +151,9 @@ export interface TranslationKeys {
     maxTokensPlaceholder: string;
     reasoning: string;
     vision: string;
+    xhigh: string;
+    max: string;
+    extendedHint: string;
     toggleHint: string;
     api: string;
     idRequired: string;
