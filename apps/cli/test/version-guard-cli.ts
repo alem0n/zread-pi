@@ -140,6 +140,22 @@ delete process.env.ZREAD_PI_VERSION_GUARD;
 
 console.log("▶ 只守卫家目录");
 
+// 5a) 退化标记 + 真实当前版本 → 备份一次后稳定，连续运行不循环备份
+// （真正的“当前版本退化”场景由 utils 单测覆盖；CLI 层验证不会反复生成 _bak-N）
+const degenerateHome = await tempHome(false, ["config.yaml", "language: zh\n"]);
+process.env.HOME = degenerateHome;
+process.env.USERPROFILE = degenerateHome;
+delete process.env.ZREAD_PI_HOME;
+delete process.env.ZREAD_PI_VERSION_GUARD;
+const degenerateDir = join(degenerateHome, ".zread-pi");
+await writeVersionFile(degenerateDir, "0.0.0-dev");
+await runVersionGuard();
+check("退化标记被真实版本备份一次", await readVersionFile(degenerateDir) === currentVersion);
+check("旧 config.yaml 进了备份", !!(await readFile(join(degenerateHome, ".zread-pi_bak", "config.yaml"), "utf-8").catch(() => null)));
+// 再跑一次：标记已是真实版本 → 兼容，不再生成 _bak-2
+await runVersionGuard();
+check("第二次运行不再备份（无 _bak-2）", !(await readFile(join(degenerateHome, ".zread-pi_bak-2"), "utf-8").catch(() => null)));
+
 const repoHome = await tempHome(true);
 roots.push(repoHome);
 process.env.HOME = repoHome;

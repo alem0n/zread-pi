@@ -127,6 +127,7 @@ export function nextBackupPath(dir: string): string {
 export type VersionGuardOutcome =
   | { status: 'created'; dir: string; version: string }
   | { status: 'compatible'; dir: string; stored: string }
+  | { status: 'skipped'; dir: string; version: string }
   | {
       status: 'incompatible';
       dir: string;
@@ -156,6 +157,14 @@ export async function ensureVersionGuard(
   dir: string,
   currentVersion: string,
 ): Promise<VersionGuardOutcome> {
+  // 0) 当前版本不可信时整体跳过：getVersion() 在构建注入失败且读不到 package.json
+  //    时会回退 '0.0.0-dev' 之类的值，它 < INCOMPATIBLE_BEFORE，照常判定会导致
+  //    “每次启动都备份”、_bak-N 无限增长。当前版本无法解析或早于分界 = 版本号本身
+  //    不可信，守卫宁可不动也不制造反复备份（旧数据保持原位最安全）。
+  if (!isVersionCompatible(currentVersion)) {
+    return { status: 'skipped', dir, version: currentVersion };
+  }
+
   // 1) 首次安装
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });

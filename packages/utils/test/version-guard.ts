@@ -197,6 +197,34 @@ check('数据目录未被备份（config.yaml 仍在原位）', (await stat(join
 check('未生成备份目录', !(await stat(`${home3b}${BACKUP_SUFFIX}`).catch(() => null)));
 
 // ---------------------------------------------------------------------------
+// 7) 退化版本号保护：0.0.0-dev / 无法解析的当前版本 → 跳过守卫，不备份
+// ---------------------------------------------------------------------------
+
+console.log('▶ 退化版本号保护（防止反复备份）');
+
+// getVersion() 在极端情况下回退 '0.0.0-dev'（构建注入失败且读不到 package.json）。
+// 该版本 < INCOMPATIBLE_BEFORE，若照常判定会“每次启动都备份”，_bak-N 无限增长。
+// 守卫必须识别这种自相矛盾（当前版本早于分界 = 版本号不可信）并跳过。
+const homeDevg = join(await tempDir('zread-vg-dev-'), '.zread-pi');
+await mkdir(homeDevg, { recursive: true });
+await writeVersionFile(homeDevg, INCOMPATIBLE_BEFORE);
+await writeFile(join(homeDevg, 'config.yaml'), 'language: zh\n', 'utf-8');
+
+const devg = await ensureVersionGuard(homeDevg, '0.0.0-dev');
+checkEqual('退化版本 = skipped', devg.status, 'skipped');
+check('数据未被备份（config.yaml 仍在原位）', (await stat(join(homeDevg, 'config.yaml'))).isFile());
+check('未生成备份目录', !(await stat(`${homeDevg}${BACKUP_SUFFIX}`).catch(() => null)));
+check('版本标记未被改写', await readVersionFile(homeDevg) === INCOMPATIBLE_BEFORE);
+
+// 无法解析的当前版本同样跳过
+const homeBad = join(await tempDir('zread-vg-bad-'), '.zread-pi');
+await mkdir(homeBad, { recursive: true });
+await writeVersionFile(homeBad, INCOMPATIBLE_BEFORE);
+const bad = await ensureVersionGuard(homeBad, 'not-a-version');
+checkEqual('无法解析的当前版本 = skipped', bad.status, 'skipped');
+check('无法解析时也未备份', !(await stat(`${homeBad}${BACKUP_SUFFIX}`).catch(() => null)));
+
+// ---------------------------------------------------------------------------
 // 8) 目录被别的进程当作 cwd：备份失败 → 直接抛错，旧数据不动
 // ---------------------------------------------------------------------------
 
