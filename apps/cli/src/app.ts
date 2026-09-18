@@ -58,7 +58,7 @@ async function adoptExistingProject(): Promise<void> {
 export async function runApp({ initialEntries }: AppOptions): Promise<void> {
   // 版本守卫必须在 TUI 接管终端前完成：不兼容时备份旧数据并给出提示，
   // 且必须在读取任何数据目录（含下面的老旧项目登记）之前执行。
-  await runVersionGuard({ repo: true });
+  await runVersionGuard();
 
   // 老旧项目自动登记必须在 TUI 接管终端前完成（失败不阻塞）
   await adoptExistingProject();
