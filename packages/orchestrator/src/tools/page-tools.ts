@@ -12,8 +12,17 @@
 import { resolve, dirname } from 'path';
 import { defineTool, getRequiredString, getString } from '@zread-pi/agent-runtime';
 import type { ToolInputParams, ToolContext, ToolDefinition } from '@zread-pi/agent-runtime';
-import type { BlueprintDetailLevel } from '@zread-pi/types';
+import type { BlueprintDetailLevel, WikiPage } from '@zread-pi/types';
 import { ensureDir, writeTextFile } from '@zread-pi/utils';
+import {
+  evaluateContentGate,
+  formatContentGateError,
+  type ContentGateReport,
+} from '../wiki/content-gate.js';
+import type { BlueprintDetailSpec } from '../agents/blueprint-detail.js';
+
+// 内容门报告类型由此再导出（wiki/types.ts 的 PageResult.gate 引用）
+export type { ContentGateReport, ContentGateMetrics } from '../wiki/content-gate.js';
 
 interface MermaidValidationIssue {
   block: number;
@@ -149,6 +158,32 @@ export function resolvePageOutputPath(
 }
 
 /**
+ * 构造 YAML frontmatter（write_page 与 generate-wiki 的 best-effort 落盘共用同一格式，
+ * 避免 drift）。
+ */
+export function buildPageFrontmatter(title?: string, slug?: string): string {
+  return title ? `---\ntitle: "${title}"\nslug: "${slug}"\n---\n\n` : '';
+}
+
+/**
+ * 内容门运行参数（由 generate-wiki 按页注入；缺省 / mode = off 时完全跳过）。
+ *
+ * `page` 提供难度 / section / associatedFiles，`spec` 提供 minimal 档的 panorama 标记。
+ */
+export interface ContentGateOptions {
+  mode: 'warn' | 'enforce';
+  page: WikiPage;
+  spec: BlueprintDetailSpec;
+}
+
+/** write_page 工具的构造选项 */
+export interface WritePageToolOptions {
+  variant: BlueprintDetailLevel;
+  /** 内容门（不传 / mode = off = 完全跳过，行为与迁移前一致） */
+  contentGate?: ContentGateOptions;
+}
+
+/**
  * Write Page Tool
  *
  * Write Wiki page content to the specified file path.
@@ -156,8 +191,23 @@ export function resolvePageOutputPath(
  *
  * 路径结构（`variant` = 蓝图细节档位）：
  * `.zread-pi/wiki/<variant>/{section}/{file}`
+ *
+ * 内容门（quality.contentGate）：Mermaid 校验之后追加，`mode = enforce` 时返回
+ * is_error + 「当前 N / 下限 M」反馈让模型重写；`warn` 只把报告塞进结果 JSON
+ * （由 generate-wiki 提取写进 PageResult.gate，不拦截落盘）。
  */
-export function createWritePageTool(variant: BlueprintDetailLevel): ToolDefinition {
+export function createWritePageTool(options: WritePageToolOptions | BlueprintDetailLevel): ToolDefinition {
+  // 兼容旧调用方直接传 variant 的写法
+  const variant: BlueprintDetailLevel =
+    typeof options === 'string' ? options : options.variant;
+  const contentGate =
+    typeof options === 'string' ? undefined : options.contentGate;
+
+  /** 评估内容门（mode = off / 未配置时返回 undefined） */
+  const evaluateGate = (fullContent: string): ContentGateReport | undefined => {
+    if (!contentGate) return undefined;
+    return evaluateContentGate(fullContent, contentGate.page, contentGate.spec, contentGate.mode);
+  };
   return defineTool({
     name: 'write_page',
     description: `将 Wiki 页面内容写入指定文件路径。按照章节组织目录结构。
@@ -202,9 +252,7 @@ export function createWritePageTool(variant: BlueprintDetailLevel): ToolDefiniti
       const filePath = resolvePageOutputPath(context.cwd, { file, section, slug }, { variant });
 
       // Build YAML frontmatter
-      const frontmatter = title
-        ? `---\ntitle: "${title}"\nslug: "${slug}"\n---\n\n`
-        : '';
+      const frontmatter = buildPageFrontmatter(title, slug);
 
       const fullContent = frontmatter + content;
       const mermaidIssues = validateMermaidContent(fullContent);
@@ -213,6 +261,21 @@ export function createWritePageTool(variant: BlueprintDetailLevel): ToolDefiniti
           data: JSON.stringify({
             success: false,
             error: formatMermaidValidationError(mermaidIssues),
+          }),
+          is_error: true,
+        };
+      }
+
+      // 内容门（quality.contentGate）：在 Mermaid 校验之后、落盘之前。
+      // enforce 未通过 → is_error + 常驻反馈（当前 N / 下限 M），模型在预算内重写；
+      // warn / 通过 → 继续落盘，报告塞进结果 JSON 供 generate-wiki 提取。
+      const gate = evaluateGate(fullContent);
+      if (gate && !gate.passed && gate.mode === 'enforce') {
+        return {
+          data: JSON.stringify({
+            success: false,
+            error: formatContentGateError(gate),
+            gate,
           }),
           is_error: true,
         };
@@ -229,6 +292,8 @@ export function createWritePageTool(variant: BlueprintDetailLevel): ToolDefiniti
           slug,
           section: section || '未分类',
           size: fullContent.length,
+          // 内容门报告（warn / 通过时携带；off 时不存在该字段）
+          ...(gate ? { gate } : {}),
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

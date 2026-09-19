@@ -13,6 +13,21 @@ export { generateWikiContent } from './wiki/generate-wiki.js'
 export { polishPageFile, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
 export type { WikiResult, ProgressState, PageResult, PolishOutcome, GenerateWikiOptions, ArticleEventPayload } from './wiki/types.js'
 
+// 内容密度门（quality.contentGate）：把「页面是否干瘪」变成机械可判定的指标
+// 移植自 lecture-to-notes 的 verify_notes.py::density_gate（纯函数 + 常量表，
+// 拦截点在 tools/page-tools.ts，降级落盘在 wiki/generate-wiki.ts）
+export {
+  evaluateContentGate,
+  extractGateMetrics,
+  extractGateReport,
+  formatContentGateError,
+  resolveGateMode,
+  proseFloor,
+  mermaidRequiredFor,
+  codeRecommendedFor,
+} from './wiki/content-gate.js'
+export type { ContentGateMetrics, ContentGateReport } from './wiki/content-gate.js'
+
 // Phase 3: Wiki Sync
 // 三阶段增量修补：diff → （按需）分类合并 → 按变更 section 分主题 / 标题；SyncDiff 语义与旧实现一致
 export { syncWiki, computeSyncDiff } from './wiki/sync-wiki.js'

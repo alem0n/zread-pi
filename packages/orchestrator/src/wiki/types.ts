@@ -7,7 +7,7 @@
 import type { BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
 import type { TokenUsage } from '@zread-pi/agent-runtime';
 import type { RunLogWriter } from '@zread-pi/utils';
-
+import type { ContentGateReport } from '../tools/page-tools.js';
 // ==================== 进度状态（批量回调） ====================
 
 /**
@@ -50,6 +50,13 @@ export interface PageResult {
   tokenUsage?: TokenUsage;
   /** 页面落盘后的兜底润色结果（polish.mode = 'full' 时才可能 applied） */
   polish?: PolishOutcome;
+  /**
+   * 内容密度门报告（quality.contentGate 未关闭时才有值）。
+   *
+   * warn 模式只记录不拦截；enforce 拦截失败后预算用尽时 best-effort 落盘，
+   * mode 记为 'enforce-degraded'，页面仍计成功（见 MIGRATION §29）。
+   */
+  gate?: ContentGateReport;
 }
 
 /**
@@ -145,6 +152,12 @@ export interface ArticleEventPayload {
   maxRetries?: number;
   /** 重试延迟（retry 时） */
   delayMs?: number;
+  /**
+   * 内容密度门报告（quality.contentGate 未关闭时携带）。
+   *
+   * warn 模式只报告不拦截；enforce-degraded 表示预算用尽后 best-effort 落盘。
+   */
+  gate?: ContentGateReport;
 }
 
 // ==================== 生成选项 ====================

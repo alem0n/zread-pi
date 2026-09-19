@@ -13,10 +13,15 @@
 import pLimit from 'p-limit';
 import { copyFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, createLogger, withRunLog, buildPageStartEvent, buildPageEndEvent, type RunLogWriter } from '@zread-pi/utils';
+import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, writeTextFile, createLogger, withRunLog, buildPageStartEvent, buildPageEndEvent, type RunLogWriter } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { getDetailSpec, MINIMAL_PANORAMA_REQUIREMENT, type BlueprintDetailSpec } from '../agents/blueprint-detail.js';
-import { createWritePageTool, resolvePageOutputPath } from '../tools/page-tools.js';
+import { createWritePageTool, buildPageFrontmatter, resolvePageOutputPath } from '../tools/page-tools.js';
+import {
+  extractGateReport,
+  resolveGateMode,
+  type ContentGateReport,
+} from '../wiki/content-gate.js';
 import {
   FileEditTool,
   FileReadTool,
@@ -108,7 +113,8 @@ function summarizeWriteError(content: unknown): string {
 
 /**
  * 记录一次 write_page 调用的输入参数与真实落盘路径，
- * 用于「模型写错路径」时把已生成的文件兜底移回 wiki.json 约定的位置。
+ * 用于「模型写错路径」时把已生成的文件兜底移回 wiki.json 约定的位置，
+ * 以及内容门 best-effort 落盘时取回被拦截的正文。
  */
 export interface PageWriteAttempt {
   /** 调用发生时 Agent 的工作目录（write_page 以它为根解析路径） */
@@ -117,8 +123,14 @@ export interface PageWriteAttempt {
   file?: string;
   section?: string;
   slug?: string;
+  /** 模型传入的标题（重建 frontmatter 用） */
+  title?: string;
   /** write_page 成功时报告的绝对落盘路径 */
   outputPath?: string;
+  /** 被内容门拦截时缓存的正文体（enforce 降级落盘用） */
+  content?: string;
+  /** 该次调用是否被内容门拦截（区别于 Mermaid / 路径错误） */
+  gateBlocked?: boolean;
 }
 
 /** 从 write_page 的 JSON 结果里解析真实落盘路径（仅成功时有值）。 */
@@ -272,6 +284,46 @@ export async function rescuePageFile(
 }
 
 /**
+ * 内容门的 best-effort 落盘降级（§3.1 / §5.1）。
+ *
+ * `enforce` 模式下模型未在 token 预算内通过内容门时，页面文件不会落盘
+ * （write_page 返回 is_error）。此时把**最近一次被拦截的内容**写入约定路径，
+ * 末尾追加一行 `<!-- gate: ... -->` 注释，并把报告标记为 `enforce-degraded`：
+ * 页面计为成功 + 质量告警，不判页失败（zread-pi「生成永不悬挂」哲学）。
+ *
+ * 返回标记后的报告；不满足降级条件（未被内容门拦截 / 模型从未产出内容）时返回 null，
+ * 由调用方走原失败路径（那是「模型未产出」，不是「门判死」）。
+ */
+async function writeDegradedPage(options: {
+  outputFile: string;
+  page: WikiPage;
+  attempts: PageWriteAttempt[];
+  gateReport: ContentGateReport | undefined;
+}): Promise<ContentGateReport | null> {
+  const { outputFile, page, attempts, gateReport } = options;
+  if (!gateReport || gateReport.passed) return null;
+
+  // 最近一次被内容门拦截且带有正文的尝试（倒序取最新）
+  const blocked = [...attempts]
+    .reverse()
+    .find((attempt) => attempt.gateBlocked && typeof attempt.content === 'string');
+  if (!blocked) return null;
+
+  const frontmatter = buildPageFrontmatter(blocked.title, blocked.slug ?? page.slug);
+  const note = `<!-- gate: 内容门未在 token 预算内通过，best-effort 落盘（${gateReport.failures.join('；')}） -->`;
+  try {
+    await ensureDir(dirname(outputFile));
+    await writeTextFile(outputFile, `${frontmatter}${blocked.content}\n\n${note}\n`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    pagesLogger.warn(`[${page.slug}] best-effort 落盘失败，走原失败路径：${message}`);
+    return null;
+  }
+
+  return { ...gateReport, mode: 'enforce-degraded' };
+}
+
+/**
  * Generate Wiki Content
  *
  * Parallel Wiki page generation with p-limit concurrency control.
@@ -312,7 +364,8 @@ async function generatePages(
   // minimal 会在页面提示词里附加「全景导览」要求
   const spec = getDetailSpec(variant);
   const wikiDir = getWikiDir(variant);
-  const writeTool = createWritePageTool(variant);
+  // 内容门模式（off = 完全跳过，行为与迁移前一致）；按页注入 page 上下文，见下方任务内构造
+  const gateMode = resolveGateMode(config);
 
   // 并发数由调用方传递（默认 1）
   const maxConcurrent = options?.maxConcurrent ?? 1;
@@ -369,6 +422,10 @@ async function generatePages(
       // 并记录每次调用的输入/实际落盘路径，供写错路径时的兜底移动使用。
       let wrotePage = false;
       let lastWriteError: string | undefined;
+      // 最近一次内容门报告（warn 记录 / enforce 拦截 / enforce-degraded 降级）
+      let lastGateReport: ContentGateReport | undefined;
+      // best-effort 落盘成功后的报告（优先于 lastGateReport 写进 PageResult）
+      let degradedGate: ContentGateReport | undefined;
       // 页面 Agent 的最后一次累计用量快照：失败路径（Agent 抛错）拿不到
       // `result.tokenUsage`，用它在 page_error 上归账，避免失败页在合计里记为 0。
       let lastUsage: TokenUsage | undefined;
@@ -376,6 +433,11 @@ async function generatePages(
       let lastContextTokens: number | undefined;
       let lastContextWindow: number | undefined;
       const writeAttempts: PageWriteAttempt[] = [];
+      // write_page 按页注入内容门（page 提供 level / section / associatedFiles）
+      const writeTool = createWritePageTool({
+        variant,
+        ...(gateMode !== 'off' ? { contentGate: { mode: gateMode, page, spec } } : {}),
+      });
       const writePageTool: ToolDefinition = {
         ...writeTool,
         async call(input, context) {
@@ -384,12 +446,21 @@ async function generatePages(
             file: getString(input, 'file'),
             section: getString(input, 'section'),
             slug: getString(input, 'slug'),
+            title: getString(input, 'title'),
           };
           writeAttempts.push(attempt);
 
           const toolResult = await writeTool.call(input, context);
+          // 内容门报告（off 时结果里不携带，extractGateReport 返回 undefined）
+          const gate = extractGateReport(toolResult.content);
+          if (gate) lastGateReport = gate;
           if (toolResult.is_error) {
             lastWriteError = summarizeWriteError(toolResult.content);
+            // 内容门拦截：缓存正文，供预算用尽时 best-effort 落盘
+            if (gate && !gate.passed) {
+              attempt.gateBlocked = true;
+              attempt.content = getString(input, 'content');
+            }
           } else {
             wrotePage = true;
             lastWriteError = undefined;
@@ -397,6 +468,74 @@ async function generatePages(
           }
           return toolResult;
         },
+      };
+
+      /**
+       * 成功收尾：落盘后的兜底润色 + 计成功 + page_complete 事件 + runLog。
+       *
+       * 正常完成与「内容门降级落盘」复用同一套逻辑（生成永不悬挂：降级也计成功，
+       * 质量告警由 `gate.mode = enforce-degraded` 携带）。
+       */
+      const finishPageSuccess = async (
+        usage: TokenUsage | undefined,
+        contextTokens: number | undefined,
+        contextWindow: number | undefined,
+      ): Promise<PageResult> => {
+        const outputFile = joinPath(wikiDir, page.section, page.file);
+        // 落盘完成后的兜底润色（第 2 层，polish.mode = 'full' 才真正执行）。
+        // 失败不判页失败：页面产物已存在，polish 是增强不是必需（polishPageFile 内部只告警）。
+        const polish = await polishPageFile({
+          filePath: outputFile,
+          slug: page.slug,
+          title: page.title,
+          runLog: createRunLogSink(runLog, {
+            key: `polish:${page.slug}`,
+            role: 'polish',
+            pageSlug: page.slug,
+          }),
+        });
+        if (polish.applied) {
+          pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms)`);
+        } else if (polish.reason === 'mermaid-rollback') {
+          pagesLogger.warn(`[${page.slug}] polish 未保留：Mermaid 复检未通过，已回滚`);
+        }
+
+        progress.completed++;
+        const pageResult: PageResult = {
+          slug: page.slug,
+          success: true,
+          outputPath: `.zread-pi/wiki/${page.section}/${page.file}`,
+          durationMs: Math.round(performance.now() - pageStartTime),
+          tokenUsage: usage,
+          polish,
+          // 内容门报告（off 时 undefined；warn 记录 / enforce 通过或降级）
+          gate: degradedGate ?? lastGateReport,
+        };
+        progress.results.push(pageResult);
+        options?.onProgress?.(progress);
+
+        options?.onEvent?.({
+          type: 'page_complete',
+          slug: page.slug,
+          outputPath: pageResult.outputPath,
+          durationMs: pageResult.durationMs,
+          usage,
+          contextTokens: contextTokens ?? lastContextTokens,
+          contextWindow: contextWindow ?? lastContextWindow,
+          gate: pageResult.gate,
+        });
+        runLog.append(
+          buildPageEndEvent({
+            slug: page.slug,
+            outputPath: pageResult.outputPath,
+            success: true,
+            durationMs: pageResult.durationMs,
+          }),
+        );
+
+        pagesLogger.info(`[OK] [${page.slug}] 完成 (${pageResult.durationMs}ms)`);
+
+        return pageResult;
       };
 
       try {
@@ -491,72 +630,60 @@ async function generatePages(
               `[${page.slug}] write_page 写入路径与 wiki.json 不一致，已兜底移动到约定位置：${rescuedFrom} -> ${outputFile}`,
             );
           } else {
-            const reason = wrotePage
-              ? 'write_page 写入路径与 wiki.json 不一致'
-              : lastWriteError
-                ? `write_page 失败：${lastWriteError}`
-                : '模型未调用 write_page';
-            throw new Error(`页面文件未生成（${reason}）`);
+            // 内容门降级（§3.1 / §5.1）：enforce 拦截后模型未在 token 预算内通过时，
+            // 把最近一次被拦截的内容 best-effort 落盘，标 enforce-degraded，页面计成功。
+            // 不满足降级条件（模型从未产出 / 非 内容门拦截）时返回 null，走原失败路径。
+            const degraded = await writeDegradedPage({
+              outputFile,
+              page,
+              attempts: writeAttempts,
+              gateReport: lastGateReport,
+            });
+            if (degraded) {
+              degradedGate = degraded;
+              pagesLogger.warn(
+                `[${page.slug}] 内容门未在预算内通过，best-effort 落盘（gate.mode=enforce-degraded）：${degraded.failures.length} 项未达标`,
+              );
+            } else {
+              const reason = wrotePage
+                ? 'write_page 写入路径与 wiki.json 不一致'
+                : lastWriteError
+                  ? `write_page 失败：${lastWriteError}`
+                  : '模型未调用 write_page';
+              throw new Error(`页面文件未生成（${reason}）`);
+            }
           }
         }
 
-        // 落盘完成后的兜底润色（第 2 层，polish.mode = 'full' 才真正执行）。
-        // 失败不判页失败：页面产物已存在，polish 是增强不是必需（polishPageFile 内部只告警）。
-        const polish = await polishPageFile({
-          filePath: outputFile,
-          slug: page.slug,
-          title: page.title,
-          runLog: createRunLogSink(runLog, {
-            key: `polish:${page.slug}`,
-            role: 'polish',
-            pageSlug: page.slug,
-          }),
-        });
-        if (polish.applied) {
-          pagesLogger.info(`[${page.slug}] polish 已生效（${polish.durationMs}ms）`);
-        } else if (polish.reason === 'mermaid-rollback') {
-          pagesLogger.warn(`[${page.slug}] polish 未保留：Mermaid 复检未通过，已回滚`);
-        }
-
-        // Success
-        progress.completed++;
-        const pageResult: PageResult = {
-          slug: page.slug,
-          success: true,
-          outputPath: `.zread-pi/wiki/${page.section}/${page.file}`,
-          durationMs: Math.round(performance.now() - pageStartTime),
-          tokenUsage: result.tokenUsage,
-          polish,
-        };
-        progress.results.push(pageResult);
-        options?.onProgress?.(progress);
-
-        // 发射 page_complete 事件
-        options?.onEvent?.({
-          type: 'page_complete',
-          slug: page.slug,
-          outputPath: pageResult.outputPath,
-          durationMs: pageResult.durationMs,
-          usage: result.tokenUsage,
-          contextTokens: result.contextTokens ?? lastContextTokens,
-          contextWindow: result.contextWindow ?? lastContextWindow,
-        });
-        runLog.append(
-          buildPageEndEvent({
-            slug: page.slug,
-            outputPath: pageResult.outputPath,
-            success: true,
-            durationMs: pageResult.durationMs,
-          }),
+        return finishPageSuccess(
+          result.tokenUsage,
+          result.contextTokens,
+          result.contextWindow,
         );
-
-        pagesLogger.info(`[OK] [${page.slug}] 完成 (${pageResult.durationMs}ms)`);
-
-        return pageResult;
 
       } catch (err: unknown) {
         // Error isolation: single page failure doesn't stop others
         const message = err instanceof Error ? err.message : String(err);
+
+        // 内容门降级（§3.1 / §5.1）：Agent 因预算耗尽 / 中断等原因没有正常收尾，
+        // 但已经有被内容门拦截的有效正文时，仍然 best-effort 落盘并计为成功
+        // （生成永不悬挂：门判死也把产物交到用户手里，质量告警由 gate 携带）。
+        const failedOutputFile = joinPath(wikiDir, page.section, page.file);
+        if (!(await fileExists(failedOutputFile))) {
+          const degraded = await writeDegradedPage({
+            outputFile: failedOutputFile,
+            page,
+            attempts: writeAttempts,
+            gateReport: lastGateReport,
+          });
+          if (degraded) {
+            degradedGate = degraded;
+            pagesLogger.warn(
+              `[${page.slug}] 内容门未在预算内通过（Agent 中断：${message.slice(0, 80)}），best-effort 落盘（gate.mode=enforce-degraded）：${degraded.failures.length} 项未达标`,
+            );
+            return finishPageSuccess(lastUsage, lastContextTokens, lastContextWindow);
+          }
+        }
 
 
         progress.failed++;
@@ -578,6 +705,7 @@ async function generatePages(
           usage: lastUsage,
           contextTokens: lastContextTokens,
           contextWindow: lastContextWindow,
+          gate: lastGateReport,
         });
         runLog.append(
           buildPageEndEvent({
