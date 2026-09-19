@@ -260,7 +260,10 @@ API Key 与模型列表都在其详情页里维护）；也能为任意 Provider
   `llm.max_tokens`，留空 = 跟随模型目录默认；配置界面 `/config/model-size`）、token 预算（`agent.token_budget`，0 = 按
   `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、文风润色（`polish.enabled`，
   `polish.mode = prompt-only | full`）、蓝图细节档位（`blueprint.detail = minimal | low | medium | high | max`，默认
-  `high`；配置界面 `/config/detail`）、外部工具开关（`tools.<id>.enabled`）。
+  `high`；配置界面 `/config/detail`）、内容质量门（`quality.contentGate.enabled` /
+  `quality.contentGate.mode = off | warn | enforce`，默认 `true` / `warn`；配置界面 `/config/quality`——
+  `warn` 只报告不拦截，`enforce` 会拦截干瘪页面并要求重写，预算耗尽后 best-effort 落盘并标注告警）、
+  外部工具开关（`tools.<id>.enabled`）。
   重试次数（`concurrency.max_retries`，0–5，0 = 不重试，配置界面 `/config/retry`）同时下发到 Agent 层与
   Provider 层：前者指数退避（2s 起、60s 封顶），后者在单次请求内读取服务端 `Retry-After`。
 - `~/.zread-pi/auth.json` —— pi-ai 格式凭据（API Key），可同时保存多个 Provider；**秘密不进 config.yaml**。

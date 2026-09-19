@@ -2346,3 +2346,93 @@ pi-ai 的 `getSupportedThinkingLevels(model)` 对这两档要求模型在
 - config.yaml 落盘 → `loadConfig` 读回的往返实测保留 `{ xhigh: null, max: 'max' }`
   三态。
 
+---
+
+## 29. 页面内容密度门（quality.contentGate，v1.14.0）
+
+### 背景
+
+迁移自 lecture-to-notes 的「输出约束与优化方法论」（详见 `plan.md`）。
+lecture-to-notes 有一个 `verify_notes.py::density_gate`——在交付前机械地判定
+笔记是不是「干瘪的 TL;DR」（中文字数 / 图 / 框 / 节 / 公式配额）。
+zread-pi 只有**结构数量**门（`blueprint.detail` 的 section / topic 篇数），
+**没有任何内容密度度量**：一篇页面是否只写了三行交代，完全无度量、无拦截。
+
+这是最大的质量缺口：页面 Agent 可以在 token 预算内交出一篇
+「`# 标题` + 一句话 + `Sources:`」的页面，`write_page` 照样落盘计成功。
+
+### 改动（P0-1，§3.1）
+
+落点 `packages/orchestrator/src/wiki/content-gate.ts`（纯函数 + 常量表，
+对齐 `blueprint-detail.ts` 的组织方式；副作用仍在工具层 / 编排层）：
+
+- **度量指标**（全部纯文本可判定，零外部依赖）：`proseChars`
+（剥离 frontmatter / 代码块 / Mermaid / `Sources:` 行 / 表格后的可见散文字符）、
+`headings` / `headingLevels`（跳级检测）、`mermaidBlocks`、`codeBlocks`、
+`sourceNotes`、`repeatOpenings`（连续 ≥3 段同前缀词）。
+- **下限表** `CONTENT_GATE_SPECS`：散文下限 = `base（Beginner 1200 /
+Intermediate 1800 / Advanced 2400）+ perFile 200 × min(关联文件数, 8)`，
+上限 `proseMax = base + 8 × perFile`（让上限实际可触发）。
+- **mermaid 是否必需**由 section 角色（`概览` / `overview` / `快速开始` /
+`核心架构`）或 minimal 档的 panorama 要求派生（`mermaidRequiredFor`），
+**与难度等级正交**——不挂在 level 表上。
+- **拦截点**：`write_page.call` 在 Mermaid 校验**之后**追加内容门，
+`mode=enforce` 未通过时返回同样的 `is_error` 结构，错误文案带
+「当前 N / 下限 M」常驻反馈（对齐 `formatQuantityFeedback` 的风格）让模型重写；
+`warn` 只把报告塞进结果 JSON（不拦截）。
+- **降级链**（适配 zread-pi「生成永不悬挂」哲学，见 §5.1）：
+  - `writeDegradedPage()` 在页面失败分支（文件不存在 + 有被门拦截的有效正文）时，
+    把最近一次被拦截的内容写入约定路径，末尾追加 `<!-- gate: <失败明细> -->` 注释，
+    `PageResult.gate.mode = 'enforce-degraded'`，**页面计为成功 + 质量告警**。
+  - 关键修复：harness 在 token 预算耗尽时**抛错**（`error_budget_exhausted`），
+    原先的降级逻辑放在 `try` 块里根本不会执行。重构后把「成功收尾」
+    （润色 + 计成功 + 事件 + runLog）抽成 `finishPageSuccess()`，
+    `catch` 块里也尝试一次降级落盘——只有降级成功才转计成功，否则走原失败路径。
+  - 无缓存正文（模型从未调 `write_page`）时仍走原失败路径——
+    那属于「未产出」，不是「门判死」。
+- **反注水**（§4）：门限是下限不是目标——错误文案明确要求
+  「不要同义改写注水、不要为凑图表而加图」；代码块是**软建议**
+（`advisories`，不影响 `passed`）：源里没有可写代码时正确答案是 0，
+  不能机械地判失败。
+- **配置**：`AppConfig.quality: { contentGate: { enabled, mode }, verifyAfterGenerate }`
+（缺省 `true` / `warn` / `false`，`normalizeQualityConfig` 保证旧配置零变化）；
+CLI 新增 `/config/quality`（模式切换 + `t` 开关 + `v` 自动校验 + `s` 保存）。
+- **UI 可见性**：`PageStatus.gate` + `CatalogEvent` / `ArticleEventPayload`
+的 `gate` 字段把报告带到生成页；完成行右侧追加 `⚠ 密度门未达标` /
+`⚠ 密度门降级落盘` 标记（黄色，不改变成功 / 失败的颜色语义）。
+
+### 行为差异
+
+- 旧行为：任何长度的页面都计成功。
+- 新行为：
+  - `warn`（缺省）：照常落盘，但完成行带 ⚠ 标记 + `PageResult.gate` 记录未达标项。
+  - `enforce`：未达标返回 `is_error`，模型在 token 预算内重写；
+    预算用尽后 best-effort 落盘（`gate.mode = enforce-degraded`），仍计成功。
+  - `off`（`enabled: false` 或 mode 显式 `off`）：完全跳过，与改动前一致。
+- 与 lecture-to-notes 的**有意偏差**：那边是 `OVERALL FAIL 就不许交付`（强阻断），
+  zread-pi 的哲学是「生成永不悬挂」——门判死也必须把产物交到用户手里，
+  质量告警随 `gate` 字段透出，由用户决定是否重生成。
+
+### 兼容性
+
+- 纯新增可选字段：`AppConfig.quality` / `PageResult.gate` /
+`PageStatus.gate` / 事件载荷的 `gate` 全部可选；旧 config.yaml 无 `quality` 段
+  时 normalizer 补全为缺省值（已实测：缺省 `enabled=true` + `mode=warn` +
+  `verifyAfterGenerate=false`；非法值回退缺省）。
+- `createWritePageTool` 的参数从 `BlueprintDetailLevel` 放宽为
+`WritePageToolOptions | BlueprintDetailLevel`（旧调用点零改动）。
+- 工具名 / schema / 提示文本**未改**（`write_page` 行为不变，只是多了一道校验）。
+
+### 验证（实际执行结果）
+
+- `bun run test:pages`：24（e2e 页面生成）+ 7（落盘兜底）+ 16（polish）
+  + **75（内容密度门：度量 / 下限表 / enforce 拦截 / warn 报告 / 反注水 /
+  配置归一化）** + **8（enforce 降级落盘端到端）** 全绿。
+- `bun run test:catalog`：52 → **57**（+5：`quality` 归一化往返——
+  缺省值补全、合法值保留、非法值回退）。
+- `bun run test:tui`：291 → **313**（+22：`/config/quality` 页面渲染 /
+  模式切换 / `t` 开关 / `v` 自动校验 / `s` 保存落盘；
+  生成页门标记的事件映射 +5 在 mapper 单测里，42 项全绿）。
+- `bun run mock:wiki`：`completed=5 failed=0`（缺省 warn 不阻断、不破坏既有链路）。
+- `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+

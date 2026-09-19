@@ -52,7 +52,7 @@ vendor/pi/packages/*（pi 内核源码快照，上游零改动）
 ### 1. `@zread-pi/types`（packages/types）
 
 共享类型基础，零外部依赖：`manifest.ts`（扫描结果）、`symbols.ts`（AST 符号）、`wiki.ts`
-（Wiki 页面与输出）、`config.ts`（AppConfig，含 `llm.providers` / `llm.context_window` / `llm.max_tokens` / `agent.max_turns` / `tools.*`）、
+（Wiki 页面与输出）、`config.ts`（AppConfig，含 `llm.providers` / `llm.context_window` / `llm.max_tokens` / `agent.max_turns` / `agent.token_budget` / `polish.*` / `blueprint.detail` / `quality.contentGate` / `tools.*`）、
 `cache.ts`、`repo-map.ts`（三层 Repo Map）。
 
 **修改要点**：这里动了就是契约面——旧 `config.yaml` 必须仍可直接启动（运行时自动迁移/补缺省值），
@@ -103,6 +103,7 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 ### 5. `@zread-pi/orchestrator`（packages/orchestrator）
 
 编排层：`orchestrator.ts`（`generateWikiCatalog`）、`wiki/generate-wiki.ts`（`generateWikiContent`）、
+`wiki/content-gate.ts`（内容密度门纯函数 + 下限表常量，对齐 `blueprint-detail.ts` 的组织方式）、
 `agents/create-agent.ts`（读配置下发 maxTurns / thinkingLevel / contextWindow / maxTokens）、`prompts/`（蓝图与页面 Agent 提示词，
 **工具名写死在其中**）、`wiki/memory.ts`（全局记忆写入）。
 
@@ -110,6 +111,10 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 
 - 并发控制用 `p-limit`；完成判定**以落盘为准**（wiki.json 可加载 / 页面文件真实存在），不信任「Agent 正常结束」；
 - `wiki.json` 契约与 `write_page` 的 Mermaid 校验是产物契约——改结构需跑 `bun run mock:wiki` 并核对产物；
+- 内容密度门是**纯函数**（`content-gate.ts`）：判定逻辑改这里，副作用仍在
+  `page-tools.ts`（拦截）与 `generate-wiki.ts`（降级落盘）；**降级落盘必须同时覆盖 `try` 与 `catch`
+  两条路径**（token 预算耗尽时 harness 抛错走 `catch`）；门限是下限不是目标，
+  代码块是软建议（源里没代码时 0 是正确答案，见 `AGENTS.md` §1.1）；
 - 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §1.1 的对应决策行。
 
 ### 6. `apps/cli`（终端界面）
