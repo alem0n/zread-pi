@@ -142,6 +142,11 @@ export {
   isBlueprintDetailLevel,
   normalizeBlueprintDetail,
   normalizeBlueprintConfig,
+  DEFAULT_QUALITY_ENABLED,
+  DEFAULT_QUALITY_MODE,
+  DEFAULT_VERIFY_AFTER_GENERATE,
+  CONTENT_GATE_MODES,
+  normalizeQualityConfig,
 } from './config/index.js';
 
 // 外部工具（注册表 / 安装器 / 归档解包），配置界面 /config/tools 与 agent-runtime 共用

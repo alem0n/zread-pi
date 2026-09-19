@@ -18,12 +18,25 @@ export interface TranslationKeys {
     historyDesc: string;
     historyConcurrencyDesc: string;
     logviewDesc: string;
+    verifyDesc: string;
+    verifyDetailDesc: string;
+    verifyEnforceDesc: string;
   };
   history: {
     pruned: string;
     remaining: string;
     empty: string;
     failed: string;
+  };
+  /** 交付闸门输出（机器可解析的行格式，文案随语言） */
+  verify: {
+    skipped: string;
+    legacy: string;
+    variant: string;
+    overallPass: string;
+    overallFail: string;
+    detailsPrefix: string;
+    summary: string;
   };
   versionGuard: {
     incompatible: string;
@@ -51,6 +64,7 @@ export interface TranslationKeys {
     maxTurns: string;
     polish: string;
     blueprintDetail: string;
+    quality: string;
     maxConcurrency: string;
     maxRetries: string;
     default: string;
@@ -278,6 +292,30 @@ export interface TranslationKeys {
     /** Footer */
     footer: string;
   };
+  quality: {
+    /** 页面标题 */
+    title: string;
+    /** 当前值 */
+    current: string;
+    /** 内容门机制说明 */
+    intro: string;
+    /** 开/关与模式标签 */
+    enabled: string;
+    disabled: string;
+    modeOff: string;
+    modeOffDesc: string;
+    modeWarn: string;
+    modeWarnDesc: string;
+    modeEnforce: string;
+    modeEnforceDesc: string;
+    /** 生成后自动校验开关说明 */
+    verifyAfterGenerate: string;
+    verifyAfterGenerateDesc: string;
+    /** 反注水提示 */
+    paddingHint: string;
+    /** Footer */
+    footer: string;
+  };
   tools: {
     /** 配置首页的条目名与列表页标题 */
     title: string;
@@ -398,6 +436,10 @@ export interface TranslationKeys {
     stageTitlesIdle: string;
     stageSection: string;
     failedSections: string;
+    /** 内容门未达标时的行内标记（warn 只报告） */
+    gateWarn: string;
+    /** 内容门降级落盘标记（enforce 预算用尽后 best-effort 落盘） */
+    gateDegraded: string;
   };
   browse: {
     title: string;

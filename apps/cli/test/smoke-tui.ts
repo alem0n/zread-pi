@@ -543,7 +543,71 @@ console.log("▶ TUI 冒烟测试");
   app.exit();
 }
 
-// --- 用例 4i：模型大小覆盖页（/config/model-size：上下文窗口 / 最大输出覆盖）---
+// --- 用例 4i：内容质量门页（/config/quality：开关 + off/warn/enforce + 自动校验）---
+{
+  const { app, terminal } = createApp(["/config/quality"]);
+  await app.start();
+  await settle();
+
+  const text = screenText(app);
+  checkContains("质量门页：标题", text, "设置内容质量门");
+  checkContains("质量门页：当前值（旧配置缺省 已启用 · 仅告警（默认））", text, "当前值: 已启用 · 仅告警（默认）");
+  checkContains("质量门页：机制说明", text, "机械可判定");
+  checkContains("质量门页：反注水提示", text, "门限是下限不是目标");
+  checkContains("质量门页：自动校验当前值", text, "生成后自动校验");
+  checkContains("质量门页：warn 选项被选中", text, "❯ 仅告警（默认）");
+  checkContains("质量门页：enforce 选项", text, "强制达标");
+  checkContains("质量门页 Footer", text, "t 启用/停用");
+
+  // ↓ + Enter：切到 enforce（Enter 写回内存配置并返回上一级）
+  terminal.send("\x1b[B");
+  await settle(20);
+  checkContains("质量门页：光标移到强制达标", screenText(app), "❯ 强制达标");
+  terminal.send("\r");
+  await settle(80);
+  check(
+    "Enter 写回配置 quality.contentGate.mode=enforce",
+    app.config.getContentGateMode() === "enforce",
+    String(app.config.getContentGateMode()),
+  );
+  checkContains("质量门页：当前值随模式更新", screenText(app), "当前值: 已启用 · 强制达标");
+
+  // t：停用内容门（写内存配置，不落盘）
+  terminal.send("t");
+  await settle(40);
+  checkContains("质量门页：t 停用", screenText(app), "当前值: 已停用 · 强制达标");
+  check("t 停用写回内存配置", app.config.isContentGateEnabled() === false, String(app.config.isContentGateEnabled()));
+
+  // 再按 t 恢复（确认是切换而非单向）
+  terminal.send("t");
+  await settle(40);
+  check("再按 t 恢复启用", app.config.isContentGateEnabled() === true);
+
+  // v：打开生成后自动校验
+  terminal.send("v");
+  await settle(40);
+  check("v 打开 verifyAfterGenerate", app.config.isVerifyAfterGenerate() === true, String(app.config.isVerifyAfterGenerate()));
+  checkContains("质量门页：自动校验随 v 更新", screenText(app), "生成后自动校验: 已启用");
+
+  // s：保存到 config.yaml（新增 quality 段）
+  terminal.send("s");
+  await settle(600);
+  checkContains("质量门页：s 保存后提示已保存", screenText(app), "配置已保存");
+  const yaml = await readFile(join(home, ".zread-pi", "config.yaml"), "utf-8");
+  checkContains("config.yaml 写入 quality 段", yaml, "quality:");
+  checkContains("config.yaml 写入 contentGate 段", yaml, "contentGate:");
+  checkContains("config.yaml 写入 mode: enforce", yaml, "mode: enforce");
+  checkContains("config.yaml 写入 verifyAfterGenerate: true", yaml, "verifyAfterGenerate: true");
+
+  // 返回配置首页：条目值跟随落盘配置
+  app.navigate("/config");
+  await settle(60);
+  checkContains("配置首页：内容质量门条目值", screenText(app), "已启用 · 强制达标");
+
+  app.exit();
+}
+
+// --- 用例 4j：模型大小覆盖页（/config/model-size：上下文窗口 / 最大输出覆盖）---
 {
   const { app, terminal } = createApp(["/config/model-size"]);
   await app.start();

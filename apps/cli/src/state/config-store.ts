@@ -9,7 +9,7 @@
  * 新增：per-provider 配置与自定义模型（同时配置多个 Provider）。
  */
 
-import type { AppConfig, BlueprintDetailLevel, CustomModelConfig, LlmProviderConfig, PolishMode } from "@zread-pi/types";
+import type { AppConfig, BlueprintDetailLevel, ContentGateMode, CustomModelConfig, LlmProviderConfig, PolishMode, QualityConfig } from "@zread-pi/types";
 import { DEFAULT_CONFIG, isFirstTimeConfig, loadConfig, saveConfig } from "@zread-pi/utils";
 
 export class ConfigStore {
@@ -131,6 +131,32 @@ export class ConfigStore {
   /** 由 /config/detail 维护：档位整体写回 */
   setBlueprintDetail(level: BlueprintDetailLevel): void {
     this.config.blueprint = { detail: level };
+  }
+
+  // ==================== 内容质量门（/config/quality） ====================
+
+  /** 内容门是否启用（旧配置缺省启用） */
+  isContentGateEnabled(): boolean {
+    return this.config.quality?.contentGate?.enabled ?? true;
+  }
+
+  /** 当前内容门模式（旧配置缺省 warn） */
+  getContentGateMode(): ContentGateMode {
+    return this.config.quality?.contentGate?.mode ?? "warn";
+  }
+
+  /** 生成完成后是否自动跑交付闸门（旧配置缺省 false） */
+  isVerifyAfterGenerate(): boolean {
+    return this.config.quality?.verifyAfterGenerate ?? false;
+  }
+
+  /** 由 /config/quality 维护：内容门开关 + 模式 + 自动校验整体写回 */
+  setQuality(enabled: boolean, mode: ContentGateMode, verifyAfterGenerate: boolean): void {
+    const quality: QualityConfig = {
+      contentGate: { enabled, mode },
+      verifyAfterGenerate,
+    };
+    this.config.quality = quality;
   }
 
   // ==================== 模型大小覆盖（/config/model-size） ====================

@@ -541,6 +541,12 @@ export interface ApplyTitlesResult {
 /**
  * 批量写回标题（标题阶段）：只改 title，slug/file/section 保持不变。
  * slug 不属于该分类时计入 unknown 并跳过（不允许跨分类改标题）。
+ *
+ * 字段不可变性（plan.md §3.5 审查修订）：本函数**只赋值 `page.title`**，
+ * slug / file / section / group / level / associatedFiles / topicSummary 结构性
+ * 不可能被改动——因此调用侧不需要、也无法做「除 title 外字段不变」的比对校验
+ * （`refine_section_titles` 工具入参只有 `{slug, title}[]`，也拿不到前后页面对象）。
+ * 真正有价值的机械检查在工具侧：数量一致性（`expectedSlugs`）。
  */
 export interface ApplyTitlesOptions {
   /** 写盘变体（档位子目录） */

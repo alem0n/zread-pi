@@ -40,6 +40,7 @@ import {
   buildStageEvent,
   buildSectionEvent,
   type RunLogWriter,
+  type ApplyTitlesResult,
 } from '@zread-pi/utils';
 import type { AppConfig, BlueprintDetailLevel } from '@zread-pi/types';
 import type { WikiPage, WikiSection, WikiTopic } from '@zread-pi/types';
@@ -849,7 +850,17 @@ export async function runTitlesStage(
       const section = target.section;
       const key = `titles:${section.title}`;
       const state = { succeeded: false, error: undefined as string | undefined };
-      const tool = trackOutputTool(createRefineSectionTitlesTool(section, { variant: context.variant }), state);
+      let applied: ApplyTitlesResult | undefined;
+      const tool = trackOutputTool(
+          createRefineSectionTitlesTool(section, {
+            variant: context.variant,
+            expectedSlugs: target.pages.map((page) => page.slug),
+            onResult: (result) => {
+              applied = result;
+            },
+          }),
+          state,
+        );
 
       emitStageEvent(context, 'titles', {
         type: 'requesting',
@@ -882,6 +893,14 @@ export async function runTitlesStage(
             error: state.error ?? '模型未调用 refine_section_titles',
           });
           titlesLogger.warn(`分类「${section.title}」失败，保留原标题：${state.error ?? '模型未调用工具'}`);
+        } else {
+          // 重写率统计（plan.md §3.5）：诊断信号触发后标题被改写的比例，用于验证诊断段是否起作用
+          const total = target.pages.length;
+          const rewritten = applied?.updated ?? 0;
+          const rate = total > 0 ? Math.round((rewritten / total) * 100) : 0;
+          titlesLogger.info(
+            `分类「${section.title}」标题重写率：${rewritten}/${total}（${rate}%，跳过 ${applied?.skipped ?? 0}，未知 ${applied?.unknown ?? 0}）`,
+          );
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

@@ -6,6 +6,7 @@ import { runConfig } from "./commands/config";
 import { runWiki } from "./commands/wiki";
 import { runBrowse } from "./commands/browse";
 import { runLogview } from "./commands/logview";
+import { runVerify } from "./commands/verify";
 import { runHistory } from "./commands/history";
 import { runVersionGuard } from "./commands/version-guard";
 import { zhCN } from "./i18n/translations/zh-CN";
@@ -91,6 +92,18 @@ program
   .action(async (runId: string | undefined) => {
     if (!applyTargetDir()) return;
     await runLogview(runId);
+  });
+
+// verify 命令：交付闸门（校验已生成的 Wiki）
+program
+  .command("verify")
+  .description(t.cli.verifyDesc)
+  .option("--detail <level>", t.cli.verifyDetailDesc)
+  .option("--enforce", t.cli.verifyEnforceDesc)
+  .action(async (options: { detail?: string; enforce?: boolean }) => {
+    if (!applyTargetDir()) return;
+    await runVersionGuard();
+    await runVerify({ detail: options.detail, enforce: options.enforce });
   });
 
 program.parse();

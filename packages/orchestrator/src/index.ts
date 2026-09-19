@@ -10,8 +10,55 @@ export { generateWikiCatalog } from './orchestrator.js'
 // Phase 2: Wiki Content Generation
 export { generateWikiContent } from './wiki/generate-wiki.js'
 // Phase 2b: 页面落盘后的兜底润色（polish.mode = 'full' 时启用）
-export { polishPageFile, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
+export { polishPageFile, checkPolishDiff, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
+export type { PolishDiffViolation } from './wiki/polish.js'
 export type { WikiResult, ProgressState, PageResult, PolishOutcome, GenerateWikiOptions, ArticleEventPayload } from './wiki/types.js'
+
+// 内容密度门（quality.contentGate）：把「页面是否干瘪」变成机械可判定的指标
+// 移植自 lecture-to-notes 的 verify_notes.py::density_gate（纯函数 + 常量表，
+// 拦截点在 tools/page-tools.ts，降级落盘在 wiki/generate-wiki.ts）
+export {
+  evaluateContentGate,
+  extractGateMetrics,
+  extractGateReport,
+  formatContentGateError,
+  resolveGateMode,
+  proseFloor,
+  mermaidRequiredFor,
+  codeRecommendedFor,
+} from './wiki/content-gate.js'
+export type { ContentGateMetrics, ContentGateReport } from './wiki/content-gate.js'
+
+// 交付闸门（quality.verifyAfterGenerate / `zread-pi verify`）：
+// 移植自 lecture-to-notes 的 verify_notes.py（检查组 + PASS/FAIL/SKIP + OVERALL）。
+// 只读：不写任何产物；verify.json 由 CLI / generate-wiki 集成按需落盘。
+export { verifyWiki } from './wiki/verify-wiki.js'
+export type {
+  VerifyReport,
+  VerifyCheck,
+  VerifyStatus,
+  VerifyGroup,
+  VerifyWikiOptions,
+} from './wiki/verify-wiki.js'
+
+// 溯源台账（claims ledger 的代码版，移植自 extract_claims.py 的两段式「提取 → 逐条 check」）：
+// 纯函数 + 只读；复用 repo-analyzer 已产出的缓存清单（last_manifest.json / last_symbols.json）。
+export {
+  parseSourceRefs,
+  collectKnownSymbols,
+  findUnresolvedSymbols,
+  collectManifestPaths,
+  isPathReal,
+  countLines,
+  checkAssociatedFiles,
+  checkTraceability,
+} from './wiki/traceability.js'
+export type {
+  SourceRef,
+  AssociatedFileIssue,
+  TraceabilityInput,
+  TraceabilityResult,
+} from './wiki/traceability.js'
 
 // Phase 3: Wiki Sync
 // 三阶段增量修补：diff → （按需）分类合并 → 按变更 section 分主题 / 标题；SyncDiff 语义与旧实现一致
@@ -40,6 +87,23 @@ export {
   buildPolishTaskPrompt,
 } from './agents/style-discipline.js'
 export type { StyleLanguage } from './agents/style-discipline.js'
+
+// 页面格式契约（frontmatter / 标题层级 / Mermaid 引号 / 溯源格式 / 交付前自检清单）：
+// 从 page-agent.ts 抽出的硬性约束，与语气正交（见 MIGRATION.md §32.1）。
+export { getPageFormat, formatPageFormat, withPageFormat } from './agents/page-format.js'
+export type { FormatLanguage } from './agents/page-format.js'
+export { PAGE_FORMAT_TAG } from './agents/page-format.js'
+
+// 读者优先纪律（reader-first）：「教会了读者」，与 humanizer 正交、拼在其之后
+// （见 MIGRATION.md §32.2）。
+export {
+  getReaderDiscipline,
+  formatReaderDiscipline,
+  withReaderDiscipline,
+  READER_SELF_CHECK,
+} from './agents/reader-first.js'
+export type { ReaderLanguage } from './agents/reader-first.js'
+export { READER_FIRST_TAG } from './agents/reader-first.js'
 
 // 蓝图细节档位（blueprint.detail）：数量区间 / 数量反馈 / 归并策略 / 缩编与代码兜底
 // 纯函数（数量控制四层机制的第 1、2、4 层；第 3 层缩编 subagent 在 blueprint-stages.ts）

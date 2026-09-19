@@ -2346,3 +2346,485 @@ pi-ai 的 `getSupportedThinkingLevels(model)` 对这两档要求模型在
 - config.yaml 落盘 → `loadConfig` 读回的往返实测保留 `{ xhigh: null, max: 'max' }`
   三态。
 
+---
+
+## 29. 页面内容密度门（quality.contentGate，v1.14.0）
+
+### 背景
+
+迁移自 lecture-to-notes 的「输出约束与优化方法论」（详见 `plan.md`）。
+lecture-to-notes 有一个 `verify_notes.py::density_gate`——在交付前机械地判定
+笔记是不是「干瘪的 TL;DR」（中文字数 / 图 / 框 / 节 / 公式配额）。
+zread-pi 只有**结构数量**门（`blueprint.detail` 的 section / topic 篇数），
+**没有任何内容密度度量**：一篇页面是否只写了三行交代，完全无度量、无拦截。
+
+这是最大的质量缺口：页面 Agent 可以在 token 预算内交出一篇
+「`# 标题` + 一句话 + `Sources:`」的页面，`write_page` 照样落盘计成功。
+
+### 改动（P0-1，§3.1）
+
+落点 `packages/orchestrator/src/wiki/content-gate.ts`（纯函数 + 常量表，
+对齐 `blueprint-detail.ts` 的组织方式；副作用仍在工具层 / 编排层）：
+
+- **度量指标**（全部纯文本可判定，零外部依赖）：`proseChars`
+（剥离 frontmatter / 代码块 / Mermaid / `Sources:` 行 / 表格后的可见散文字符）、
+`headings` / `headingLevels`（跳级检测）、`mermaidBlocks`、`codeBlocks`、
+`sourceNotes`、`repeatOpenings`（连续 ≥3 段同前缀词）。
+- **下限表** `CONTENT_GATE_SPECS`：散文下限 = `base（Beginner 1200 /
+Intermediate 1800 / Advanced 2400）+ perFile 200 × min(关联文件数, 8)`，
+上限 `proseMax = base + 8 × perFile`（让上限实际可触发）。
+- **mermaid 是否必需**由 section 角色（`概览` / `overview` / `快速开始` /
+`核心架构`）或 minimal 档的 panorama 要求派生（`mermaidRequiredFor`），
+**与难度等级正交**——不挂在 level 表上。
+- **拦截点**：`write_page.call` 在 Mermaid 校验**之后**追加内容门，
+`mode=enforce` 未通过时返回同样的 `is_error` 结构，错误文案带
+「当前 N / 下限 M」常驻反馈（对齐 `formatQuantityFeedback` 的风格）让模型重写；
+`warn` 只把报告塞进结果 JSON（不拦截）。
+- **降级链**（适配 zread-pi「生成永不悬挂」哲学，见 §5.1）：
+  - `writeDegradedPage()` 在页面失败分支（文件不存在 + 有被门拦截的有效正文）时，
+    把最近一次被拦截的内容写入约定路径，末尾追加 `<!-- gate: <失败明细> -->` 注释，
+    `PageResult.gate.mode = 'enforce-degraded'`，**页面计为成功 + 质量告警**。
+  - 关键修复：harness 在 token 预算耗尽时**抛错**（`error_budget_exhausted`），
+    原先的降级逻辑放在 `try` 块里根本不会执行。重构后把「成功收尾」
+    （润色 + 计成功 + 事件 + runLog）抽成 `finishPageSuccess()`，
+    `catch` 块里也尝试一次降级落盘——只有降级成功才转计成功，否则走原失败路径。
+  - 无缓存正文（模型从未调 `write_page`）时仍走原失败路径——
+    那属于「未产出」，不是「门判死」。
+- **反注水**（§4）：门限是下限不是目标——错误文案明确要求
+  「不要同义改写注水、不要为凑图表而加图」；代码块是**软建议**
+（`advisories`，不影响 `passed`）：源里没有可写代码时正确答案是 0，
+  不能机械地判失败。
+- **配置**：`AppConfig.quality: { contentGate: { enabled, mode }, verifyAfterGenerate }`
+（缺省 `true` / `warn` / `false`，`normalizeQualityConfig` 保证旧配置零变化）；
+CLI 新增 `/config/quality`（模式切换 + `t` 开关 + `v` 自动校验 + `s` 保存）。
+- **UI 可见性**：`PageStatus.gate` + `CatalogEvent` / `ArticleEventPayload`
+的 `gate` 字段把报告带到生成页；完成行右侧追加 `⚠ 密度门未达标` /
+`⚠ 密度门降级落盘` 标记（黄色，不改变成功 / 失败的颜色语义）。
+
+### 行为差异
+
+- 旧行为：任何长度的页面都计成功。
+- 新行为：
+  - `warn`（缺省）：照常落盘，但完成行带 ⚠ 标记 + `PageResult.gate` 记录未达标项。
+  - `enforce`：未达标返回 `is_error`，模型在 token 预算内重写；
+    预算用尽后 best-effort 落盘（`gate.mode = enforce-degraded`），仍计成功。
+  - `off`（`enabled: false` 或 mode 显式 `off`）：完全跳过，与改动前一致。
+- 与 lecture-to-notes 的**有意偏差**：那边是 `OVERALL FAIL 就不许交付`（强阻断），
+  zread-pi 的哲学是「生成永不悬挂」——门判死也必须把产物交到用户手里，
+  质量告警随 `gate` 字段透出，由用户决定是否重生成。
+
+### 兼容性
+
+- 纯新增可选字段：`AppConfig.quality` / `PageResult.gate` /
+`PageStatus.gate` / 事件载荷的 `gate` 全部可选；旧 config.yaml 无 `quality` 段
+  时 normalizer 补全为缺省值（已实测：缺省 `enabled=true` + `mode=warn` +
+  `verifyAfterGenerate=false`；非法值回退缺省）。
+- `createWritePageTool` 的参数从 `BlueprintDetailLevel` 放宽为
+`WritePageToolOptions | BlueprintDetailLevel`（旧调用点零改动）。
+- 工具名 / schema / 提示文本**未改**（`write_page` 行为不变，只是多了一道校验）。
+
+### 验证（实际执行结果）
+
+- `bun run test:pages`：24（e2e 页面生成）+ 7（落盘兜底）+ 16（polish）
+  + **75（内容密度门：度量 / 下限表 / enforce 拦截 / warn 报告 / 反注水 /
+  配置归一化）** + **8（enforce 降级落盘端到端）** 全绿。
+- `bun run test:catalog`：52 → **57**（+5：`quality` 归一化往返——
+  缺省值补全、合法值保留、非法值回退）。
+- `bun run test:tui`：291 → **313**（+22：`/config/quality` 页面渲染 /
+  模式切换 / `t` 开关 / `v` 自动校验 / `s` 保存落盘；
+  生成页门标记的事件映射 +5 在 mapper 单测里，42 项全绿）。
+- `bun run mock:wiki`：`completed=5 failed=0`（缺省 warn 不阻断、不破坏既有链路）。
+- `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+
+---
+
+## 30. 交付闸门 verify-wiki（v1.15.0）
+
+### 背景
+
+迁移自 lecture-to-notes 的 `scripts/verify_notes.py`（详见 `plan.md` §3.2）。
+那是一条「一站式交付闸门」：`density / artifacts / layout / log / figures /
+provenance` 逐条输出 `PASS`/`FAIL`/`SKIP`，末尾 `OVERALL PASS`/`OVERALL FAIL`，
+退出码随之。zread-pi **没有任何统一质量出口**——判定散在 `generate-wiki` 的
+`fileExists` + 路径救援 + 内容门里，用户无法在生成后跑一条命令问「这次达标了吗」。
+
+### 改动（P0-2）
+
+落点 `packages/orchestrator/src/wiki/verify-wiki.ts`（纯逻辑、**只读**）+
+CLI 子命令 `zread-pi verify`（`apps/cli/src/commands/verify.ts`）。
+
+- **结构对齐** `verify_notes.py`：`Report` 收集器 + `emit(status, group, message, details)`，
+  逐条 `PASS`/`FAIL`/`SKIP`，`OVERALL` 由「任一 FAIL 即 false；SKIP 不影响」决定，
+  CLI 退出码随之（0 / 1）。
+- **五个检查组**：
+  - `structure`：`loadWikiBlueprint` 可加载、pages 非空、每页 `file` 真实存在、
+    `(section, file)` 不重复、sections 与 pages 的分类集合双向一致。
+  - `content`：逐页跑 §29 的 `evaluateContentGate`；`--enforce` 时未达标计 FAIL，
+    否则**只列出**（状态 PASS + details，不影响 OVERALL）。
+  - `mermaid`：复用 `validateMermaidContent`（与 `write_page` 拦截同一套）。
+  - `frontmatter`：每页含 `title:` / `slug:` 且与 wiki.json 一致。
+  - `traceability`：解析 `Sources:` 行的 `](path#Lx-Ly)`——路径真实（磁盘存在） /
+    行号区间落在文件长度内（流式按行计数，不全量缓冲）/ 跨页重复声明（WARN，
+    只列出供人工裁决，不 FAIL）。外部链接与纯锚点排除。
+- **变体解析含遗留目录**：先 `resolveWikiVariant(detail, wikiRoot)`；
+  命中则以显式 path 调 `loadWikiBlueprint`（path 优先于 variant 必填参数）；
+  返回 undefined 时显式 fallback 读遗留目录 `.zread-pi/wiki/wiki.json`；
+  都不存在 → 整体 SKIP、退出码 0（无产物可验，不报 FAIL）。
+- **生成后自动校验**：`quality.verifyAfterGenerate`（缺省 false）打开时，
+  `generateWikiContent` 完成后跑一次闸门，摘要落成 `<runDir>/verify.json`。
+  **不改动 `RunMeta`**（run.json 是固定字段结构，见 plan.md §3.2 的审查修订）——
+  trajectory replay 无感知；校验失败不判生成失败（闸门是事后体检，不是交付前置）。
+
+### 行为差异
+
+- 旧行为：无任何「生成后体检」手段。
+- 新行为：`zread-pi verify [-d <dir>] [--detail <档位>] [--enforce]` 输出
+  逐行检查 + `OVERALL PASS/FAIL`，退出码 0 / 1（CI 可直接判定）；
+  `verifyAfterGenerate=true` 时自动落 `verify.json`。
+- 与 lecture-to-notes 的**有意偏差**：那边 `OVERALL FAIL` 就不许交付（强阻断）；
+  zread-pi 的产物**已经落盘**，闸门是事后体检——`FAIL` 只反映质量、不回滚产物，
+  且校验本身失败不影响生成结果（生成永不悬挂）。
+- `content` 组默认不记 FAIL（`--enforce` 才计），避免密度门把日常的
+  「我故意要一篇精简页面」场景判成失败。
+
+### 兼容性
+
+- 纯新增：`verify-wiki.ts` 只读，不改动任何既有产物 / 契约 / 工具。
+- `quality.verifyAfterGenerate` 是既有字段（§29 引入，缺省 false），
+  此前未接线；现在接上后旧配置行为不变（缺省不自动跑）。
+- `RunMeta` 不变；`verify.json` 是 run 目录下的独立文件。
+- CLI 输出走 stdout 接管（`output-guard`，与 `history` 命令同一套），
+  检查行可被脚本按 `<STATUS> <group> <message>` 解析。
+
+### 验证（实际执行结果）
+
+- `bun run test:verify`（新增套件）：**54/54**——`parseSourceRefs` 纯函数 /
+  五组全绿 / structure 三类失败 / content 的 enforce 与非 enforce 语义 /
+  mermaid 失败 / frontmatter 缺失与不一致 / traceability 路径与行号失败 /
+  跨页重复只 WARN / 遗留目录回退 / 无产物 SKIP / 骨架 SKIP / 档位解析 /
+  `verifyAfterGenerate` → `verify.json` 落盘且 `run.json` 契约不变。
+- 真机 CLI（`bun run cli verify --dir fixtures/hello-python`，mock:wiki 产物）：
+  structure / mermaid / frontmatter 全绿；content 列出 5 页未达标（非 enforce）；
+  traceability FAIL（mock LLM 不产 Sources 行）；`--enforce` 使 content 转 FAIL；
+  空目录 SKIP + 退出码 0；`--help` 文案正确。
+- `bun run test`：全量套件绿（含新 `test:verify`）；`bun run typecheck` 0 错误。
+
+---
+
+## 31. 溯源台账（P1-1，v1.16.0）
+
+### 背景
+
+迁移自 lecture-to-notes 的 `scripts/extract_claims.py`（详见 `plan.md` §3.3 / §5.5）。
+那是一条「脚本决定源里有什么，不由模型决定」的两段式管线——
+**先提取**（页面声称的全部事实）**再逐条 check**（对照源码事实）。
+
+v1.15.0 的 `verify-wiki` 只做了溯源的**路径 / 行号**层（verify-wiki 内联实现）。
+本步把它抽成独立模块并补上**符号层**，同时复活旧版 `validate_blueprint` 的存在性判定。
+
+### 改动
+
+落点 `packages/orchestrator/src/wiki/traceability.ts`（纯函数 + 只读）。
+
+| 函数 | 作用 |
+| --- | --- |
+| `parseSourceRefs` | 从 `Sources:` 行解析全部引用（`[名](path)` / `[名](path#Lx-Ly)`）；
+外链 / 邮箱 / 纯锚点排除（不是仓库内溯源）。**从 verify-wiki 迁入，旧导入路径保留** |
+| `collectKnownSymbols` | 由 `last_symbols.json` 构造已知符号集合（exports / functions / imports） |
+| `findUnresolvedSymbols` | 正文行内代码引用了、但符号缓存里不存在的标识符（**WARN**）；
+先剥离围栏代码块，避免把代码示例当成溯源引用；过短名 / 非标识符不报；上报有上限 |
+| `collectManifestPaths` / `isPathReal` | 路径台账：manifest 命中**或**磁盘存在（并集，避免对非源文件假 FAIL） |
+| `countLines` | 流式按行计数（不全量缓冲；只对被引用的文件执行） |
+| `checkAssociatedFiles` | 蓝图维度：每页 `associatedFiles` 真实存在（**复活旧版 `validate_blueprint`**） |
+| `checkTraceability` | 汇总：两段式提取 → 逐条 check，返回 `badPaths`（FAIL）/ `badLines`（FAIL）/
+`duplicateClaims`（WARN）/ `unresolvedSymbols`（WARN）/ `symbolsUnavailable` |
+
+### verify-wiki 的检查组变化
+
+- `structure` 组**新增**一项：`associatedFiles` 存在性（蓝图声明）。
+- `traceability` 组从 3 项变 4 项：路径 / 行号 / 跨页重复 / **符号可溯**。
+  符号检查与 `Sources:` **正交**——即使页面没有 Sources（`noSources` FAIL）也照跑，
+  因为符号幻觉与溯源声明是两类独立问题。
+- 缓存读取并行：`loadCachedManifest()` + `loadCachedSymbols()`。
+- **符号缓存缺失 → SKIP**（没有台账就无据可判，不报 FAIL；
+  mock:wiki 流程不产 `last_symbols.json`，故夹具产物恒 SKIP，真机生成有缓存）。
+
+### 行为差异
+
+- 旧行为：溯源只查「路径在不在 / 行号越不越界」。
+- 新行为：多一层**符号可溯**（WARN）——页面正文里 `` `computeMysteryResult` `` 
+  这类幻觉函数名会被列出来供人工确认；蓝图声明的 `associatedFiles` 
+  指向不存在的路径直接 FAIL（此前完全不查）。
+- 符号层**只 WARN 不 FAIL**：匹配不到可能是幻觉、也可能是缓存过期或引用的是
+  文档 / 工具名（`write_page` 之类），语义上不足以直接判失败。
+
+### 兼容性
+
+- 纯新增：`traceability.ts` 只读，不写任何产物。
+- `parseSourceRefs` 从 verify-wiki 迁到 traceability，**旧导入路径保留**
+  （`verify-wiki.ts` re-export），测试与外部调用点零改动。
+- `ValidateBlueprintTool`（旧版一次性蓝图工具）标记为**仅归档**（与
+  `generate_blueprint` 同策略：当前流程不使用，提示词与测试均不引用），
+  存在性判定迁移到 `checkAssociatedFiles`。
+- 缓存文件（`last_manifest.json` / `last_symbols.json`）由 repo-analyzer 
+  在扫描期产出，本步**零额外解析成本**（只读）。
+
+### 验证（实际执行结果）
+
+- `bun run test:traceability`（新套件）：**37/37**——符号集合构造 / 幻觉识别 /
+围栏剥离 / 噪声过滤 / 上限保护；manifest 路径归一化与磁盘兜底；流式行计数
+（含空文件与不存在文件）；`checkAssociatedFiles`；`checkTraceability` 端到端
+（badPaths / badLines 带总行数 / 反转区间 / 单行 `#L2` / 跨页重复 / noSources /
+符号维度 / 外链锚点排除）。
+- `bun run test:verify`：**54/54**（既有断言全绿；structure 组多 1 项 associatedFiles，
+  traceability 组多 1 项符号检查——夹具无符号缓存时 SKIP）。
+- 真机 CLI（为夹具写入合成符号缓存后）：符号全绿 → PASS；
+  在页面里加入幻觉函数 `computeMysteryResult` →
+  `1 个行内代码标识符未在符号缓存中找到（WARN，供人工确认）` 且只列幻觉项
+  （`add` 正确忽略）；无缓存 → `SKIP`。
+- `bun run test`：全量套件绿（含新 `test:traceability`）；`bun run typecheck` 0 错误。
+
+---
+
+## 32. 页面格式资产化 + reader-first 纪律（P1-2，v1.17.0）
+
+### 背景
+
+plan.md §3.4。三件事：
+
+1. **页面格式规范资产化**：`page-agent.ts` 里与叙述语气无关的硬性格式契约
+   （frontmatter / 标题层级 / Mermaid 引号 / `Sources:` 格式 / 交付前自检清单）
+   散在提示词正文里，改格式要翻整段 prompt；抽成独立 `.md` 资产后可单独维护。
+2. **reader-first 教学型写作纪律**：humanizer 只管「像人写的」（反 AI 腔），
+   但「教会了读者」是另一件事——补一块正交纪律。
+3. **polish 层扩展**：`polish.mode=full` 时做一次「教学型」结构化自检；
+   回滚保护从「只查 Mermaid 语法」升级为「只许改散文」的三项 diff 断言。
+
+### 改动
+
+#### 32.1 页面格式契约（§3.4.1）
+
+| 落点 | 内容 |
+| --- | --- |
+| `prompts/page-format.zh.md` / `.en.md` | 硬性格式契约：frontmatter 由 `write_page` 注入（不得手写）/
+标题层级（唯一 H1 / 不跳级 / 源码导航节标题固定）/ Mermaid 引号规则 /
+`Sources:` 溯源格式 / **交付前自检清单 8 条**（对齐 lecture-to-notes
+`notes-prompt.md` 的清单形态，语境改为代码 wiki） |
+| `agents/page-format.ts` | `getPageFormat` / `formatPageFormat` / `withPageFormat` / `PAGE_FORMAT_TAG`，
+形状对齐 `style-discipline.ts`（语言选择 `en` 之外一律中文；始终注入，
+不受 `polish.enabled` 影响——格式是硬约束） |
+| `prompts/page-agent.ts` | **抽出** Mermaid 引号三条与「绝对纪律：精准溯源」整段（改为指向格式契约的一句话）；
+叙述语气与结构要求**逐字保留** |
+| `wiki/generate-wiki.ts` | `buildPagePrompt(page, spec, variant, language)` 新增 `language` 参数，
+`withPageFormat()` 拼在页面提示词之后、任务元数据之前（格式契约靠前）；
+`generatePages` 内部解析 `options.language ?? config.doc_language` |
+
+#### 32.2 reader-first 纪律（§3.4.2）
+
+| 落点 | 内容 |
+| --- | --- |
+| `prompts/reader-first.zh.md` / `.en.md` | 移植自 lecture-to-notes `references/reader-first-writing.md`，
+**保留原措辞与编号**的 8 节 + 最终清单，改写为「代码 wiki」语境：
+保护源码事实（不把实现写成设计意图）/ 论证地图（开头回答「读完后能解释什么」）/
+段落单一职责 / 证据四问（**接口签名 / 调用方 / 触发条件 / 边界与失败模式**）/
+章节开合（「读者现在能做什么 / 下一步看哪页」收尾）/ 禁用词与 ~90 字长句复审信号 /
+七遍修订压缩为单遍结构化自检 |
+| `agents/reader-first.ts` | `getReaderDiscipline` / `formatReaderDiscipline` / `withReaderDiscipline` /
+`READER_FIRST_TAG` / `READER_SELF_CHECK`（第 8 节压缩版，供 polish Agent） |
+| `agents/create-agent.ts` | `withReaderDiscipline(...)` 拼在 `withStyleDiscipline(...)` **之后**，
+共用 `polish.enabled` 开关（纪律是同一层预防机制） |
+
+与 humanizer 的分工（重要决策）：humanizer = 反 AI 腔；reader-first = 教会读者。
+两者正交，reader-first 拼在后面。禁用词表与 humanizer 的 25 条模式
+去重后只保留差异部分（「值得注意的是」等已在 humanizer，reader-first 保留
+「以当前代码为准」这类**事实边界**措辞）。
+
+#### 32.3 polish 层扩展（§3.4.3）
+
+- `buildPolishSystemPrompt()` = humanizer 纪律全文 + `READER_SELF_CHECK` +
+  Embedded mode（顺序：纪律 → 自检 → 输出约定）。
+- `polish.ts` 新增纯函数 `checkPolishDiff(original, current)`：**只许改散文**——
+  frontmatter 块 / 全部 `Sources:` 行 / 全部 Mermaid 代码块**逐字不变**，
+  任一被改动返回 `PolishDiffViolation`（kind = frontmatter / sources / mermaid）。
+- 回滚语义升级：原「改坏 Mermaid 语法才回滚」→「越界即回滚」；
+  reason 新增 `structure-rollback`（Mermaid 越界仍记 `mermaid-rollback`，
+  保持旧调用点文案不变）；Mermaid 越界时额外附 `validateMermaidContent` 的语法详情。
+
+### 行为差异
+
+- 页面提示词：格式契约从「散在正文」变为「独立 `<page_format>` 块」，
+  并新增 8 → **11** 条交付前自检清单（第 9–11 条为 §4 反注水补充，见 32.4）；
+  既有叙述 / 结构 / 语气要求逐字保留。
+- 页面 Agent 系统提示：humanizer 块之后多一个 `<reader_first>` 块
+  （`polish.enabled=false` 时两者都不注入）。
+- polish：`mode=full` 时多一次「教学型」结构化自检；改 frontmatter / `Sources:` /
+  Mermaid 块都会被回滚（此前只有改坏 Mermaid 语法才回滚）。
+
+### 兼容性
+
+- `GenerateWikiOptions` 新增**可选** `language`（缺省 = `config.doc_language`）；
+  `buildPagePrompt` 新增可选第 4 参数（旧调用点零改动，但本仓库内调用点已全部传入）。
+- `PolishOutcome.reason` 新增 `structure-rollback`（联合类型扩展，旧匹配仍成立）。
+- 旧配置零影响：`doc_language` 是既有必填字段；`polish.*` 缺省值不变。
+- 工具名 / schema / 提示词里的**工具调用指令**（`write_page` 参数要求、输出路径规范）
+  全部保留在 `buildPagePrompt` 末尾未动。
+- `tsup-md-text` 插件按 `.md` 后缀全局接管，新增资产无需改构建配置；
+  `md.d.ts` 的 `*.md` 声明同样覆盖。
+
+### 验证（实际执行结果）
+
+- `bun run test:page-format`（新套件）：**40/40**——两语言资产节数（6）/
+  列表项 / 清单条数（11）一一对应；语言选择与回退；注入块标签与开关；
+  reader-first 拼在 humanizer 之后；`buildPagePrompt` 含格式契约且保留既有段落
+  （`en` 选英文契约、块只注入一次）；polish 系统提示 = 纪律 + 自检 + Embedded mode
+  且顺序正确；**§4 反注水三条在 zh/en 双语都存在**（同义改写注水 /
+  不复制 README·AGENTS.md / 「源没有就应该是 0」口径）。
+- `bun run test:pages`：page-polish **16 → 24**（+8：`checkPolishDiff` 纯函数——
+  只改散文安全 / 改 frontmatter / 改 Sources 行号 / 删 Sources 行 / 改 Mermaid 节点 /
+  改块外散文安全 / 多项越界全部列出 / 完全相同）；既有 Mermaid 回滚端到端仍绿。
+- `bun run mock:wiki`：`completed=5 failed=0`，且**生成后自动跑交付闸门**
+  （`overall=PASS`，结构类检查全绿，content 组按 §6 口径只列出）。
+- `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+
+#### 32.4 补齐：§4 反注水清单 + §5.5 一致性校验（plan 复执行，v1.18.1）
+
+对 plan.md 逐条复执行时发现两项未严格落地，本次补齐：
+
+**(1) §4 反注水清单不完整**——plan §4 明令「禁止清单写进 `page-format.*.md`
+的自检清单」，此前只落地了「口号式收尾」一条。补齐 zh / en 各 3 条（清单 8 → 11，
+编号一一对应）：
+- 同义改写注水（同一论断换词重复、同一段意思拆成两段讲）
+- 为凑图表而加图 / 为凑字数而堆术语表；不把 README / AGENTS.md / CHANGELOG
+  整段复制当散文（项目说明已由 `<project_context>` 自动注入）
+- **§4.2「源没有就应该是 0」**：新增「代码块」节——关联文件没有可写代码
+  （纯配置 / 纯类型 / 纯 Markdown）时代码块正确答案是 **0**，强行加等于编造源码；
+  Mermaid 同理（不涉及拓扑时为 0，`minimal` 档 panorama 是唯一例外）
+
+**(2) §5.5 一致性校验未落地**（【用户新增约束】的强制项）——plan 要求「门限算式与
+正则用**同一输入**在 Python 参考实现与 TS 实现上跑黄金值对照」，此前测试里的
+「黄金值」是手算的，未真正跑 Python 源。本次落地：
+- `tools/golden-parity-gen.py`：`import` 源仓库的 `verify_notes.CJK` /
+  `extract_claims.numbers_in` / `flatten_tex`，在 6 个固定样本上产出黄金值
+  （可复现：`python3 tools/golden-parity-gen.py`）
+- `content-gate.ts` 导出 `countCjkChars`（逐字移植 `[一-鿿]` = U+4E00..U+9FFF）
+  与 `numbersIn`（`\d+(?:[.,]\d+)*`）
+- `test/golden-parity.ts`：**15/15**——6 样本 CJK 计数对照 + 数字台账口径
+  （千分位 / 小数点续接）+ 区间端点边界语义（U+4E00 / U+9FFF 计入，
+  全角空格与全角逗号不计入，空串 = 0）
+- **对照抓出一个真实 bug**：CJK 正则最初写成 `/[\u4e00-\u9fff]/gu`，
+  `String.prototype.test` 在带 `g` 标志时是有状态的（`lastIndex` 前进），
+  在 `filter` 里逐字符调用会交替跳过，计数直接腰斩（8 字符只数出 4）。
+  去掉 `g` 标志后与 Python 完全一致。这正是黄金值对照该防的漂移。
+- 有意偏差（不在对照范围，已在 §29 / §0.2 声明）：Python 的 CJK 门基于视频时长，
+  zread-pi 基于 level + 关联文件规模；Python 在 LaTeX 上计数，zread-pi 在
+  Markdown 上剥离围栏后计数。本测试只对照**字符级正则语义**（哪些字符算 CJK /
+  哪些串算数字），这是「判定逻辑」本身。
+- 新增 `test:golden-parity` 脚本，并入 `test:blueprint` 与 test 主链。
+
+**(3) §6 的 mock 产物核对自动化**——plan 要求「`mock:wiki` 后跑 `zread-pi verify`，
+只断言结构类检查全绿」，此前是手工执行。`mock-wiki-run.ts` 生成后自动调
+`verifyWiki`：mock 页面内容补 `Sources:` 溯源行（指向夹具真实文件，行号区间按
+文件实际行数取前 1/2），traceability 组从「无 Sources → FAIL」变为路径真实 /
+行号有效 / 跨页重复全绿，`overall=PASS`；content 组按口径只列出不阻断。
+
+**(4) 三个文件补溯源文件头**（§5.5 强制）：`prompts/page-format.zh.md` /
+`.en.md` / `agents/page-format.ts` 此前缺头部来源注释，已补（源为
+`notes-prompt.md`，注明复制的四段 + 语境词替换 + 同步对象）。
+
+---
+
+## 33. 标题诊断信号与只改标题自检（P2，v1.18.0）
+
+### 背景
+
+plan.md §3.5（迁移的**最后一段**）。把 lecture-to-notes
+`structure-reorder.md` 的诊断信号表移植到 `refine_section_titles`。
+
+标题阶段此前只规定「≤20 字 / 产品架构视角 / 不改含义」，**没有诊断信号**——
+模型不会主动发现「这串标题其实层级错了」（母题被拆散 / 带编号 / 带续接词）。
+工具侧也只有 `applySectionTitles` 的 `unknown` 计数，缺一条「页数必须一致」的硬检查。
+
+### 改动
+
+#### 33.1 提示词追加诊断段
+
+`prompts/titles.ts` 新增「诊断信号：哪些迹象说明标题层级坏了」段，对齐
+`structure-reorder.md` §2.1 的 7 条（语境从「一篇笔记的 H1 骨架」改为
+「一个分类下的页面标题」）：
+
+| # | 迹象 |
+| - | --- |
+| 1 | 标题带**子层级编号**（「2.3 注意力」「B2 编码器」） |
+| 2 | 标题带**续接词**（「（续）」「再谈…」「…的其余部分」「…补充」） |
+| 3 | **相邻多个标题语义上同属一个母题** |
+| 4 | 各标题**字数量级悬殊**（最短不足最长 1/5） |
+| 5 | 标题是**具体技术点**而非主题块（「Softmax 的温度系数」） |
+| 6 | 同一个母题名词在**多个标题里反复出现** |
+| 7 | 标题**命名风格不统一** |
+
+并带上 `structure-reorder.md` 的两条策略：**优先收敛合并、少拆分**；
+没有母题时保持原样、不硬造。诊断结果只允许通过「改写标题」落地——
+**不得新增、删除、调换页面**，不得改 slug/file/associatedFiles/group/level。
+
+#### 33.2 工具侧两项机械检查
+
+`createRefineSectionTitlesTool(section, options)` 新增两个**可选**字段：
+
+- `expectedSlugs?: string[]` —— **数量一致性自检**：在落盘**之前**校验，
+  模型交出陌生 slug 或漏掉本分类页面时直接 `is_error` + 列出具体差异，
+  **不落盘**（对齐 `structure-reorder.md` §6 的「页数不变」那条）。
+  由阶段驱动器传入 `target.pages.map(p => p.slug)`。
+- `onResult?: (result: ApplyTitlesResult) => void` —— **重写率统计**回调，
+  阶段驱动器用它记 `titles` 命名 logger：
+  `分类「X」标题重写率：updated/total（rate%，跳过 N，未知 M）`，
+  用于验证诊断段是否真的促使模型改写标题。
+
+#### 33.3 字段不可变性（审查修订）
+
+原设想的「校验除 title 外其他字段字节不变」是**伪检查**：
+`applySectionTitles` 实现里**只赋值 `page.title`**，slug / file / section /
+group / level / associatedFiles / topicSummary 结构性不可能被改动；
+且 `refine_section_titles` 工具入参只有 `{slug, title}[]`，拿不到前后页面对象。
+因此把不可变性写成 `applySectionTitles` 的**实现注释**（`wiki-content.ts`），
+真正有价值的机械检查放在工具侧（§33.2）。
+
+### 行为差异
+
+- 标题阶段提示词多一段诊断信号（7 条 + 收敛优先策略）。
+- 模型若漏页或交出陌生 slug：此前照常落盘（漏的页保留原标题，陌生的被 `unknown` 跳过）；
+  现在**整体拒绝并要求重提**（is_error + 具体差异，不落盘）。标题阶段失败语义
+  不变——仍不判页失败、保留原标题（`refine_section_titles` 的 `forwardErrors: false`）。
+- 新增一条重写率日志（info 级，`titles` 命名 logger）。
+
+### 兼容性
+
+- `expectedSlugs` / `onResult` 都是**新增可选**字段：不传时行为与迁移前一致
+  （数量自检跳过，由 `applySectionTitles` 自身的 `unknown/skipped` 兜底）。
+- 提示词追加段落，既有 8 条输出规范**逐字保留**；工具名 / schema / 描述未改。
+- `ApplyTitlesResult` 是既有的导出类型，工具侧新增 `import type`。
+
+### 验证（实际执行结果）
+
+- `test:blueprint` 新增 `titles-diagnostic.ts`：**28/28**——提示词含 7 条信号与策略；
+  陌生 slug / 漏 slug → `is_error` 且**不落盘**（标题未变）；正确提交 → 落盘 +
+  slug/file/section/associatedFiles 逐字不变 + `onResult` 带 updated=2/skipped=1/unknown=0；
+  `expectedSlugs` 缺省时跳过数量自检（旧调用点兼容）。
+- 真机链路（`e2e-blueprint.ts` + 真实捕获日志）：标题阶段正常落盘，
+  重写率日志按分类输出（如 `分类「Overview」标题重写率：3/3（100%，跳过 0，未知 0）`）。
+- `bun run mock:wiki`：`completed=5 failed=0`（low 档位跳过标题精修，链路不破）。
+- `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+
+---
+
+## 迁移完成度
+
+`plan.md` 的五个阶段全部落地：
+
+| 阶段 | 内容 | 版本 |
+| --- | --- | --- |
+| P0-1 | §3.1 内容密度门（度量 / 拦截 / enforce 降级落盘 / 配置界面 / 生成页 ⚠ 标记） | v1.14.0 |
+| P0-2 | §3.2 verify-wiki 交付闸门（五组检查 + CLI 子命令 + verify.json） | v1.15.0 |
+| P1-1 | §3.3 溯源台账（符号可溯 WARN / associatedFiles FAIL / 跨页重复） | v1.16.0 |
+| P1-2 | §3.4 页面格式资产 + reader-first 纪律 + polish 只许改散文 | v1.17.0 |
+| P2 | §3.5 标题诊断信号 + 数量一致性自检 + 重写率统计 | v1.18.0 |
+

@@ -26,7 +26,7 @@ import {
   slotUsageTotal,
   toUsageTotals,
 } from "./usage";
-import type { CatalogAgentState, TokenUsage, WikiPage } from "./types";
+import type { CatalogAgentState, PageStatus, TokenUsage, WikiPage } from "./types";
 
 type ArticleItem = { value: string; page: WikiPage };
 
@@ -455,6 +455,9 @@ export default class WikiGeneratePage extends Screen {
       durationMs: pageState?.durationMs,
     });
 
+    // 内容门标记：页面已完成但低于密度下限（warn 只报告；enforce-degraded 已降级落盘）
+    const gateMarker = this.gateMarker(pageState?.gate);
+
     // 重试状态使用特殊逻辑（带倒计时）
     if (isRetrying) {
       const seconds = this.retrySeconds(page.slug, delayMs);
@@ -467,10 +470,20 @@ export default class WikiGeneratePage extends Screen {
       return statusRow(width, left, style(countdownText, { color: rightColor }));
     }
 
-    // 普通状态
-    const rightText = `[${statusText}]` + suffix;
+    // 普通状态（内容门标记以黄色追加，不改变成功/失败的颜色语义）
+    const rightText = `[${statusText}]` + suffix + (gateMarker ? ` ${gateMarker}` : "");
 
     return statusRow(width, left, style(rightText, { color: rightColor }));
+  }
+
+  /** 内容门标记：未达标时返回黄色提示串（warn 只报告 / enforce-degraded 降级落盘） */
+  private gateMarker(gate: PageStatus["gate"]): string | null {
+    if (!gate || gate.passed) return null;
+    const label =
+      gate.mode === "enforce-degraded"
+        ? this.t("wikiGenerate.gateDegraded")
+        : this.t("wikiGenerate.gateWarn");
+    return style(`⚠ ${label}`, { color: theme.warning });
   }
 
   /** 计算 retry 剩余秒数（等价迁移前的 useCountdown） */

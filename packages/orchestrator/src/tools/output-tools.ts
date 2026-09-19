@@ -12,11 +12,14 @@
  * 每次提交都带「数量反馈」；越界提交**不落盘、不报错**，返回归并 / 补充策略文本请求重提；
  * 连续两次不收敛后标记 `state.exhausted`，由阶段驱动器开缩编 subagent 或代码兜底。
  *
- * `generate_blueprint` / `generate_sync_blueprint` 是旧版一次性蓝图的工具，
+ * `generate_blueprint` / `generate_sync_blueprint` / `validate_blueprint` 是旧版工具，
  * 保留仅归档（当前流程不再使用；提示词与测试均不引用）。
+ * 存在性校验已迁移到交付闸门 `verify-wiki` 的页面维度（wiki/traceability.ts
+ * 的 `checkAssociatedFiles`）。
  */
 
 import type { ToolDefinition, ToolInputParams, ToolInputSchemaProperty, ToolContext, ToolResult } from '@zread-pi/agent-runtime'
+import type { ApplyTitlesResult } from '@zread-pi/utils'
 import {
   applySectionTitles,
   generateWikiJson,
@@ -505,6 +508,16 @@ export function createRefineSectionTitlesTool(
   options: {
     /** 写盘变体 */
     variant: BlueprintDetailLevel
+    /**
+     * 该分类的页面 slug 清单（由阶段驱动器传入），用于「数量一致性」自检：
+     * 模型漏页（缺 slug）或交出陌生 slug 时直接 is_error，不落盘。
+     */
+    expectedSlugs?: string[]
+    /**
+     * 写回结果回调（阶段驱动器用它统计「重写率」——诊断信号触发后标题被改写的比例，
+     * 用于验证诊断段是否真的起作用）。
+     */
+    onResult?: (result: ApplyTitlesResult) => void
   },
 ): ToolDefinition {
   return {
@@ -541,7 +554,32 @@ export function createRefineSectionTitlesTool(
           ? (input.titles as unknown as Array<{ slug?: string; title?: string }>)
           : []
         const incomingSection = typeof input.section === 'string' ? input.section.trim() : ''
+
+        // 数量一致性自检（对齐 lecture-to-notes structure-reorder 的两级自检里
+        // 「页数不变」那条）：在落盘之前校验，失败直接 is_error、不写盘。
+        const expected = options.expectedSlugs ?? []
+        if (expected.length > 0) {
+          const incomingSlugs = titles
+            .map((entry) => (typeof entry?.slug === 'string' ? entry.slug.trim() : ''))
+            .filter((slug) => slug.length > 0)
+          const unknownSlugs = incomingSlugs.filter((slug) => !expected.includes(slug))
+          const missingSlugs = expected.filter((slug) => !incomingSlugs.includes(slug))
+          if (unknownSlugs.length > 0 || missingSlugs.length > 0) {
+            const parts = [
+              ...(unknownSlugs.length > 0 ? [`陌生 slug ${unknownSlugs.length} 个：${unknownSlugs.join(', ')}`] : []),
+              ...(missingSlugs.length > 0 ? [`遗漏 slug ${missingSlugs.length} 个：${missingSlugs.join(', ')}`] : []),
+            ]
+            return {
+              type: 'tool_result',
+              tool_use_id: '',
+              content: `标题数量不一致（期望 ${expected.length} 页）：${parts.join('；')}。请提交该分类下**全部**页面的标题，slug 逐字保留，不得新增或遗漏。`,
+              is_error: true,
+            }
+          }
+        }
+
         const result = await applySectionTitles(section, titles, { variant: options.variant })
+        options.onResult?.(result)
 
         const mismatch =
           incomingSection && incomingSection.toLowerCase() !== section.title.trim().toLowerCase()
@@ -674,6 +712,13 @@ export const GenerateBlueprintTool: ToolDefinition = {
  * Validate Blueprint Tool
  *
  * Validates that associatedFiles in pages point to real files or directories.
+ */
+/**
+ * ValidateBlueprintTool（旧版，仅归档）
+ *
+ * 存在性校验已迁移到交付闸门 `verify-wiki` 的页面维度
+ * （`checkAssociatedFiles`，见 wiki/traceability.ts），当前流程不再使用本工具。
+ * 保留与 `generate_blueprint` 同策略：提示词与测试均不引用。
  */
 export const ValidateBlueprintTool: ToolDefinition = {
   name: 'validate_blueprint',

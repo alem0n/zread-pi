@@ -7,10 +7,11 @@
  * 并使用独立的较小 token 预算）。
  *
  * 失败语义：polish 失败**不判页失败**——页面产物已存在，polish 是增强不是必需
- * （与 history 写入「失败不阻断」同一哲学）。唯一的破坏性检测是 Mermaid：
- * polish 完成后重跑 `validateMermaidContent`，若改坏图表则回滚到 polish 前的内容并告警。
+ * （与 history 写入「失败不阻断」同一哲学）。唯一的破坏性检测是**结构复检**：
+ * polish 完成后跑 `checkPolishDiff`，若它改动了 frontmatter / `Sources:` 溯源行 /
+ * Mermaid 代码块（只许改散文），就回滚到 polish 前的内容并告警。
  *
- * 详见 MIGRATION.md §15。
+ * 详见 MIGRATION.md §15 / §32.3。
  */
 
 import { readFile } from 'node:fs/promises';
@@ -59,6 +60,61 @@ async function readIfExists(filePath: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * polish 结构复检：只许改散文，frontmatter / `Sources:` 溯源行 / Mermaid 代码块逐字不变。
+ *
+ * 三项都是「事实」而非「散文」：frontmatter 由 write_page 注入（title / slug 是
+ * wiki.json 契约）；`Sources:` 的路径与行号是溯源证据；Mermaid 代码块是图结构本身
+ * （外面的解释文字才算散文）。任一项被改动即判定 polish 越界，回滚到润色前内容。
+ */
+export interface PolishDiffViolation {
+  /** 被改动的结构类别 */
+  kind: 'frontmatter' | 'sources' | 'mermaid';
+  /** 一行诊断结论（拼进回滚告警） */
+  detail: string;
+}
+
+const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+const SOURCES_LINE_RE = /^[ \t>]*Sources?:\s.*$/gim;
+const MERMAID_BLOCK_RE = /^```mermaid[\s\S]*?^```/gm;
+
+/** 提取全部 Mermaid 代码块（含围栏，逐字比较） */
+function extractMermaidBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  MERMAID_BLOCK_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = MERMAID_BLOCK_RE.exec(text)) !== null) blocks.push(match[0]);
+  return blocks;
+}
+
+/** 纯函数：比较润色前后，列出全部越界改动（空数组 = 只改了散文，安全） */
+export function checkPolishDiff(original: string, current: string): PolishDiffViolation[] {
+  const violations: PolishDiffViolation[] = [];
+
+  // 1. frontmatter 块逐字不变（title / slug 是 write_page 注入的契约，不是散文）
+  const fmOriginal = FRONTMATTER_BLOCK_RE.exec(original)?.[0] ?? '';
+  const fmCurrent = FRONTMATTER_BLOCK_RE.exec(current)?.[0] ?? '';
+  if (fmOriginal !== fmCurrent) {
+    violations.push({ kind: 'frontmatter', detail: 'frontmatter 块被改动（title / slug 由 write_page 注入，只许改散文）' });
+  }
+
+  // 2. Sources 溯源行逐字不变（路径 / 行号 / 链接目标是证据，不是散文）
+  const sourcesOriginal = (original.match(SOURCES_LINE_RE) ?? []).sort().join('\n');
+  const sourcesCurrent = (current.match(SOURCES_LINE_RE) ?? []).sort().join('\n');
+  if (sourcesOriginal !== sourcesCurrent) {
+    violations.push({ kind: 'sources', detail: 'Sources 溯源行被改动（路径 / 行号必须逐字保留）' });
+  }
+
+  // 3. Mermaid 代码块逐字不变（图结构是事实；块外的解释文字才算散文）
+  const mermaidOriginal = extractMermaidBlocks(original).join('\n---\n');
+  const mermaidCurrent = extractMermaidBlocks(current).join('\n---\n');
+  if (mermaidOriginal !== mermaidCurrent) {
+    violations.push({ kind: 'mermaid', detail: 'Mermaid 代码块被改动（图结构只许原样保留）' });
+  }
+
+  return violations;
 }
 
 /**
@@ -122,16 +178,25 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
     };
   }
 
-  // 唯一的结构性复检：polish 不能改坏 Mermaid；改坏就回滚到润色前内容并告警
-  const mermaidIssues = validateMermaidContent(current);
-  if (mermaidIssues.length > 0) {
-    const detail = formatMermaidValidationError(mermaidIssues);
+  // 结构复检：只许改散文（frontmatter / Sources / Mermaid 代码块逐字不变）。
+  // 任一项被改动即判定越界，回滚到润色前内容；Mermaid 越界时额外附语法校验详情。
+  const violations = checkPolishDiff(original, current);
+  if (violations.length > 0) {
+    const mermaidBroken = violations.some((v) => v.kind === 'mermaid');
+    const mermaidDetail = mermaidBroken
+      ? formatMermaidValidationError(validateMermaidContent(current))
+      : '';
+    const detail = [
+      ...violations.map((v) => v.detail),
+      ...(mermaidDetail ? [mermaidDetail] : []),
+    ].join('\n');
     try {
       await writeTextFile(options.filePath, original);
-      polishLogger.warn(`[${options.slug}] polish 改坏了 Mermaid，已回滚到润色前内容：\n${detail}`);
+      const kind = violations[0].kind;
+      polishLogger.warn(`[${options.slug}] polish 越界（${kind}），已回滚到润色前内容：\n${detail}`);
       return {
         applied: false,
-        reason: 'mermaid-rollback',
+        reason: kind === 'mermaid' ? 'mermaid-rollback' : 'structure-rollback',
         error: detail,
         durationMs: startedAt(),
         tokenUsage,
@@ -142,7 +207,7 @@ export async function polishPageFile(options: PolishPageOptions): Promise<Polish
       polishLogger.error(`[${options.slug}] polish 回滚失败：${message}\n${detail}`);
       return {
         applied: false,
-        reason: 'mermaid-rollback',
+        reason: 'structure-rollback',
         error: `${detail}\nrollback failed: ${message}`,
         durationMs: startedAt(),
         tokenUsage,

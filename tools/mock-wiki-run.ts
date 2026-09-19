@@ -29,6 +29,15 @@ const entries = (await readdir(target, { recursive: true, withFileTypes: true })
 	.map((entry) => join(entry.parentPath ?? target, entry.name).slice(target.length + 1).replace(/\\/g, "/"))
 	.filter((relative) => SOURCE_EXT.has(extname(relative)) && !relative.startsWith("."));
 
+/** 夹具源文件的可用行数（供 mock 页面的 Sources 溯源行给出落在文件内的行号区间） */
+const SOURCE_LINE_CAP: Record<string, number> = {};
+for (const relative of entries) {
+	if (["main.py", "calculator.py", "utils.py", "README.md"].includes(basename(relative))) {
+		const text = await readFile(join(target, relative), "utf-8");
+		SOURCE_LINE_CAP[relative] = Math.max(1, Math.floor(text.split("\n").length / 2) || 1);
+	}
+}
+
 const slugify = (value: string): string =>
 	value
 		.toLowerCase()
@@ -177,6 +186,13 @@ const server = Bun.serve({
 						const file = /\*\*文件名\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? `${slug}.md`;
 						const title = /\*\*标题\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? slug;
 						const pageSection = /\*\*章节\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "";
+						// 溯源行指向夹具里真实存在的源文件（让 verify 的 traceability 组可走全链路）
+						// 路径取相对仓库根的 POSIX 写法（与 manifest / associatedFiles 同口径）；
+						// 行号区间取文件行数的前 1/2，保证落在文件内（SOURCE_LINE_CAP 预计算）
+						const sources = Object.keys(SOURCE_LINE_CAP)
+							.slice(0, 2)
+							.map((relative) => `[${basename(relative)}](${relative}#L1-L${SOURCE_LINE_CAP[relative]})`)
+							.join(", ");
 						write(
 							toolCall(`call_${slug}`, "write_page", {
 								slug,
@@ -186,13 +202,14 @@ const server = Bun.serve({
 								content: [
 									`# ${title}`,
 									"",
-									`> 由 mock LLM 生成（离线试跑），真实内容请用 \`bun run cli\`。`,
+									"> 由 mock LLM 生成（离线试跑），真实内容请用 `bun run cli`。",
 									"",
 									"```mermaid",
 									"flowchart TB",
 									`  A["${title}"] --> B["测试通过"]`,
 									"```",
 									"",
+									...(sources ? [`Sources: ${sources}`] : []),
 								].join("\n"),
 							}),
 						);
@@ -244,6 +261,7 @@ process.chdir(target);
 
 const { generateWikiCatalog } = await import("../packages/orchestrator/src/orchestrator.js");
 const { generateWikiContent } = await import("../packages/orchestrator/src/wiki/generate-wiki.js");
+const { verifyWiki } = await import("../packages/orchestrator/src/wiki/verify-wiki.js");
 const { RunLogWriter } = await import("../packages/utils/src/trajectory-store/index.js");
 
 // ---------------------------------------------------------------------------
@@ -295,7 +313,28 @@ for (const page of blueprint.pages) {
 }
 console.log(`\n结果：completed=${result.completed} failed=${result.failed}，mock 请求数=${requestCount}`);
 
+// ---------------------------------------------------------------------------
+// 5) 交付闸门核对（plan.md §3.2 / §6）：mock 产物只断言结构类检查全绿；
+//    content 组以 warn 报告产出（mock LLM + 极小夹具过不了密度门，属预期）。
+// ---------------------------------------------------------------------------
+const verify = await verifyWiki({ root: target, detail: 'low' });
+const structural = verify.checks.filter((c) => c.group !== 'content');
+const contentChecks = verify.checks.filter((c) => c.group === 'content');
+console.log(`\n▶ 交付闸门：overall=${verify.ok ? 'PASS' : 'FAIL'}（legacy=${verify.legacy}）`);
+for (const c of structural) console.log(`   ${c.status === 'PASS' ? '✓' : c.status === 'SKIP' ? '○' : '✗'} [${c.group}] ${c.message}`);
+if (contentChecks.length > 0) {
+	console.log(`   （content 组 ${contentChecks.length} 项为 warn 报告，不作为达标依据）`);
+}
+
 process.chdir(join(target, ".."));
 await rm(home, { recursive: true, force: true });
 
-if (result.failed > 0 || result.completed !== expectedPages) process.exit(1);
+// 结构类检查必须全绿（SKIP 允许：mock 不产符号缓存，traceability 降级属预期）
+const structuralFailures = structural.filter((c) => c.status === 'FAIL');
+if (result.failed > 0 || result.completed !== expectedPages || structuralFailures.length > 0) {
+	if (structuralFailures.length > 0) {
+		console.log(`\n❌ 结构类检查失败 ${structuralFailures.length} 项`);
+		for (const c of structuralFailures) console.log(`   ✗ [${c.group}] ${c.message}`);
+	}
+	process.exit(1);
+}

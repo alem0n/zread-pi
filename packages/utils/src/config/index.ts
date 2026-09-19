@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
-import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, ThinkingLevel, ThinkingLevelMap, ToolsConfig } from '@zread-pi/types';
+import type { AppConfig, CustomModelConfig, LlmAuthType, LlmProviderConfig, PolishConfig, PolishMode, QualityConfig, ContentGateMode, ThinkingLevel, ThinkingLevelMap, ToolsConfig } from '@zread-pi/types';
 import { ensureDir, writeTextFileAtomic } from '../file-io';
 import { withFileLock } from '../lockfile.js';
 import { getProjectHome, projectHomePath } from '../project-home.js';
@@ -130,6 +130,45 @@ export function normalizePolishConfig(value: unknown): PolishConfig {
 }
 
 /**
+ * 内容质量门（内容密度门 + 生成后自动校验）
+ *
+ * 移植自 lecture-to-notes 的 `verify_notes.py::density_gate`，但把强阻断改成
+ * 可降级（warn / enforce；enforce 在预算用尽时 best-effort 落盘，见 MIGRATION §29）。
+ * 默认 warn：记录与上屏，不拦截 write_page，老用户升级行为零变化。
+ */
+export const DEFAULT_QUALITY_ENABLED = true;
+export const DEFAULT_QUALITY_MODE: ContentGateMode = 'warn';
+export const DEFAULT_VERIFY_AFTER_GENERATE = false;
+
+/** 配置界面可选的全部内容门模式（顺序即展示顺序） */
+export const CONTENT_GATE_MODES: ContentGateMode[] = ['off', 'warn', 'enforce'];
+
+/** 判断任意值是否是合法的内容门模式 */
+function isContentGateMode(value: unknown): value is ContentGateMode {
+  return value === 'off' || value === 'warn' || value === 'enforce';
+}
+
+/** 归一化内容质量配置：非法/缺省值回退默认（启用 + warn + 不自动校验），旧 config.yaml 无需迁移 */
+export function normalizeQualityConfig(value: unknown): QualityConfig {
+  const raw =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const contentGate =
+    raw.contentGate && typeof raw.contentGate === 'object' && !Array.isArray(raw.contentGate)
+      ? (raw.contentGate as Record<string, unknown>)
+      : {};
+  return {
+    contentGate: {
+      enabled: typeof contentGate.enabled === 'boolean' ? contentGate.enabled : DEFAULT_QUALITY_ENABLED,
+      mode: isContentGateMode(contentGate.mode) ? contentGate.mode : DEFAULT_QUALITY_MODE,
+    },
+    verifyAfterGenerate:
+      typeof raw.verifyAfterGenerate === 'boolean' ? raw.verifyAfterGenerate : DEFAULT_VERIFY_AFTER_GENERATE,
+  };
+}
+
+/**
  * pi 支持的思考深度等级（与 pi-ai 的 ModelThinkingLevel 对齐，按由浅到深排序）
  *
  * off = 关闭扩展思考；xhigh / max 仅部分模型支持。
@@ -227,6 +266,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   polish: normalizePolishConfig(undefined),
   blueprint: normalizeBlueprintConfig(undefined),
+  // 旧配置没有 quality 段：归一化为「内容门启用 + warn + 不自动校验」（老用户零变化）
+  quality: normalizeQualityConfig(undefined),
   tools: normalizeToolsConfig(undefined),
   concurrency: {
     max_concurrent: 1,
@@ -450,6 +491,8 @@ export function validateConfig(raw: unknown): AppConfig {
     polish: normalizePolishConfig(config.polish),
     // 旧配置没有 blueprint 段：归一化为默认 high（老用户零变化）
     blueprint: normalizeBlueprintConfig(config.blueprint),
+    // 旧配置没有 quality 段：归一化为默认值（内容门启用 + warn + 不自动校验）
+    quality: normalizeQualityConfig(config.quality),
     tools: normalizeToolsConfig(config.tools),
     concurrency: {
       max_concurrent: concurrency.max_concurrent as number,

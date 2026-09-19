@@ -222,6 +222,35 @@ export interface BlueprintConfig {
 }
 
 /**
+ * ContentGateMode - 内容密度门的作用模式
+ *
+ * 移植自 lecture-to-notes 的 `verify_notes.py::density_gate`（把「这篇文档是否干瘪」
+ * 从主观判断变成机械可判定的指标），但把强阻断改成可降级：
+ * - off：完全跳过（不计算、不记录）；
+ * - warn（默认）：计算并记录进 `PageResult.gate`，**不拦截** write_page；
+ * - enforce：在 write_page 内拦截（与 Mermaid 引号校验同一位置），
+ *   返回 is_error + 「当前 N / 下限 M」的常驻反馈让模型重写；
+ *   预算用尽仍未通过时走 best-effort 落盘降级（见 MIGRATION §29），不判页失败。
+ */
+export type ContentGateMode = 'off' | 'warn' | 'enforce';
+
+/**
+ * QualityConfig - 内容质量门（配置界面 /config/quality 维护）
+ *
+ * 旧 config.yaml 没有该段时由 validateConfig 补齐默认值（contentGate 启用 + warn、
+ * verifyAfterGenerate 关闭），老用户升级行为零变化。
+ */
+export interface QualityConfig {
+  /** 内容密度门（页面是否只有干瘪 TL;DR 的机械判定） */
+  contentGate: {
+    enabled: boolean;
+    mode: ContentGateMode;
+  };
+  /** 生成完成后是否自动跑一次 verify-wiki（缺省 false，避免拖慢生成） */
+  verifyAfterGenerate: boolean;
+}
+
+/**
  * AppConfig - Configuration
  */
 export interface AppConfig {
@@ -234,6 +263,11 @@ export interface AppConfig {
   polish: PolishConfig;
   /** 蓝图细节档位（旧 config.yaml 缺少该段时由 validateConfig 补齐默认 high） */
   blueprint: BlueprintConfig;
+  /**
+   * 内容质量门（内容密度门 + 生成后自动校验；旧 config.yaml 缺少该段时由
+   * validateConfig 补齐默认值：contentGate 启用 + warn、verifyAfterGenerate 关闭）
+   */
+  quality: QualityConfig;
   /** 外部工具（rg / fd …）的启用开关，配置界面 /config/tools 维护 */
   tools: ToolsConfig;
   concurrency: {

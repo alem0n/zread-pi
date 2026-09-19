@@ -41,7 +41,7 @@
 - **五档蓝图细节（`blueprint.detail`）** —— 从 `minimal`（1 个分类 · 1 篇全景导览，必须 Mermaid 架构图，适合快速了解）到 `max`（每分类 5~12 篇、深挖关联文件），默认 `high` 与旧行为一致；数量越界先由模型按归并 / 补充策略重提，仍不收敛则由缩编 Agent 或代码确定性兜底，生成永不悬挂。
 - **多档共存 + 浏览切换** —— 每个档位的完整产物独立存放（`wiki/<档位>/`，互不覆盖）；浏览站侧边栏底部提供上拉档位选择器（显示各档位篇数，当前高亮），切换时同 slug 页面保留、否则落到新档位首页。旧的无档位产物以「默认」条目只读兼容。
 - **仓库自述注入** —— 目标仓库若有 `AGENTS.md` / `CLAUDE.md`（含大小写变体与全局 `~/.zread-pi`），会把里面的架构说明与约定注入页面 Agent 的系统提示，让生成的 Wiki 与仓库自述保持一致。
-- **文风纪律（humanizer）** —— 按文档语言注入两套精炼的「反 AI 腔」写作纪律（基于 Wikipedia "Signs of AI Writing"）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，代码块 / `Sources:` 溯源行 / Mermaid 引号标签 / frontmatter 全程受保护，润色失败不会让页面失败。
+- **文风纪律（humanizer）+ 读者优先（reader-first）** —— 按文档语言注入两套正交的写作纪律：humanizer 管「像人写的」（反 AI 腔，基于 Wikipedia "Signs of AI Writing"），reader-first 管「教会了读者」（教学型结构化自检）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，frontmatter / `Sources:` 溯源行 / Mermaid 代码块全程受「只许改散文」的 diff 断言保护，润色失败不会让页面失败。
 - **符号级增量缓存** —— 基于 AST hash；未变更的符号跨运行直接跳过，Wiki 同步只重新生成源码确实变过的页面。
 - **并行页面 Agent** —— `p-limit` 调度扇出，并发可配置；每个 Agent 只拥有一个 Wiki 页面，只读它需要的真实代码。
 - **图片读取管线** —— `Read` 读图片时自动缩放到 2000×2000 / 4.5MB 以内（省 token、避免被 provider 拒收），BMP 等非内联格式自动转 PNG，并给出坐标换算提示。
@@ -57,6 +57,7 @@
 - **Wiki 同步，而不是 Wiki 覆盖** —— diff 感知的再生成：页面被标记为 `new` / `updated` / `unchanged` / `archived`，
   像审代码 diff 一样审文档变更。
 - **全局记忆** —— 生成过的项目自动记录（`zread-pi history` 一键清理失效项），老项目打开即自动补录；配置 / 凭据 / 记忆的跨进程写入都有文件锁保护。
+- **交付闸门** —— `zread-pi verify` 一条命令判定本次生成是否达标（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），逐行 `PASS`/`FAIL`/`SKIP` + 退出码，可直接进 CI；溯源会核对页面声称的路径、行号与行内代码符号是否真实存在于源码（符号级只警告、不判失败），生成后也能自动跑一次并落 `verify.json`（`quality.verifyAfterGenerate`）。
 
 ## Quick Start
 
@@ -103,6 +104,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
 | `zread-pi logview [runId]`| 启动轨迹（Trajectory）检查视图 —— 在浏览器回放本次 / 历次运行的完整事件流；runId 缺省 = 最近一次运行 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
+| `zread-pi verify [--detail <档位>] [--enforce]` | 交付闸门：逐条输出 `PASS`/`FAIL`/`SKIP`（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），末尾 `OVERALL PASS`/`FAIL`，退出码随之；溯源含路径真实、行号有效、行内代码符号可溯（WARN）与蓝图 `associatedFiles` 存在性；`--enforce` 才把内容密度门未达标计为失败，否则只列出 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
 
 所有子命令均支持 `-d / --dir <path>` 指定目标仓库（不用切 shell 目录）。
@@ -260,7 +262,10 @@ API Key 与模型列表都在其详情页里维护）；也能为任意 Provider
   `llm.max_tokens`，留空 = 跟随模型目录默认；配置界面 `/config/model-size`）、token 预算（`agent.token_budget`，0 = 按
   `agent.max_turns × 25000` 折算；`agent.max_turns = 0` = 不限制预算）、文风润色（`polish.enabled`，
   `polish.mode = prompt-only | full`）、蓝图细节档位（`blueprint.detail = minimal | low | medium | high | max`，默认
-  `high`；配置界面 `/config/detail`）、外部工具开关（`tools.<id>.enabled`）。
+  `high`；配置界面 `/config/detail`）、内容质量门（`quality.contentGate.enabled` /
+  `quality.contentGate.mode = off | warn | enforce`，默认 `true` / `warn`；配置界面 `/config/quality`——
+  `warn` 只报告不拦截，`enforce` 会拦截干瘪页面并要求重写，预算耗尽后 best-effort 落盘并标注告警）、
+  外部工具开关（`tools.<id>.enabled`）。
   重试次数（`concurrency.max_retries`，0–5，0 = 不重试，配置界面 `/config/retry`）同时下发到 Agent 层与
   Provider 层：前者指数退避（2s 起、60s 封顶），后者在单次请求内读取服务端 `Retry-After`。
 - `~/.zread-pi/auth.json` —— pi-ai 格式凭据（API Key），可同时保存多个 Provider；**秘密不进 config.yaml**。
