@@ -32,6 +32,7 @@ import type { CatalogEvent } from '../types.js';
 import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
 import { loadProjectContextFiles, withProjectContext } from './context-files.js';
 import { withStyleDiscipline } from './style-discipline.js';
+import { withReaderDiscipline } from './reader-first.js';
 
 /** 本模块的命名 logger（Agent 的创建与事件流转）。 */
 const agentLogger = createLogger('orchestrator.agent');
@@ -320,12 +321,17 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     if (contextFiles.length > 0) {
       agentLogger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
     }
-    systemPrompt = withStyleDiscipline(
-      withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
+    systemPrompt = withReaderDiscipline(
+      withStyleDiscipline(
+        withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
+        docLanguage,
+        styleEnabled,
+      ),
       docLanguage,
       styleEnabled,
     );
     agentLogger.info(`文风纪律（humanizer）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
+    agentLogger.info(`读者优先纪律（reader-first）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
   }
   const agent = CreateAgentSdk({
     model,
