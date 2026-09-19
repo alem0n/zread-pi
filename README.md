@@ -57,6 +57,7 @@
 - **Wiki 同步，而不是 Wiki 覆盖** —— diff 感知的再生成：页面被标记为 `new` / `updated` / `unchanged` / `archived`，
   像审代码 diff 一样审文档变更。
 - **全局记忆** —— 生成过的项目自动记录（`zread-pi history` 一键清理失效项），老项目打开即自动补录；配置 / 凭据 / 记忆的跨进程写入都有文件锁保护。
+- **交付闸门** —— `zread-pi verify` 一条命令判定本次生成是否达标（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），逐行 `PASS`/`FAIL`/`SKIP` + 退出码，可直接进 CI；生成后也能自动跑一次并落 `verify.json`（`quality.verifyAfterGenerate`）。
 
 ## Quick Start
 
@@ -103,6 +104,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
 | `zread-pi logview [runId]`| 启动轨迹（Trajectory）检查视图 —— 在浏览器回放本次 / 历次运行的完整事件流；runId 缺省 = 最近一次运行 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
+| `zread-pi verify [--detail <档位>] [--enforce]` | 交付闸门：逐条输出 `PASS`/`FAIL`/`SKIP`（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），末尾 `OVERALL PASS`/`FAIL`，退出码随之；`--enforce` 才把内容密度门未达标计为失败，否则只列出 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
 
 所有子命令均支持 `-d / --dir <path>` 指定目标仓库（不用切 shell 目录）。

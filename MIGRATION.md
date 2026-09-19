@@ -2436,3 +2436,76 @@ CLI 新增 `/config/quality`（模式切换 + `t` 开关 + `v` 自动校验 + `s
 - `bun run mock:wiki`：`completed=5 failed=0`（缺省 warn 不阻断、不破坏既有链路）。
 - `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
 
+---
+
+## 30. 交付闸门 verify-wiki（v1.15.0）
+
+### 背景
+
+迁移自 lecture-to-notes 的 `scripts/verify_notes.py`（详见 `plan.md` §3.2）。
+那是一条「一站式交付闸门」：`density / artifacts / layout / log / figures /
+provenance` 逐条输出 `PASS`/`FAIL`/`SKIP`，末尾 `OVERALL PASS`/`OVERALL FAIL`，
+退出码随之。zread-pi **没有任何统一质量出口**——判定散在 `generate-wiki` 的
+`fileExists` + 路径救援 + 内容门里，用户无法在生成后跑一条命令问「这次达标了吗」。
+
+### 改动（P0-2）
+
+落点 `packages/orchestrator/src/wiki/verify-wiki.ts`（纯逻辑、**只读**）+
+CLI 子命令 `zread-pi verify`（`apps/cli/src/commands/verify.ts`）。
+
+- **结构对齐** `verify_notes.py`：`Report` 收集器 + `emit(status, group, message, details)`，
+  逐条 `PASS`/`FAIL`/`SKIP`，`OVERALL` 由「任一 FAIL 即 false；SKIP 不影响」决定，
+  CLI 退出码随之（0 / 1）。
+- **五个检查组**：
+  - `structure`：`loadWikiBlueprint` 可加载、pages 非空、每页 `file` 真实存在、
+    `(section, file)` 不重复、sections 与 pages 的分类集合双向一致。
+  - `content`：逐页跑 §29 的 `evaluateContentGate`；`--enforce` 时未达标计 FAIL，
+    否则**只列出**（状态 PASS + details，不影响 OVERALL）。
+  - `mermaid`：复用 `validateMermaidContent`（与 `write_page` 拦截同一套）。
+  - `frontmatter`：每页含 `title:` / `slug:` 且与 wiki.json 一致。
+  - `traceability`：解析 `Sources:` 行的 `](path#Lx-Ly)`——路径真实（磁盘存在） /
+    行号区间落在文件长度内（流式按行计数，不全量缓冲）/ 跨页重复声明（WARN，
+    只列出供人工裁决，不 FAIL）。外部链接与纯锚点排除。
+- **变体解析含遗留目录**：先 `resolveWikiVariant(detail, wikiRoot)`；
+  命中则以显式 path 调 `loadWikiBlueprint`（path 优先于 variant 必填参数）；
+  返回 undefined 时显式 fallback 读遗留目录 `.zread-pi/wiki/wiki.json`；
+  都不存在 → 整体 SKIP、退出码 0（无产物可验，不报 FAIL）。
+- **生成后自动校验**：`quality.verifyAfterGenerate`（缺省 false）打开时，
+  `generateWikiContent` 完成后跑一次闸门，摘要落成 `<runDir>/verify.json`。
+  **不改动 `RunMeta`**（run.json 是固定字段结构，见 plan.md §3.2 的审查修订）——
+  trajectory replay 无感知；校验失败不判生成失败（闸门是事后体检，不是交付前置）。
+
+### 行为差异
+
+- 旧行为：无任何「生成后体检」手段。
+- 新行为：`zread-pi verify [-d <dir>] [--detail <档位>] [--enforce]` 输出
+  逐行检查 + `OVERALL PASS/FAIL`，退出码 0 / 1（CI 可直接判定）；
+  `verifyAfterGenerate=true` 时自动落 `verify.json`。
+- 与 lecture-to-notes 的**有意偏差**：那边 `OVERALL FAIL` 就不许交付（强阻断）；
+  zread-pi 的产物**已经落盘**，闸门是事后体检——`FAIL` 只反映质量、不回滚产物，
+  且校验本身失败不影响生成结果（生成永不悬挂）。
+- `content` 组默认不记 FAIL（`--enforce` 才计），避免密度门把日常的
+  「我故意要一篇精简页面」场景判成失败。
+
+### 兼容性
+
+- 纯新增：`verify-wiki.ts` 只读，不改动任何既有产物 / 契约 / 工具。
+- `quality.verifyAfterGenerate` 是既有字段（§29 引入，缺省 false），
+  此前未接线；现在接上后旧配置行为不变（缺省不自动跑）。
+- `RunMeta` 不变；`verify.json` 是 run 目录下的独立文件。
+- CLI 输出走 stdout 接管（`output-guard`，与 `history` 命令同一套），
+  检查行可被脚本按 `<STATUS> <group> <message>` 解析。
+
+### 验证（实际执行结果）
+
+- `bun run test:verify`（新增套件）：**54/54**——`parseSourceRefs` 纯函数 /
+  五组全绿 / structure 三类失败 / content 的 enforce 与非 enforce 语义 /
+  mermaid 失败 / frontmatter 缺失与不一致 / traceability 路径与行号失败 /
+  跨页重复只 WARN / 遗留目录回退 / 无产物 SKIP / 骨架 SKIP / 档位解析 /
+  `verifyAfterGenerate` → `verify.json` 落盘且 `run.json` 契约不变。
+- 真机 CLI（`bun run cli verify --dir fixtures/hello-python`，mock:wiki 产物）：
+  structure / mermaid / frontmatter 全绿；content 列出 5 页未达标（非 enforce）；
+  traceability FAIL（mock LLM 不产 Sources 行）；`--enforce` 使 content 转 FAIL；
+  空目录 SKIP + 退出码 0；`--help` 文案正确。
+- `bun run test`：全量套件绿（含新 `test:verify`）；`bun run typecheck` 0 错误。
+
