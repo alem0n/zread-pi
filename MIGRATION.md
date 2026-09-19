@@ -2653,7 +2653,8 @@ plan.md §3.4。三件事：
 ### 行为差异
 
 - 页面提示词：格式契约从「散在正文」变为「独立 `<page_format>` 块」，
-  并新增 8 条交付前自检清单；既有叙述 / 结构 / 语气要求逐字保留。
+  并新增 8 → **11** 条交付前自检清单（第 9–11 条为 §4 反注水补充，见 32.4）；
+  既有叙述 / 结构 / 语气要求逐字保留。
 - 页面 Agent 系统提示：humanizer 块之后多一个 `<reader_first>` 块
   （`polish.enabled=false` 时两者都不注入）。
 - polish：`mode=full` 时多一次「教学型」结构化自检；改 frontmatter / `Sources:` /
@@ -2672,15 +2673,63 @@ plan.md §3.4。三件事：
 
 ### 验证（实际执行结果）
 
-- `bun run test:page-format`（新套件）：**37/37**——两语言资产节数 / 列表项 / 清单条数
-  一一对应；语言选择与回退；注入块标签与开关；reader-first 拼在 humanizer 之后；
-  `buildPagePrompt` 含格式契约且保留既有段落（`en` 选英文契约、块只注入一次）；
-  polish 系统提示 = 纪律 + 自检 + Embedded mode 且顺序正确。
+- `bun run test:page-format`（新套件）：**40/40**——两语言资产节数（6）/
+  列表项 / 清单条数（11）一一对应；语言选择与回退；注入块标签与开关；
+  reader-first 拼在 humanizer 之后；`buildPagePrompt` 含格式契约且保留既有段落
+  （`en` 选英文契约、块只注入一次）；polish 系统提示 = 纪律 + 自检 + Embedded mode
+  且顺序正确；**§4 反注水三条在 zh/en 双语都存在**（同义改写注水 /
+  不复制 README·AGENTS.md / 「源没有就应该是 0」口径）。
 - `bun run test:pages`：page-polish **16 → 24**（+8：`checkPolishDiff` 纯函数——
   只改散文安全 / 改 frontmatter / 改 Sources 行号 / 删 Sources 行 / 改 Mermaid 节点 /
   改块外散文安全 / 多项越界全部列出 / 完全相同）；既有 Mermaid 回滚端到端仍绿。
-- `bun run mock:wiki`：`completed=5 failed=0`（提示词改动不破坏既有链路）。
+- `bun run mock:wiki`：`completed=5 failed=0`，且**生成后自动跑交付闸门**
+  （`overall=PASS`，结构类检查全绿，content 组按 §6 口径只列出）。
 - `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+
+#### 32.4 补齐：§4 反注水清单 + §5.5 一致性校验（plan 复执行，v1.18.1）
+
+对 plan.md 逐条复执行时发现两项未严格落地，本次补齐：
+
+**(1) §4 反注水清单不完整**——plan §4 明令「禁止清单写进 `page-format.*.md`
+的自检清单」，此前只落地了「口号式收尾」一条。补齐 zh / en 各 3 条（清单 8 → 11，
+编号一一对应）：
+- 同义改写注水（同一论断换词重复、同一段意思拆成两段讲）
+- 为凑图表而加图 / 为凑字数而堆术语表；不把 README / AGENTS.md / CHANGELOG
+  整段复制当散文（项目说明已由 `<project_context>` 自动注入）
+- **§4.2「源没有就应该是 0」**：新增「代码块」节——关联文件没有可写代码
+  （纯配置 / 纯类型 / 纯 Markdown）时代码块正确答案是 **0**，强行加等于编造源码；
+  Mermaid 同理（不涉及拓扑时为 0，`minimal` 档 panorama 是唯一例外）
+
+**(2) §5.5 一致性校验未落地**（【用户新增约束】的强制项）——plan 要求「门限算式与
+正则用**同一输入**在 Python 参考实现与 TS 实现上跑黄金值对照」，此前测试里的
+「黄金值」是手算的，未真正跑 Python 源。本次落地：
+- `tools/golden-parity-gen.py`：`import` 源仓库的 `verify_notes.CJK` /
+  `extract_claims.numbers_in` / `flatten_tex`，在 6 个固定样本上产出黄金值
+  （可复现：`python3 tools/golden-parity-gen.py`）
+- `content-gate.ts` 导出 `countCjkChars`（逐字移植 `[一-鿿]` = U+4E00..U+9FFF）
+  与 `numbersIn`（`\d+(?:[.,]\d+)*`）
+- `test/golden-parity.ts`：**15/15**——6 样本 CJK 计数对照 + 数字台账口径
+  （千分位 / 小数点续接）+ 区间端点边界语义（U+4E00 / U+9FFF 计入，
+  全角空格与全角逗号不计入，空串 = 0）
+- **对照抓出一个真实 bug**：CJK 正则最初写成 `/[\u4e00-\u9fff]/gu`，
+  `String.prototype.test` 在带 `g` 标志时是有状态的（`lastIndex` 前进），
+  在 `filter` 里逐字符调用会交替跳过，计数直接腰斩（8 字符只数出 4）。
+  去掉 `g` 标志后与 Python 完全一致。这正是黄金值对照该防的漂移。
+- 有意偏差（不在对照范围，已在 §29 / §0.2 声明）：Python 的 CJK 门基于视频时长，
+  zread-pi 基于 level + 关联文件规模；Python 在 LaTeX 上计数，zread-pi 在
+  Markdown 上剥离围栏后计数。本测试只对照**字符级正则语义**（哪些字符算 CJK /
+  哪些串算数字），这是「判定逻辑」本身。
+- 新增 `test:golden-parity` 脚本，并入 `test:blueprint` 与 test 主链。
+
+**(3) §6 的 mock 产物核对自动化**——plan 要求「`mock:wiki` 后跑 `zread-pi verify`，
+只断言结构类检查全绿」，此前是手工执行。`mock-wiki-run.ts` 生成后自动调
+`verifyWiki`：mock 页面内容补 `Sources:` 溯源行（指向夹具真实文件，行号区间按
+文件实际行数取前 1/2），traceability 组从「无 Sources → FAIL」变为路径真实 /
+行号有效 / 跨页重复全绿，`overall=PASS`；content 组按口径只列出不阻断。
+
+**(4) 三个文件补溯源文件头**（§5.5 强制）：`prompts/page-format.zh.md` /
+`.en.md` / `agents/page-format.ts` 此前缺头部来源注释，已补（源为
+`notes-prompt.md`，注明复制的四段 + 语境词替换 + 同步对象）。
 
 ---
 

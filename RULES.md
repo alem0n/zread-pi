@@ -141,6 +141,9 @@ frontmatter / `Sources:` / Mermaid 三项 diff 断言）、
 - 标题阶段的 `expectedSlugs` 数量自检必须**在落盘前**执行（陌生/遗漏 slug →
   is_error 且不落盘）；`expectedSlugs` / `onResult` 保持**可选**（旧调用点兼容）；
 - 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §1.1 的对应决策行。
+- §5.5 一致性校验是强制项：从 lecture-to-notes 移植的判定逻辑（CJK 计数 /
+  数字台账口径）必须能被 `tools/golden-parity-gen.py` 在源 Python 实现上
+  复现（`bun run test:golden-parity`）；样本两边同步、黄金值重新生成。
 
 ### 6. `apps/cli`（终端界面）
 
