@@ -106,6 +106,12 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 `wiki/content-gate.ts`（内容密度门纯函数 + 下限表常量，对齐 `blueprint-detail.ts` 的组织方式）、
 `wiki/verify-wiki.ts`（交付闸门纯逻辑，**只读**：不写任何产物）、
 `wiki/traceability.ts`（溯源台账纯函数，**只读**：只读缓存清单与被引用的源文件）、
+`wiki/polish.ts`（页面级 polish 兜底；`checkPolishDiff` 是纯函数——只许改散文：
+frontmatter / `Sources:` / Mermaid 三项 diff 断言）、
+`agents/page-format.ts` + `prompts/page-format.*.md`（页面格式契约资产：frontmatter /
+标题层级 / Mermaid 引号 / 溯源格式 / 交付前自检清单）、
+`agents/reader-first.ts` + `prompts/reader-first.*.md`（读者优先教学型纪律，与 humanizer 正交）、
+`agents/style-discipline.ts`（humanizer 纪律 + polish 系统提示拼装）。、
 `agents/create-agent.ts`（读配置下发 maxTurns / thinkingLevel / contextWindow / maxTokens）、`prompts/`（蓝图与页面 Agent 提示词，
 **工具名写死在其中**）、`wiki/memory.ts`（全局记忆写入）。
 
@@ -124,6 +130,12 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
   （`last_manifest.json` / `last_symbols.json`）零额外解析成本；符号层只 WARN
   （幻觉 / 缓存过期 / 文档名无法区分），蓝图 `associatedFiles` 才 FAIL；
   `parseSourceRefs` 迁入本模块后旧导入路径必须保留（verify-wiki re-export）；
+- 提示词资产（`prompts/*.md`）是**成对**的：zh / en 两份必须同步改动，
+  条数与编号一一对应（`page-format` / `reader-first` / `humanizer` 都如此）；
+  新增 `.md` 资产由 `tools/tsup-md-text.ts` 插件按后缀全局接管，无需改构建配置，
+  但要确认 `import ... with { type: 'text' }` 的导入路径正确；
+- `page-agent.ts` 只做**文本外置**：与叙述语气无关的硬性格式契约抽到
+  `page-format.*.md`，叙述 / 语气 / 结构要求逐字保留；改完跑 `mock:wiki` 确认链路不破；
 - 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §1.1 的对应决策行。
 
 ### 6. `apps/cli`（终端界面）

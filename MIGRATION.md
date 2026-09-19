@@ -2584,3 +2584,101 @@ v1.15.0 的 `verify-wiki` 只做了溯源的**路径 / 行号**层（verify-wiki
   （`add` 正确忽略）；无缓存 → `SKIP`。
 - `bun run test`：全量套件绿（含新 `test:traceability`）；`bun run typecheck` 0 错误。
 
+---
+
+## 32. 页面格式资产化 + reader-first 纪律（P1-2，v1.17.0）
+
+### 背景
+
+plan.md §3.4。三件事：
+
+1. **页面格式规范资产化**：`page-agent.ts` 里与叙述语气无关的硬性格式契约
+   （frontmatter / 标题层级 / Mermaid 引号 / `Sources:` 格式 / 交付前自检清单）
+   散在提示词正文里，改格式要翻整段 prompt；抽成独立 `.md` 资产后可单独维护。
+2. **reader-first 教学型写作纪律**：humanizer 只管「像人写的」（反 AI 腔），
+   但「教会了读者」是另一件事——补一块正交纪律。
+3. **polish 层扩展**：`polish.mode=full` 时做一次「教学型」结构化自检；
+   回滚保护从「只查 Mermaid 语法」升级为「只许改散文」的三项 diff 断言。
+
+### 改动
+
+#### 32.1 页面格式契约（§3.4.1）
+
+| 落点 | 内容 |
+| --- | --- |
+| `prompts/page-format.zh.md` / `.en.md` | 硬性格式契约：frontmatter 由 `write_page` 注入（不得手写）/
+标题层级（唯一 H1 / 不跳级 / 源码导航节标题固定）/ Mermaid 引号规则 /
+`Sources:` 溯源格式 / **交付前自检清单 8 条**（对齐 lecture-to-notes
+`notes-prompt.md` 的清单形态，语境改为代码 wiki） |
+| `agents/page-format.ts` | `getPageFormat` / `formatPageFormat` / `withPageFormat` / `PAGE_FORMAT_TAG`，
+形状对齐 `style-discipline.ts`（语言选择 `en` 之外一律中文；始终注入，
+不受 `polish.enabled` 影响——格式是硬约束） |
+| `prompts/page-agent.ts` | **抽出** Mermaid 引号三条与「绝对纪律：精准溯源」整段（改为指向格式契约的一句话）；
+叙述语气与结构要求**逐字保留** |
+| `wiki/generate-wiki.ts` | `buildPagePrompt(page, spec, variant, language)` 新增 `language` 参数，
+`withPageFormat()` 拼在页面提示词之后、任务元数据之前（格式契约靠前）；
+`generatePages` 内部解析 `options.language ?? config.doc_language` |
+
+#### 32.2 reader-first 纪律（§3.4.2）
+
+| 落点 | 内容 |
+| --- | --- |
+| `prompts/reader-first.zh.md` / `.en.md` | 移植自 lecture-to-notes `references/reader-first-writing.md`，
+**保留原措辞与编号**的 8 节 + 最终清单，改写为「代码 wiki」语境：
+保护源码事实（不把实现写成设计意图）/ 论证地图（开头回答「读完后能解释什么」）/
+段落单一职责 / 证据四问（**接口签名 / 调用方 / 触发条件 / 边界与失败模式**）/
+章节开合（「读者现在能做什么 / 下一步看哪页」收尾）/ 禁用词与 ~90 字长句复审信号 /
+七遍修订压缩为单遍结构化自检 |
+| `agents/reader-first.ts` | `getReaderDiscipline` / `formatReaderDiscipline` / `withReaderDiscipline` /
+`READER_FIRST_TAG` / `READER_SELF_CHECK`（第 8 节压缩版，供 polish Agent） |
+| `agents/create-agent.ts` | `withReaderDiscipline(...)` 拼在 `withStyleDiscipline(...)` **之后**，
+共用 `polish.enabled` 开关（纪律是同一层预防机制） |
+
+与 humanizer 的分工（重要决策）：humanizer = 反 AI 腔；reader-first = 教会读者。
+两者正交，reader-first 拼在后面。禁用词表与 humanizer 的 25 条模式
+去重后只保留差异部分（「值得注意的是」等已在 humanizer，reader-first 保留
+「以当前代码为准」这类**事实边界**措辞）。
+
+#### 32.3 polish 层扩展（§3.4.3）
+
+- `buildPolishSystemPrompt()` = humanizer 纪律全文 + `READER_SELF_CHECK` +
+  Embedded mode（顺序：纪律 → 自检 → 输出约定）。
+- `polish.ts` 新增纯函数 `checkPolishDiff(original, current)`：**只许改散文**——
+  frontmatter 块 / 全部 `Sources:` 行 / 全部 Mermaid 代码块**逐字不变**，
+  任一被改动返回 `PolishDiffViolation`（kind = frontmatter / sources / mermaid）。
+- 回滚语义升级：原「改坏 Mermaid 语法才回滚」→「越界即回滚」；
+  reason 新增 `structure-rollback`（Mermaid 越界仍记 `mermaid-rollback`，
+  保持旧调用点文案不变）；Mermaid 越界时额外附 `validateMermaidContent` 的语法详情。
+
+### 行为差异
+
+- 页面提示词：格式契约从「散在正文」变为「独立 `<page_format>` 块」，
+  并新增 8 条交付前自检清单；既有叙述 / 结构 / 语气要求逐字保留。
+- 页面 Agent 系统提示：humanizer 块之后多一个 `<reader_first>` 块
+  （`polish.enabled=false` 时两者都不注入）。
+- polish：`mode=full` 时多一次「教学型」结构化自检；改 frontmatter / `Sources:` /
+  Mermaid 块都会被回滚（此前只有改坏 Mermaid 语法才回滚）。
+
+### 兼容性
+
+- `GenerateWikiOptions` 新增**可选** `language`（缺省 = `config.doc_language`）；
+  `buildPagePrompt` 新增可选第 4 参数（旧调用点零改动，但本仓库内调用点已全部传入）。
+- `PolishOutcome.reason` 新增 `structure-rollback`（联合类型扩展，旧匹配仍成立）。
+- 旧配置零影响：`doc_language` 是既有必填字段；`polish.*` 缺省值不变。
+- 工具名 / schema / 提示词里的**工具调用指令**（`write_page` 参数要求、输出路径规范）
+  全部保留在 `buildPagePrompt` 末尾未动。
+- `tsup-md-text` 插件按 `.md` 后缀全局接管，新增资产无需改构建配置；
+  `md.d.ts` 的 `*.md` 声明同样覆盖。
+
+### 验证（实际执行结果）
+
+- `bun run test:page-format`（新套件）：**37/37**——两语言资产节数 / 列表项 / 清单条数
+  一一对应；语言选择与回退；注入块标签与开关；reader-first 拼在 humanizer 之后；
+  `buildPagePrompt` 含格式契约且保留既有段落（`en` 选英文契约、块只注入一次）；
+  polish 系统提示 = 纪律 + 自检 + Embedded mode 且顺序正确。
+- `bun run test:pages`：page-polish **16 → 24**（+8：`checkPolishDiff` 纯函数——
+  只改散文安全 / 改 frontmatter / 改 Sources 行号 / 删 Sources 行 / 改 Mermaid 节点 /
+  改块外散文安全 / 多项越界全部列出 / 完全相同）；既有 Mermaid 回滚端到端仍绿。
+- `bun run mock:wiki`：`completed=5 failed=0`（提示词改动不破坏既有链路）。
+- `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+
