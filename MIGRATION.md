@@ -1019,7 +1019,7 @@ polish:
 
 | 阶段 | 执行方式 | AI 输出工具 | 代码侧动作 |
 |---|---|---|---|
-| 1 分类 | 1 个 Agent（Repo Map 全局分析） | `submit_sections`（4~8 个 section：title + description） | 写 wiki.json 骨架（sections + 空 pages），强制包含概览/快速开始/核心架构 |
+| 1 分类 | 1 个 Agent（Repo Map 全局分析） | `submit_sections`（3~8 个 section：title + description） | 写 wiki.json 骨架（sections + 空 pages），强制包含概览/核心架构 |
 | 2 分主题 | 遍历 sections，每 section 1 个 Agent，p-limit 并发 | `submit_section_topics`（title 草稿 + slug + group + level + associatedFiles） | 统一分配 slug 序号与 file 名、去重，加锁读-改-写合并进 wiki.json；单 section 失败记 `failedSections` 不阻断其余 |
 | 3 标题 | 遍历 sections（有页面的），每 section 1 个 Agent | `refine_section_titles`（仅 slug + title） | 写回 title；输出量极小，失败保留原 title |
 | 4 文章 | 现有 `generateWikiContent` | `write_page`（不变） | 不改 |
@@ -1097,10 +1097,10 @@ AI 归并 + 代码兜底」四层机制，代码不替 AI 做语义决策。
 | 档位 | 分类数 | 每分类文章数 | 标题精修 | 附加要求 |
 | --- | --- | --- | --- | --- |
 | `minimal` | 固定 1（概览） | 固定 1 | 跳过 | 页面提示词附加「全景导览」：必须用 Mermaid 架构图梳理模块关系与数据流 |
-| `low` | 3~5（基础分类已强占 3） | 1~3 | 跳过 | — |
-| `medium` | 4~6 | 3~5 | 保留 | — |
-| `high`（默认） | 4~8 | 3~10 | 保留 | — |
-| `max` | 4~8 | 5~12 | 保留 | 强调全面详尽、鼓励更深关联文件探索 |
+| `low` | 2~5（基础分类已强占 2） | 1~3 | 跳过 | — |
+| `medium` | 3~6 | 3~5 | 保留 | — |
+| `high`（默认） | 3~8 | 3~10 | 保留 | — |
+| `max` | 3~8 | 5~12 | 保留 | 强调全面详尽、鼓励更深关联文件探索 |
 
 ### 18.2 四层数量防线（代码落点）
 
@@ -2373,7 +2373,7 @@ zread-pi 只有**结构数量**门（`blueprint.detail` 的 section / topic 篇�
 - **下限表** `CONTENT_GATE_SPECS`：散文下限 = `base（Beginner 1200 /
 Intermediate 1800 / Advanced 2400）+ perFile 200 × min(关联文件数, 8)`，
 上限 `proseMax = base + 8 × perFile`（让上限实际可触发）。
-- **mermaid 是否必需**由 section 角色（`概览` / `overview` / `快速开始` /
+- **mermaid 是否必需**由 section 角色（`概览` / `overview` /
 `核心架构`）或 minimal 档的 panorama 要求派生（`mermaidRequiredFor`），
 **与难度等级正交**——不挂在 level 表上。
 - **拦截点**：`write_page.call` 在 Mermaid 校验**之后**追加内容门，
@@ -2827,4 +2827,103 @@ group / level / associatedFiles / topicSummary 结构性不可能被改动；
 | P1-1 | §3.3 溯源台账（符号可溯 WARN / associatedFiles FAIL / 跨页重复） | v1.16.0 |
 | P1-2 | §3.4 页面格式资产 + reader-first 纪律 + polish 只许改散文 | v1.17.0 |
 | P2 | §3.5 标题诊断信号 + 数量一致性自检 + 重写率统计 | v1.18.0 |
+
+---
+
+## 34. 移除「快速开始」强制基础分类（v1.19.0）
+
+### 背景
+
+五阶段迁移全部落地后的一次**取向修正**（非 plan.md 内容，是独立决策）。
+
+原设计在所有非 minimal 档位强制三个基础分类：概览 / **快速开始** / 核心架构。
+复盘时判定「快速开始」这一条**与工具的定位和反注水机制冲突**：
+
+1. **受众错配**：wiki 的读者是「准备接手或深入研究源码的开发者」，
+   安装 / 配置 / 运行步骤是 README 里 10 秒能拿到的东西，不是需要 Agent
+   读源码综合的内容；wiki 的差异化价值在架构、设计意图、模块职责、失败模式。
+2. **可信度风险最高**：工具不执行安装命令，生成的快速开始最容易写出
+   「看起来对、跑不通」的命令与版本号；而溯源机制（`Sources:` 指向源文件）
+   对安装步骤恰恰最无力——安装步骤本来就 self-evident，不是「需要证据的论断」。
+3. **与反注水机制自相矛盾（决定性）**：`codeRecommendedFor` 要求代码块来自
+   **关联源文件**（「源没有代码时正确答案是 0」），但快速开始这页天然该写
+   shell 命令；同时它又被 `OVERVIEW_SECTIONS` 强制要求 Mermaid。一边逼出
+   过程性内容、一边逼它配图、一边要求源码代码块——模型只能注水凑，
+   而密度门的存在意义正是抓注水。
+4. **一刀切**：快速开始只对「产物本身就是装来跑的」仓库（CLI / 库 / 框架）
+   有价值；内部微服务、纯模块库根本没有外部安装故事，强行塞一页只能是
+   hollow 内容。
+
+**决策：直接删除，不做「按需派生」。** 检测可安装面本身是新的不可靠判据，
+且把简单问题复杂化。基础分类应该是**对任何代码库都成立的骨架**——
+概览（它是什么）+ 核心架构（它怎么组织）这两条对所有仓库都成立，快速开始不是。
+
+### 改动
+
+#### 34.1 核心逻辑
+
+- `packages/utils/src/output/wiki-content.ts`：`BASE_SECTIONS` zh / en
+  各删除 `快速开始` / `Quick Start`（3 → 2），三处 JSDoc 同步。
+- `packages/orchestrator/src/agents/blueprint-detail.ts`：
+  `BLUEPRINT_DETAIL_SPECS` 的 sections **下限 -1**（low 3→2、medium/high/max 4→3）。
+  必要性：`judgeQuantity` 判的是 `normalizeBlueprintSections` **归一化后**
+  的 count（`output-tools.ts` 的 `submit_sections.call`），基础分类少一个则
+  下限必须同步降一，否则「模型只贡献基础分类即达标」的旧语义被破坏。
+  `BASE_SECTION_NOTE` 两处文案同步（三个 → 两个）。
+- `packages/orchestrator/src/prompts/classify.ts`：数量目标的 base 块改两个
+  分类；示例 JSON 删 `快速开始` 条目（6 → 5 个分类）。
+- `packages/orchestrator/src/tools/output-tools.ts`：`submit_sections` 的
+  JSDoc + schema description。
+- `packages/orchestrator/src/wiki/content-gate.ts`：`OVERVIEW_SECTIONS` 删
+  `快速开始` / `quick start`——**该角色的页面不再强制 Mermaid**
+  （`概览` / `核心架构` 仍强制）。失败文案本身只写「概览/核心架构类」，无需改。
+
+#### 34.2 两个易漏的硬伤（执行时实际踩到）
+
+1. **`OVER_SECTIONS` 必须补一个领域**：`blueprint-detail.ts` 的
+   `OVER_SECTIONS` 原为 3 基础 + 6 领域 = **9**，靠 `9 > max 8` 触发「分类数
+   超出上限」→ 缩编 subagent 整条 C1 链路。删一个基础分类后变成 2 + 6 = **8**，
+   **恰好不再超限**，C1 缩编链路会**静默失效**（不报错，只是不再走那条路径）。
+   → 处理：追加 `领域G`，保持 2 + 7 = 9 > 8。
+2. **`mock-generate.ts` 的用量合计算术**：底部合计行是按请求数**硬算**的
+   （不是动态读值）。42 → 32 请求后，输入侧 5040 → 3840（3.8k）、
+   输出 1260 → 960；且 `formatBytes` 在 <1000 时**不带 k 后缀**
+   （`960 → "960"`，而 `1020 → "1.0k"`），重生成断言跨越了这个边界。
+
+#### 34.3 回归断言（防回潮）
+
+- `content-gate.ts`：删「快速开始页强制 Mermaid」，改为**反向**断言——
+  `快速开始` / `Quick Start` 不再强制 Mermaid，而 `概览` / `核心架构` 仍强制。
+- `blueprint-detail.ts`：**空输入只强补两个基础分类**（中英文各一断言）；
+  并断言「模型主动提交『快速开始』仍作为普通分类保留」——它只是不再被强制、
+  不再强制 Mermaid，不是被禁止。
+
+### 行为差异
+
+| 维度 | 迁移前 | 迁移后 |
+| --- | --- | --- |
+| 非 minimal 基础分类 | 概览 / **快速开始** / 核心架构（3 个） | 概览 / 核心架构（2 个） |
+| `low` 分类数区间 | 3~5 | 2~5 |
+| `medium` / `high` / `max` 下限 | 4 | 3 |
+| 「快速开始」页 Mermaid 强制 | 强制 | 该分类已不存在，规则随 `OVERVIEW_SECTIONS` 删除失效 |
+
+**旧产物兼容**：`loadWikiBlueprint` 只按字段加载，不校验基础分类集合；
+`syncWiki` 的 merge 模式「既有分类必留」，旧 wiki 里的快速开始分类会被原样保留
+（只是不再强补）。`apps/browse` 无任何快速开始硬编码，多档变体切换不受影响。
+
+### 验证（实际执行结果）
+
+- `blueprint-detail` **116/116**（含 3 条新回归断言）；`content-gate` **76/76**；
+  `e2e-blueprint` **52/52**；`e2e-sync` **23/23**；`mock-generate` **43/43**；
+  `cli-target-dir` **33/33**。
+- `bun run mock:wiki`：产物 `2 个分类 / 4 页`，`completed=4 failed=0`，
+  交付闸门 `overall=PASS`（structure 组 `4 页 / 2 分类`）。
+- `bun run typecheck` 0 错误；`bun run test` 全量套件绿。
+
+### 风险（真机待确认）
+
+真机模型在提示词只要求 2 个基础分类时**仍可能输出「安装 / 运行」类内容**——
+这无害，它会变成一个普通业务分类（不再强制 Mermaid），数量门照常校验区间。
+wiki 由此不再提供「怎么跑起来」的入口，这是**有意为之**：wiki 定位是源码理解
+而非使用指南，安装说明应由人工维护的 README 承担。
 
