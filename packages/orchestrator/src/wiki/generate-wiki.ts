@@ -37,6 +37,7 @@ import { verifyWiki } from './verify-wiki.js';
 import { createRunLogSink } from '../agents/run-log-sink.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
+import { withPageFormat } from '../agents/page-format.js';
 import type { AppConfig, BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
@@ -53,13 +54,18 @@ export function buildPagePrompt(
   page: WikiPage,
   spec: BlueprintDetailSpec,
   variant?: BlueprintDetailLevel | null,
+  language?: string | null,
 ): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
   const topicSummary = page.topicSummary ? `\n**主题摘要**: ${page.topicSummary}` : '';
   const panorama = spec.panorama ? `\n\n---\n\n${MINIMAL_PANORAMA_REQUIREMENT}` : '';
   const wikiBase = variant ? `.zread-pi/wiki/${variant}` : '.zread-pi/wiki';
 
-  return `${PageAgentPrompt}
+  // 页面格式契约（frontmatter / 标题层级 / Mermaid 引号 / 溯源格式 / 自检清单）：
+  // 与叙述语气正交的硬性约束，拼在页面提示词之后、任务元数据之前。
+  const withFormat = withPageFormat(PageAgentPrompt, language);
+
+  return `${withFormat}
 
 ---
 
@@ -392,6 +398,8 @@ async function generatePages(
   startTime: number,
 ): Promise<WikiResult> {
   const config = await loadConfig();
+  // 页面格式契约按 doc_language 选 zh / en 版本（`en` 之外一律中文）
+  const docLanguage = options?.language ?? config.doc_language ?? null;
   // minimal 会在页面提示词里附加「全景导览」要求
   const spec = getDetailSpec(variant);
   const wikiDir = getWikiDir(variant);
@@ -581,7 +589,7 @@ async function generatePages(
             LsTool,
             writePageTool
           ],
-          prompts: buildPagePrompt(page, spec, variant),
+          prompts: buildPagePrompt(page, spec, variant, docLanguage),
           // maxTurns 由 config.agent.max_turns 提供（可在配置界面修改）；调用方可选覆盖
           maxTurns: options?.maxTurns,
           runLog: pageSink,
