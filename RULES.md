@@ -105,6 +105,7 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 编排层：`orchestrator.ts`（`generateWikiCatalog`）、`wiki/generate-wiki.ts`（`generateWikiContent`）、
 `wiki/content-gate.ts`（内容密度门纯函数 + 下限表常量，对齐 `blueprint-detail.ts` 的组织方式）、
 `wiki/verify-wiki.ts`（交付闸门纯逻辑，**只读**：不写任何产物）、
+`wiki/traceability.ts`（溯源台账纯函数，**只读**：只读缓存清单与被引用的源文件）、
 `agents/create-agent.ts`（读配置下发 maxTurns / thinkingLevel / contextWindow / maxTokens）、`prompts/`（蓝图与页面 Agent 提示词，
 **工具名写死在其中**）、`wiki/memory.ts`（全局记忆写入）。
 
@@ -119,6 +120,10 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 - 交付闸门（`verify-wiki.ts`）**只读**：`verify.json` 只能由 CLI（`apps/cli/src/commands/verify.ts`）
   或 `generate-wiki.ts` 的 `verifyAfterGenerate` 集成落盘；**不得改 `RunMeta`**（摘要是 run 目录下的独立文件）；
   校验失败不判生成失败（闸门是事后体检，不是交付前置）；
+- 溯源台账（`traceability.ts`）**只读**，且复用 repo-analyzer 已产出的缓存清单
+  （`last_manifest.json` / `last_symbols.json`）零额外解析成本；符号层只 WARN
+  （幻觉 / 缓存过期 / 文档名无法区分），蓝图 `associatedFiles` 才 FAIL；
+  `parseSourceRefs` 迁入本模块后旧导入路径必须保留（verify-wiki re-export）；
 - 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §1.1 的对应决策行。
 
 ### 6. `apps/cli`（终端界面）

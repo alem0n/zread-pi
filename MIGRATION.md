@@ -2509,3 +2509,78 @@ CLI 子命令 `zread-pi verify`（`apps/cli/src/commands/verify.ts`）。
   空目录 SKIP + 退出码 0；`--help` 文案正确。
 - `bun run test`：全量套件绿（含新 `test:verify`）；`bun run typecheck` 0 错误。
 
+---
+
+## 31. 溯源台账（P1-1，v1.16.0）
+
+### 背景
+
+迁移自 lecture-to-notes 的 `scripts/extract_claims.py`（详见 `plan.md` §3.3 / §5.5）。
+那是一条「脚本决定源里有什么，不由模型决定」的两段式管线——
+**先提取**（页面声称的全部事实）**再逐条 check**（对照源码事实）。
+
+v1.15.0 的 `verify-wiki` 只做了溯源的**路径 / 行号**层（verify-wiki 内联实现）。
+本步把它抽成独立模块并补上**符号层**，同时复活旧版 `validate_blueprint` 的存在性判定。
+
+### 改动
+
+落点 `packages/orchestrator/src/wiki/traceability.ts`（纯函数 + 只读）。
+
+| 函数 | 作用 |
+| --- | --- |
+| `parseSourceRefs` | 从 `Sources:` 行解析全部引用（`[名](path)` / `[名](path#Lx-Ly)`）；
+外链 / 邮箱 / 纯锚点排除（不是仓库内溯源）。**从 verify-wiki 迁入，旧导入路径保留** |
+| `collectKnownSymbols` | 由 `last_symbols.json` 构造已知符号集合（exports / functions / imports） |
+| `findUnresolvedSymbols` | 正文行内代码引用了、但符号缓存里不存在的标识符（**WARN**）；
+先剥离围栏代码块，避免把代码示例当成溯源引用；过短名 / 非标识符不报；上报有上限 |
+| `collectManifestPaths` / `isPathReal` | 路径台账：manifest 命中**或**磁盘存在（并集，避免对非源文件假 FAIL） |
+| `countLines` | 流式按行计数（不全量缓冲；只对被引用的文件执行） |
+| `checkAssociatedFiles` | 蓝图维度：每页 `associatedFiles` 真实存在（**复活旧版 `validate_blueprint`**） |
+| `checkTraceability` | 汇总：两段式提取 → 逐条 check，返回 `badPaths`（FAIL）/ `badLines`（FAIL）/
+`duplicateClaims`（WARN）/ `unresolvedSymbols`（WARN）/ `symbolsUnavailable` |
+
+### verify-wiki 的检查组变化
+
+- `structure` 组**新增**一项：`associatedFiles` 存在性（蓝图声明）。
+- `traceability` 组从 3 项变 4 项：路径 / 行号 / 跨页重复 / **符号可溯**。
+  符号检查与 `Sources:` **正交**——即使页面没有 Sources（`noSources` FAIL）也照跑，
+  因为符号幻觉与溯源声明是两类独立问题。
+- 缓存读取并行：`loadCachedManifest()` + `loadCachedSymbols()`。
+- **符号缓存缺失 → SKIP**（没有台账就无据可判，不报 FAIL；
+  mock:wiki 流程不产 `last_symbols.json`，故夹具产物恒 SKIP，真机生成有缓存）。
+
+### 行为差异
+
+- 旧行为：溯源只查「路径在不在 / 行号越不越界」。
+- 新行为：多一层**符号可溯**（WARN）——页面正文里 `` `computeMysteryResult` `` 
+  这类幻觉函数名会被列出来供人工确认；蓝图声明的 `associatedFiles` 
+  指向不存在的路径直接 FAIL（此前完全不查）。
+- 符号层**只 WARN 不 FAIL**：匹配不到可能是幻觉、也可能是缓存过期或引用的是
+  文档 / 工具名（`write_page` 之类），语义上不足以直接判失败。
+
+### 兼容性
+
+- 纯新增：`traceability.ts` 只读，不写任何产物。
+- `parseSourceRefs` 从 verify-wiki 迁到 traceability，**旧导入路径保留**
+  （`verify-wiki.ts` re-export），测试与外部调用点零改动。
+- `ValidateBlueprintTool`（旧版一次性蓝图工具）标记为**仅归档**（与
+  `generate_blueprint` 同策略：当前流程不使用，提示词与测试均不引用），
+  存在性判定迁移到 `checkAssociatedFiles`。
+- 缓存文件（`last_manifest.json` / `last_symbols.json`）由 repo-analyzer 
+  在扫描期产出，本步**零额外解析成本**（只读）。
+
+### 验证（实际执行结果）
+
+- `bun run test:traceability`（新套件）：**37/37**——符号集合构造 / 幻觉识别 /
+围栏剥离 / 噪声过滤 / 上限保护；manifest 路径归一化与磁盘兜底；流式行计数
+（含空文件与不存在文件）；`checkAssociatedFiles`；`checkTraceability` 端到端
+（badPaths / badLines 带总行数 / 反转区间 / 单行 `#L2` / 跨页重复 / noSources /
+符号维度 / 外链锚点排除）。
+- `bun run test:verify`：**54/54**（既有断言全绿；structure 组多 1 项 associatedFiles，
+  traceability 组多 1 项符号检查——夹具无符号缓存时 SKIP）。
+- 真机 CLI（为夹具写入合成符号缓存后）：符号全绿 → PASS；
+  在页面里加入幻觉函数 `computeMysteryResult` →
+  `1 个行内代码标识符未在符号缓存中找到（WARN，供人工确认）` 且只列幻觉项
+  （`add` 正确忽略）；无缓存 → `SKIP`。
+- `bun run test`：全量套件绿（含新 `test:traceability`）；`bun run typecheck` 0 错误。
+
