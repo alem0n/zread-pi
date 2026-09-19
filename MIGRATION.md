@@ -2682,3 +2682,100 @@ plan.md §3.4。三件事：
 - `bun run mock:wiki`：`completed=5 failed=0`（提示词改动不破坏既有链路）。
 - `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
 
+---
+
+## 33. 标题诊断信号与只改标题自检（P2，v1.18.0）
+
+### 背景
+
+plan.md §3.5（迁移的**最后一段**）。把 lecture-to-notes
+`structure-reorder.md` 的诊断信号表移植到 `refine_section_titles`。
+
+标题阶段此前只规定「≤20 字 / 产品架构视角 / 不改含义」，**没有诊断信号**——
+模型不会主动发现「这串标题其实层级错了」（母题被拆散 / 带编号 / 带续接词）。
+工具侧也只有 `applySectionTitles` 的 `unknown` 计数，缺一条「页数必须一致」的硬检查。
+
+### 改动
+
+#### 33.1 提示词追加诊断段
+
+`prompts/titles.ts` 新增「诊断信号：哪些迹象说明标题层级坏了」段，对齐
+`structure-reorder.md` §2.1 的 7 条（语境从「一篇笔记的 H1 骨架」改为
+「一个分类下的页面标题」）：
+
+| # | 迹象 |
+| - | --- |
+| 1 | 标题带**子层级编号**（「2.3 注意力」「B2 编码器」） |
+| 2 | 标题带**续接词**（「（续）」「再谈…」「…的其余部分」「…补充」） |
+| 3 | **相邻多个标题语义上同属一个母题** |
+| 4 | 各标题**字数量级悬殊**（最短不足最长 1/5） |
+| 5 | 标题是**具体技术点**而非主题块（「Softmax 的温度系数」） |
+| 6 | 同一个母题名词在**多个标题里反复出现** |
+| 7 | 标题**命名风格不统一** |
+
+并带上 `structure-reorder.md` 的两条策略：**优先收敛合并、少拆分**；
+没有母题时保持原样、不硬造。诊断结果只允许通过「改写标题」落地——
+**不得新增、删除、调换页面**，不得改 slug/file/associatedFiles/group/level。
+
+#### 33.2 工具侧两项机械检查
+
+`createRefineSectionTitlesTool(section, options)` 新增两个**可选**字段：
+
+- `expectedSlugs?: string[]` —— **数量一致性自检**：在落盘**之前**校验，
+  模型交出陌生 slug 或漏掉本分类页面时直接 `is_error` + 列出具体差异，
+  **不落盘**（对齐 `structure-reorder.md` §6 的「页数不变」那条）。
+  由阶段驱动器传入 `target.pages.map(p => p.slug)`。
+- `onResult?: (result: ApplyTitlesResult) => void` —— **重写率统计**回调，
+  阶段驱动器用它记 `titles` 命名 logger：
+  `分类「X」标题重写率：updated/total（rate%，跳过 N，未知 M）`，
+  用于验证诊断段是否真的促使模型改写标题。
+
+#### 33.3 字段不可变性（审查修订）
+
+原设想的「校验除 title 外其他字段字节不变」是**伪检查**：
+`applySectionTitles` 实现里**只赋值 `page.title`**，slug / file / section /
+group / level / associatedFiles / topicSummary 结构性不可能被改动；
+且 `refine_section_titles` 工具入参只有 `{slug, title}[]`，拿不到前后页面对象。
+因此把不可变性写成 `applySectionTitles` 的**实现注释**（`wiki-content.ts`），
+真正有价值的机械检查放在工具侧（§33.2）。
+
+### 行为差异
+
+- 标题阶段提示词多一段诊断信号（7 条 + 收敛优先策略）。
+- 模型若漏页或交出陌生 slug：此前照常落盘（漏的页保留原标题，陌生的被 `unknown` 跳过）；
+  现在**整体拒绝并要求重提**（is_error + 具体差异，不落盘）。标题阶段失败语义
+  不变——仍不判页失败、保留原标题（`refine_section_titles` 的 `forwardErrors: false`）。
+- 新增一条重写率日志（info 级，`titles` 命名 logger）。
+
+### 兼容性
+
+- `expectedSlugs` / `onResult` 都是**新增可选**字段：不传时行为与迁移前一致
+  （数量自检跳过，由 `applySectionTitles` 自身的 `unknown/skipped` 兜底）。
+- 提示词追加段落，既有 8 条输出规范**逐字保留**；工具名 / schema / 描述未改。
+- `ApplyTitlesResult` 是既有的导出类型，工具侧新增 `import type`。
+
+### 验证（实际执行结果）
+
+- `test:blueprint` 新增 `titles-diagnostic.ts`：**28/28**——提示词含 7 条信号与策略；
+  陌生 slug / 漏 slug → `is_error` 且**不落盘**（标题未变）；正确提交 → 落盘 +
+  slug/file/section/associatedFiles 逐字不变 + `onResult` 带 updated=2/skipped=1/unknown=0；
+  `expectedSlugs` 缺省时跳过数量自检（旧调用点兼容）。
+- 真机链路（`e2e-blueprint.ts` + 真实捕获日志）：标题阶段正常落盘，
+  重写率日志按分类输出（如 `分类「Overview」标题重写率：3/3（100%，跳过 0，未知 0）`）。
+- `bun run mock:wiki`：`completed=5 failed=0`（low 档位跳过标题精修，链路不破）。
+- `bun run test`：全量套件绿；`bun run typecheck` 0 错误。
+
+---
+
+## 迁移完成度
+
+`plan.md` 的五个阶段全部落地：
+
+| 阶段 | 内容 | 版本 |
+| --- | --- | --- |
+| P0-1 | §3.1 内容密度门（度量 / 拦截 / enforce 降级落盘 / 配置界面 / 生成页 ⚠ 标记） | v1.14.0 |
+| P0-2 | §3.2 verify-wiki 交付闸门（五组检查 + CLI 子命令 + verify.json） | v1.15.0 |
+| P1-1 | §3.3 溯源台账（符号可溯 WARN / associatedFiles FAIL / 跨页重复） | v1.16.0 |
+| P1-2 | §3.4 页面格式资产 + reader-first 纪律 + polish 只许改散文 | v1.17.0 |
+| P2 | §3.5 标题诊断信号 + 数量一致性自检 + 重写率统计 | v1.18.0 |
+

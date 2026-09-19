@@ -113,7 +113,9 @@ frontmatter / `Sources:` / Mermaid 三项 diff 断言）、
 `agents/reader-first.ts` + `prompts/reader-first.*.md`（读者优先教学型纪律，与 humanizer 正交）、
 `agents/style-discipline.ts`（humanizer 纪律 + polish 系统提示拼装）。、
 `agents/create-agent.ts`（读配置下发 maxTurns / thinkingLevel / contextWindow / maxTokens）、`prompts/`（蓝图与页面 Agent 提示词，
-**工具名写死在其中**）、`wiki/memory.ts`（全局记忆写入）。
+**工具名写死在其中**；其中 `titles.ts` 含标题阶段的**诊断信号段**——
+对齐 lecture-to-notes `structure-reorder.md` 的 7 条）、
+`wiki/memory.ts`（全局记忆写入）。
 
 **修改要点**：
 
@@ -136,6 +138,8 @@ frontmatter / `Sources:` / Mermaid 三项 diff 断言）、
   但要确认 `import ... with { type: 'text' }` 的导入路径正确；
 - `page-agent.ts` 只做**文本外置**：与叙述语气无关的硬性格式契约抽到
   `page-format.*.md`，叙述 / 语气 / 结构要求逐字保留；改完跑 `mock:wiki` 确认链路不破；
+- 标题阶段的 `expectedSlugs` 数量自检必须**在落盘前**执行（陌生/遗漏 slug →
+  is_error 且不落盘）；`expectedSlugs` / `onResult` 保持**可选**（旧调用点兼容）；
 - 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §1.1 的对应决策行。
 
 ### 6. `apps/cli`（终端界面）
