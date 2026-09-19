@@ -427,3 +427,31 @@ export function resolveGateMode(config: {
   if (!gate || gate.enabled === false) return 'off';
   return gate.mode ?? 'warn';
 }
+
+// ==================== 与 Python 参考实现的黄金值对照（§5.5） ====================
+
+/**
+ * CJK 统一表意文字计数。
+ *
+ * 逐字移植自 `verify_notes.py:38` 的 `CJK = re.compile(r"[一-鿿]")`
+ * （U+4E00..U+9FFF，不含扩展区 B 及以外）。供黄金值对照（见
+ * `test/golden-parity.ts`）：同一输入下 TS 与 Python 的计数必须一致。
+ * 语义保持源实现，不随手「优化」。
+ */
+const CJK_RE = /[\u4e00-\u9fff]/u;
+
+export function countCjkChars(text: string): number {
+  return [...text].filter((char) => CJK_RE.test(char)).length;
+}
+
+/**
+ * 数字台账的 TS 侧口径（对照 `extract_claims.py::numbers_in`）。
+ *
+ * 语义：`\d+(?:[.,]\d+)*`——连续数字串，小数点 / 千分位逗号续接为一段。
+ * 逐字保持源正则语义（逗号是千分位而非分隔符，与 Python 同一输入下结果一致）。
+ */
+const NUMBER_RE = /\d+(?:[.,]\d+)*/g;
+
+export function numbersIn(value: string): string[] {
+  return value.match(NUMBER_RE) ?? [];
+}
