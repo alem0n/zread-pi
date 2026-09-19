@@ -54,7 +54,6 @@ await writeFile(
 
 const SECTIONS = [
 	{ title: "Overview", description: "项目定位与速览" },
-	{ title: "Quick Start", description: "安装配置与最小示例" },
 	{ title: "Core Architecture", description: "整体架构与模块协作" },
 	{ title: "核心模块", description: "问候模块的实现细节" },
 ];
@@ -78,26 +77,6 @@ const TOPICS: Record<string, Array<Record<string, unknown>>> = {
 			slug: "design-goals",
 			level: "Intermediate",
 			associatedFiles: ["README.md"],
-		},
-	],
-	"Quick Start": [
-		{
-			title: "快速开始指南",
-			slug: "quick-start",
-			level: "Beginner",
-			associatedFiles: ["src/greet.ts"],
-		},
-		{
-			title: "环境与安装",
-			slug: "environment-setup",
-			level: "Beginner",
-			associatedFiles: ["src/greet.ts"],
-		},
-		{
-			title: "最小可运行示例",
-			slug: "minimal-example",
-			level: "Beginner",
-			associatedFiles: ["src/greet.ts"],
 		},
 	],
 	"Core Architecture": [
@@ -392,16 +371,14 @@ const sections = ((blueprint?.sections as Array<{ title: string }> | undefined) 
 
 console.log("\n▶ 断言（三阶段正向）");
 check("wiki.json 已写出", blueprint !== undefined, wikiJsonPath);
-check("页面数与主题阶段一致", pages.length === 12, `实际 ${pages.length}`);
-check("sectionsCount 已回传", result.sectionsCount === 4, String(result.sectionsCount));
-check("pagesCount 已回传", result.pagesCount === 12, String(result.pagesCount));
+check("页面数与主题阶段一致", pages.length === 9, `实际 ${pages.length}`);
+check("sectionsCount 已回传", result.sectionsCount === 3, String(result.sectionsCount));
+check("pagesCount 已回传", result.pagesCount === 9, String(result.pagesCount));
 check("failedSections 为空", result.failedSections === undefined, JSON.stringify(result.failedSections));
 
 check(
-	"分类清单含强制基础分类（Overview/Quick Start/Core Architecture）",
-	["Overview", "Quick Start", "Core Architecture"].every((title) =>
-		sections.some((section) => section.title === title),
-	),
+	"分类清单含强制基础分类（Overview/Core Architecture）",
+	["Overview", "Core Architecture"].every((title) => sections.some((section) => section.title === title)),
 	JSON.stringify(sections.map((section) => section.title)),
 );
 check(
@@ -448,8 +425,8 @@ check(
 	[...stages].join(","),
 );
 check(
-	"分主题事件带分类级进度（total=4）",
-	events.some((event) => event.stage === "topics" && event.progressTotal === 4),
+	"分主题事件带分类级进度（total=3）",
+	events.some((event) => event.stage === "topics" && event.progressTotal === 3),
 	JSON.stringify(events.filter((event) => event.progressTotal !== undefined).slice(0, 5)),
 );
 
@@ -465,13 +442,13 @@ check(
 	JSON.stringify(agentKeys),
 );
 check(
-	"每个分类一个主题 Agent 行（4 行）",
-	topicsKeys.length === 4,
+	"每个分类一个主题 Agent 行（3 行）",
+	topicsKeys.length === 3,
 	JSON.stringify(topicsKeys),
 );
 check(
-	"每个有页面的分类一个标题 Agent 行（4 行）",
-	titlesKeys.length === 4,
+	"每个有页面的分类一个标题 Agent 行（3 行）",
+	titlesKeys.length === 3,
 	JSON.stringify(titlesKeys),
 );
 check(
@@ -497,7 +474,7 @@ check(
 const visitedSections = new Set(seenSections);
 check(
 	"每个分类都跑到了主题/标题阶段",
-	["Overview", "Quick Start", "Core Architecture", "核心模块"].every((title) => visitedSections.has(title)),
+	["Overview", "Core Architecture", "核心模块"].every((title) => visitedSections.has(title)),
 	[...visitedSections].join(","),
 );
 
@@ -513,7 +490,7 @@ check("durationMs 已回传", typeof result.durationMs === "number" && result.du
 check(
 	"submit_sections 成功结果带常驻数量反馈（区间内也发）",
 	seenToolResults.some((content) =>
-		content.includes("分类数量反馈：当前 4 / 要求 4~8（当前档位：high）"),
+		content.includes("分类数量反馈：当前 3 / 要求 3~8（当前档位：high）"),
 	),
 	seenToolResults.filter((content) => content.includes("数量反馈")).slice(0, 2).join(" || "),
 );
@@ -578,9 +555,9 @@ check(
 	partial.failedSections?.some((entry) => entry.section === "核心模块" && entry.stage === "topics") === true,
 	JSON.stringify(partial.failedSections),
 );
-check("失败分类不阻断其余分类", partialPages.length === 9, `实际 ${partialPages.length}`);
+check("失败分类不阻断其余分类", partialPages.length === 6, `实际 ${partialPages.length}`);
 check("失败后 wiki.json 仍可加载", partialBlueprint !== undefined);
-check("失败后 pagesCount 反映实际页面数", partial.pagesCount === 9, String(partial.pagesCount));
+check("失败后 pagesCount 反映实际页面数", partial.pagesCount === 6, String(partial.pagesCount));
 check(
 	"未产出工具的分类其 Agent 行被标为 failed（业务判定，不是运行状态）",
 	partialAgentEvents.some(
@@ -698,7 +675,7 @@ check("末事件是 run_end", logEvents[logEvents.length - 1]?.kind === "run_end
 
 // 事件携带 agent 身份与 sessionId（轨迹回放并发归属的依据）
 const agentStarts = logEvents.filter((event) => event.kind === "agent_start");
-check("有 agent_start 事件（1 分类 + N 主题 + N 标题）", agentStarts.length >= 8, `count=${agentStarts.length}`);
+check("有 agent_start 事件（1 分类 + N 主题 + N 标题）", agentStarts.length >= 7, `count=${agentStarts.length}`);
 const sessions = agentStarts
 	.map((event) => event.agent?.sessionId)
 	.filter((value): value is string => typeof value === "string");

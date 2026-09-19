@@ -191,12 +191,13 @@ console.log('\nB) 下限表（自适应 level × 关联文件数）');
   const overview = makePage({ section: '概览', level: 'Beginner' });
   const overviewEn = makePage({ section: 'Overview', level: 'Advanced' });
   const core = makePage({ section: '核心架构' });
-  const quick = makePage({ section: '快速开始' });
   const other = makePage({ section: '工具函数' });
   check('概览页强制 Mermaid（中文）', mermaidRequiredFor(overview, highSpec) === true);
   check('Overview 页强制 Mermaid（英文，大小写不敏感）', mermaidRequiredFor(overviewEn, highSpec) === true);
   check('核心架构页强制 Mermaid', mermaidRequiredFor(core, highSpec) === true);
-  check('快速开始页强制 Mermaid', mermaidRequiredFor(quick, highSpec) === true);
+  // 「快速开始」基础分类已移除：该角色不再强制 Mermaid（回归断言，防回潮）
+  check('快速开始页不再强制 Mermaid（基础分类已移除）', mermaidRequiredFor(makePage({ section: '快速开始' }), highSpec) === false);
+  check('Quick Start 页不再强制 Mermaid（英文角色同步移除）', mermaidRequiredFor(makePage({ section: 'Quick Start' }), highSpec) === false);
   check('普通页不强制 Mermaid', mermaidRequiredFor(other, highSpec) === false);
   check('minimal 档 panorama 强制 Mermaid（无论 section）', mermaidRequiredFor(other, getDetailSpec('minimal')) === true);
   // 正交性：Beginner 概览页与 Advanced 概览页的 Mermaid 判定相同

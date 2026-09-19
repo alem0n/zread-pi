@@ -156,7 +156,7 @@ function outOfRangeResult(
 /**
  * Submit Sections Tool（分类阶段）
  *
- * 写入 wiki.json 骨架：sections（强制包含概览/快速开始/核心架构）+ 空 pages。
+ * 写入 wiki.json 骨架：sections（强制包含概览/核心架构）+ 空 pages。
  * sync 流程传 `merge: true`：保留既有分类与页面，只把新增分类补进 sections。
  *
  * `detail`（蓝图细节档位）控制数量区间；`state` 用于回传越界 / 缩编触发信息。
@@ -186,7 +186,7 @@ export function createSubmitSectionsTool(options: {
           type: 'array',
           description: merge
             ? `更新后的顶级分类清单（sync：既有分类必留，新增优先并入既有；总量含既有不超 ${spec().sections.max} 个）`
-            : `顶级分类清单（${spec().sections.min}~${spec().sections.max} 个；必须包含概览/快速开始/核心架构）`,
+            : `顶级分类清单（${spec().sections.min}~${spec().sections.max} 个；必须包含概览/核心架构）`,
           items: SECTION_ITEM_SCHEMA,
         },
       },

@@ -121,7 +121,7 @@ export interface TrajectoryGroupModel {
 export interface TrajectoryTurnModel {
   /** turn 序号；null = turn 之间的独立段（压缩 / run 收尾） */
   turn: number | null;
-  /** turn 标签（如「规划主题」「拟定标题 · 核心架构」「页面 · quick-start」） */
+  /** turn 标签（如「规划主题」「拟定标题 · 核心架构」「页面 · architecture」） */
   label: string;
   /** 会话归属键（agent.sessionId；独立段没有） */
   sessionId?: string;
