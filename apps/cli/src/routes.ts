@@ -16,6 +16,7 @@ import ConfigLanguagePage from "./views/config-language";
 import ConfigModelSizePage from "./views/config-model-size";
 import ConfigMaxTurnsPage from "./views/config-max-turns";
 import ConfigPolishPage from "./views/config-polish";
+import ConfigQualityPage from "./views/config-quality";
 import ConfigProviderDetailPage from "./views/config-provider-detail";
 import ConfigProviderPage from "./views/config-provider";
 import ConfigRetryPage from "./views/config-retry";
@@ -48,6 +49,8 @@ export const routes: RouteDefinition[] = [
   { pattern: "/config/model-size", create: () => new ConfigModelSizePage() },
   { pattern: "/config/max-turns", create: () => new ConfigMaxTurnsPage() },
   { pattern: "/config/polish", create: () => new ConfigPolishPage() },
+  // 内容质量门（quality.contentGate：off / warn / enforce + 生成后自动校验）
+  { pattern: "/config/quality", create: () => new ConfigQualityPage() },
   // 蓝图细节档位（blueprint.detail：minimal / low / medium / high / max）
   { pattern: "/config/detail", create: () => new ConfigDetailPage() },
   // 外部工具（rg / fd）：列表 → 详情（安装/卸载/启用开关 + 安装进度条）

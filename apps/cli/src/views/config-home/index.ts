@@ -109,6 +109,26 @@ const configItems: ConfigItem[] = [
     route: "/config/polish",
   },
   {
+    // 内容质量门（quality.contentGate）：页面是否干瘪的机械判定 + 生成后自动校验
+    key: "quality",
+    labelKey: "config.quality",
+    getValue: (config, t) => {
+      const gate = config.quality?.contentGate;
+      const enabled = gate?.enabled ?? true;
+      const mode = gate?.mode ?? "warn";
+      const stateLabel = enabled ? t("quality.enabled") : t("quality.disabled");
+      const modeLabel =
+        mode === "enforce"
+          ? t("quality.modeEnforce")
+          : mode === "warn"
+            ? t("quality.modeWarn")
+            : t("quality.modeOff");
+      return `${stateLabel} · ${modeLabel}`;
+    },
+    default: "warn",
+    route: "/config/quality",
+  },
+  {
     // 外部工具：展示就绪数量（rg / fd），详情见 /config/tools。
     // 注意：getValue 会在每次渲染时被调用，而状态探测要 spawn 子进程，
     // 因此这里只读页面初始化/返回时缓存的值（见 ConfigHomePage.toolsSummary）。

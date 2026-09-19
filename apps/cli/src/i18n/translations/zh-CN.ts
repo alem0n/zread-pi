@@ -49,6 +49,7 @@ export const zhCN: TranslationKeys = {
     maxTurns: '最大轮次',
     polish: '文风润色',
     blueprintDetail: '蓝图细节档位',
+    quality: '内容质量门',
     maxConcurrency: '最大并发数',
     maxRetries: '最大重试次数',
     default: '(默认: {default})',
@@ -242,6 +243,25 @@ export const zhCN: TranslationKeys = {
       '两种模式下，代码块、行内代码、Sources: 溯源行、Mermaid 引号标签与 YAML frontmatter 都受保护。',
     footer: 'ESC 返回 | ↑↓ 选择 | Enter 确认并返回 | t 启用/停用 | s 保存并返回',
   },
+  quality: {
+    title: '设置内容质量门',
+    current: '当前值',
+    intro:
+      '内容密度门把「页面是否只有干瘪 TL;DR」变成机械可判定的指标（散文篇幅 / 标题层级 / 溯源行 / Mermaid / 代码块 / 句首重复）。下限按难度与关联文件数自适应。',
+    enabled: '已启用',
+    disabled: '已停用',
+    modeOff: '关闭',
+    modeOffDesc: '完全不校验（行为与升级前一致）',
+    modeWarn: '仅告警（默认）',
+    modeWarnDesc: '计算并记录进页面结果，不拦截落盘，页面照常生成',
+    modeEnforce: '强制达标',
+    modeEnforceDesc: '未达标时拦截并要求重写；预算用尽仍未通过则 best-effort 落盘并标记告警',
+    verifyAfterGenerate: '生成后自动校验',
+    verifyAfterGenerateDesc: '生成完成后自动跑一次交付闸门（verify-wiki），默认关闭',
+    paddingHint:
+      '门限是下限不是目标：不要同义改写注水、不要为凑图表而加图；源里没有可写代码时代码块正确答案是 0。',
+    footer: 'ESC 返回 | ↑↓ 选择 | Enter 确认并返回 | t 启用/停用 | s 保存并返回',
+  },
   blueprintDetail: {
     title: '设置蓝图细节档位',
     current: '当前值',
@@ -390,5 +410,7 @@ export const zhCN: TranslationKeys = {
     stageTitlesIdle: '精修标题中',
     stageSection: ' · {section}',
     failedSections: '{n} 个分类失败',
+    gateWarn: '密度门未达标',
+    gateDegraded: '密度门降级落盘',
   },
 };

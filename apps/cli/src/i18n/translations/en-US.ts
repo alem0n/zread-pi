@@ -49,6 +49,7 @@ export const enUS: TranslationKeys = {
     maxTurns: 'Max Turns',
     polish: 'Style Polishing',
     blueprintDetail: 'Blueprint Detail',
+    quality: 'Content Quality Gate',
     maxConcurrency: 'Max Concurrency',
     maxRetries: 'Max Retries',
     default: '(default: {default})',
@@ -243,6 +244,25 @@ export const enUS: TranslationKeys = {
       'In both modes, code blocks, inline code, Sources: lines, Mermaid quoted labels and YAML frontmatter stay protected.',
     footer: 'ESC to go back | ↑↓ to select | Enter to apply and go back | t to enable/disable | s to save and go back',
   },
+  quality: {
+    title: 'Content Quality Gate',
+    current: 'Current',
+    intro:
+      'The content gate turns “is this page a thin TL;DR?” into mechanically decidable metrics (prose length, heading levels, Sources lines, Mermaid, code blocks, repeated openings). Floors adapt to page level and associated-file count.',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    modeOff: 'Off',
+    modeOffDesc: 'No checks at all (identical to pre-upgrade behavior)',
+    modeWarn: 'Warn (default)',
+    modeWarnDesc: 'Compute and record into the page result; never blocks writing, pages generate as usual',
+    modeEnforce: 'Enforce',
+    modeEnforceDesc: 'Block and request a rewrite when below the floor; if the budget runs out first, write best-effort and flag a warning',
+    verifyAfterGenerate: 'Verify after generate',
+    verifyAfterGenerateDesc: 'Run the delivery gate (verify-wiki) automatically after generation; off by default',
+    paddingHint:
+      'The floor is a floor, not a target: do not pad with rewording, do not add diagrams just to tick a box; when the sources have no writable code, the correct code-block count is 0.',
+    footer: 'ESC back | ↑↓ select | Enter apply & back | t enable/disable | s save & back',
+  },
   blueprintDetail: {
     title: 'Set blueprint detail level',
     current: 'Current',
@@ -391,5 +411,7 @@ export const enUS: TranslationKeys = {
     stageTitlesIdle: 'Refining titles',
     stageSection: ' · {section}',
     failedSections: '{n} section(s) failed',
+    gateWarn: 'below content gate',
+    gateDegraded: 'gate degraded',
   },
 };

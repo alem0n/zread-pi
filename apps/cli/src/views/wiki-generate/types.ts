@@ -9,7 +9,7 @@
  */
 
 import type { WikiPage } from '@zread-pi/types';
-import type { TokenUsage, BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus } from '@zread-pi/orchestrator';
+import type { TokenUsage, BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus, ContentGateReport } from '@zread-pi/orchestrator';
 
 // ==================== 基础状态类型 ====================
 
@@ -44,6 +44,7 @@ export type {
   BlueprintFailedSection,
   CatalogAgentRole,
   CatalogAgentStatus,
+  ContentGateReport,
 } from '@zread-pi/orchestrator';
 
 // ==================== 目录 Agent 行（每个 Agent 一行） ====================
@@ -157,8 +158,13 @@ export interface PageStatus {
   maxRetries?: number;
   /** 重试延迟毫秒（retry 阶段） */
   delayMs?: number;
+  /**
+   * 内容密度门报告（quality.contentGate 未关闭时携带）。
+   *
+   * `passed=false` 时页面已完成但低于密度下限（warn 只报告；enforce-degraded 已降级落盘）。
+   */
+  gate?: ContentGateReport;
 }
-
 /** 文章集合状态 */
 export interface ArticlesState {
   /** 状态映射：slug → PageStatus */

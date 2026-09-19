@@ -227,7 +227,8 @@ function pageStatusEquals(a: PageStatus, b: PageStatus): boolean {
     a.outputPath === b.outputPath &&
     a.retryCount === b.retryCount &&
     a.maxRetries === b.maxRetries &&
-    a.delayMs === b.delayMs
+    a.delayMs === b.delayMs &&
+    a.gate === b.gate
   );
 }
 
@@ -397,7 +398,7 @@ export function articleEventToState(
         carryUsage: currentStatus.carryUsage,
         usage: currentStatus.usage,
       });
-      // 新一轮的上下文从零开始（不沿用上一轮的报表值）
+      // 新一轮的上下文与内容门报告从零开始（不沿用上一轮的报表值）
       break;
 
     case 'requesting':
@@ -462,6 +463,7 @@ export function articleEventToState(
         carryUsage: currentStatus.carryUsage,
         durationMs: event.durationMs ?? 0,
         outputPath: event.outputPath,
+        ...(event.gate ? { gate: event.gate } : {}),
         ...contextPatch,
       };
       break;
@@ -474,6 +476,7 @@ export function articleEventToState(
         carryUsage: currentStatus.carryUsage,
         error: event.error,
         durationMs: event.durationMs ?? 0,
+        ...(event.gate ? { gate: event.gate } : {}),
         ...contextPatch,
       };
       break;
