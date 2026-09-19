@@ -61,7 +61,7 @@ export const BLUEPRINT_DETAIL_SPECS: Record<BlueprintDetailLevel, BlueprintDetai
   },
   low: {
     level: 'low',
-    sections: { min: 3, max: 5 },
+    sections: { min: 2, max: 5 },
     topics: { min: 1, max: 3 },
     refineTitles: false,
     panorama: false,
@@ -69,7 +69,7 @@ export const BLUEPRINT_DETAIL_SPECS: Record<BlueprintDetailLevel, BlueprintDetai
   },
   medium: {
     level: 'medium',
-    sections: { min: 4, max: 6 },
+    sections: { min: 3, max: 6 },
     topics: { min: 3, max: 5 },
     refineTitles: true,
     panorama: false,
@@ -77,7 +77,7 @@ export const BLUEPRINT_DETAIL_SPECS: Record<BlueprintDetailLevel, BlueprintDetai
   },
   high: {
     level: 'high',
-    sections: { min: 4, max: 8 },
+    sections: { min: 3, max: 8 },
     topics: { min: 3, max: 10 },
     refineTitles: true,
     panorama: false,
@@ -85,7 +85,7 @@ export const BLUEPRINT_DETAIL_SPECS: Record<BlueprintDetailLevel, BlueprintDetai
   },
   max: {
     level: 'max',
-    sections: { min: 4, max: 8 },
+    sections: { min: 3, max: 8 },
     topics: { min: 5, max: 12 },
     refineTitles: true,
     panorama: false,
@@ -177,7 +177,7 @@ export function formatQuantityFeedback(options: QuantityFeedbackOptions): string
 
 // ==================== AI 归并策略文本 ====================
 
-const BASE_SECTION_NOTE = '概览 / 快速开始 / 核心架构三个基础分类永不动、永不归并；';
+const BASE_SECTION_NOTE = '概览 / 核心架构两个基础分类永不动、永不归并；';
 
 function sectionsOverStrategy(spec: BlueprintDetailSpec, sync: boolean): string {
   if (sync) {
@@ -290,7 +290,7 @@ export function buildCondenseSectionTask(options: {
       ? [
           '优先合并同一领域、同一受众的分类（description 融合两者要点）；',
           '合并后的分类必须保留 scope 边界：两者 scope 取并集，「不包含」冲突时保留更明确的一条；',
-          '概览 / 快速开始 / 核心架构永不合并；高密度核心机制分类永不合并；',
+          '概览 / 核心架构永不合并；高密度核心机制分类永不合并；',
         ]
       : [
           '把覆盖过宽的条目拆成更细的子领域，或补充能承载多个模块的顶级分类；',

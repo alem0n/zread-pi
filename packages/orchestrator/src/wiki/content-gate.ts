@@ -118,8 +118,6 @@ const REPEAT_OPENINGS_MAX = 2;
 const OVERVIEW_SECTIONS = new Set([
   '概览',
   'overview',
-  '快速开始',
-  'quick start',
   '核心架构',
   'core architecture',
 ]);

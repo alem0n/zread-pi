@@ -41,20 +41,18 @@ const DEFAULT_BLUEPRINT_FILE = 'wiki.json';
 export const MAX_BLUEPRINT_SECTIONS = 8;
 
 /**
- * 强制包含的三个基础分类（按文档语言选择）。
+ * 强制包含的两个基础分类（按文档语言选择）。
  *
- * 无论模型如何分类，概览 / 快速开始 / 核心架构都必须存在——它们承载
- * 「项目是什么、怎么跑起来、整体怎么组织」三个入口，是 Wiki 的骨架。
+ * 无论模型如何分类，概览 / 核心架构都必须存在——它们承载
+ * 「项目是什么、整体怎么组织」两个入口，是 Wiki 的骨架。
  */
 const BASE_SECTIONS: Record<'zh' | 'en', WikiSection[]> = {
   zh: [
     { title: '概览', description: '项目定位、核心价值与整体速览' },
-    { title: '快速开始', description: '安装、配置与最小可运行示例' },
     { title: '核心架构', description: '整体架构、核心模块职责与协作关系' },
   ],
   en: [
     { title: 'Overview', description: 'What the project is, its core value and high-level tour' },
-    { title: 'Quick Start', description: 'Install, configure and run the smallest working example' },
     { title: 'Core Architecture', description: 'Overall architecture, core modules and how they cooperate' },
   ],
 };
@@ -129,14 +127,14 @@ export function normalizeSectionList(input: unknown): WikiSection[] {
  */
 export interface BlueprintSectionOptions {
   /**
-   * minimal 档位：只保留「概览」一个分类（跳过「快速开始 / 核心架构」强补逻辑）。
+   * minimal 档位：只保留「概览」一个分类（跳过「核心架构」强补逻辑）。
    * minimal 的分类数固定为 1，没有归并空间，因此由代码直接收尾。
    */
   minimal?: boolean;
 }
 
 /**
- * 归一化分类清单：去重 + 强制基础分类（概览/快速开始/核心架构）+ 数量上限。
+ * 归一化分类清单：去重 + 强制基础分类（概览/核心架构）+ 数量上限。
  * 基础分类排在最前，因此截断不会丢基础分类。
  *
  * `options.minimal = true` 时只保留「概览」一个分类（文档语言对应的第一个基础分类），
