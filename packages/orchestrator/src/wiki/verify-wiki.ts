@@ -15,11 +15,13 @@
  */
 
 import { existsSync } from 'node:fs';
-import { open, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   fileExists,
   joinPath,
+  loadCachedManifest,
+  loadCachedSymbols,
   loadWikiBlueprint,
   resolveWikiVariant,
 } from '@zread-pi/utils';
@@ -27,6 +29,14 @@ import type { BlueprintDetailLevel, WikiOutput, WikiPage } from '@zread-pi/types
 import { getDetailSpec } from '../agents/blueprint-detail.js';
 import { evaluateContentGate, proseFloor } from './content-gate.js';
 import { validateMermaidContent } from '../tools/page-tools.js';
+import {
+  checkAssociatedFiles,
+  checkTraceability,
+  collectManifestPaths,
+} from './traceability.js';
+
+// parseSourceRefs 曾在本模块定义；迁到 traceability.ts 后保持旧导入路径可用（测试与外部调用点）
+export { parseSourceRefs } from './traceability.js';
 
 // ==================== 类型 ====================
 
@@ -78,72 +88,6 @@ class Report {
   emit(status: VerifyStatus, group: VerifyGroup, message: string, details?: string[]): void {
     if (status === 'FAIL') this.ok = false;
     this.checks.push({ status, group, message, details });
-  }
-}
-
-// ==================== Sources 溯源解析 ====================
-
-interface SourceRef {
-  /** 引用路径（相对仓库根） */
-  path: string;
-  /** 行号区间（#Lx-Ly；无行号时 undefined） */
-  lineFrom?: number;
-  lineTo?: number;
-  /** 出现该引用的页面 slug */
-  pageSlug: string;
-}
-
-const SOURCES_LINE_RE = /^#{0,6}\s*Sources?:\s*(.*)$/im;
-const LINK_RE = /\[([^\]]*)\]\(([^)\s]+)\)/g;
-
-/**
- * 从页面正文解析 `Sources:` 行里的全部引用。
- *
- * 支持两种形式：`[名](相对路径)` 与 `[名](相对路径#L12-34)`。
- * 绝对路径与外部链接（http(s):// / mailto:）不参与校验（它们不是仓库内溯源）。
- */
-export function parseSourceRefs(markdown: string, pageSlug: string): SourceRef[] {
-  const refs: SourceRef[] = [];
-  const sourcesMatch = SOURCES_LINE_RE.exec(markdown);
-  if (!sourcesMatch) return refs;
-
-  const body = sourcesMatch[1];
-  LINK_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = LINK_RE.exec(body)) !== null) {
-    const target = match[2];
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('mailto:')) continue;
-    if (!target || target.startsWith('#')) continue;
-
-    const hashIndex = target.indexOf('#');
-    const path = hashIndex === -1 ? target : target.slice(0, hashIndex);
-    const ref: SourceRef = { path, pageSlug };
-
-    if (hashIndex !== -1) {
-      const lineSpec = target.slice(hashIndex + 1);
-      const lineMatch = /^L(\d+)(?:-L?(\d+))?$/.exec(lineSpec);
-      if (lineMatch) {
-        ref.lineFrom = Number.parseInt(lineMatch[1], 10);
-        ref.lineTo = lineMatch[2] ? Number.parseInt(lineMatch[2], 10) : ref.lineFrom;
-      }
-    }
-    refs.push(ref);
-  }
-  return refs;
-}
-
-/** 流式按行计数（不全量缓冲；只对被引用的文件执行） */
-async function countLines(filePath: string): Promise<number | undefined> {
-  try {
-    const handle = await open(filePath, 'r');
-    let lines = 0;
-    for await (const _line of handle.readLines()) {
-      lines++;
-    }
-    await handle.close();
-    return lines;
-  } catch {
-    return undefined;
   }
 }
 
@@ -349,7 +293,28 @@ export async function verifyWiki(options: VerifyWikiOptions = {}): Promise<Verif
   );
 
   // ==================== traceability（溯源台账，对齐 §3.3 的页面维度） ====================
-  await verifyTraceability(root, pages, contents, report);
+  const [manifest, symbols] = await Promise.all([
+    loadCachedManifest(),
+    loadCachedSymbols(),
+  ]);
+  const manifestPaths = collectManifestPaths(manifest);
+
+  // 蓝图声明：每页 associatedFiles 真实存在（复活旧版 validate_blueprint，页面维度）
+  const associatedIssues = checkAssociatedFiles(pages, root, manifestPaths);
+  report.emit(
+    associatedIssues.length === 0 ? 'PASS' : 'FAIL',
+    'structure',
+    associatedIssues.length === 0
+      ? `${pages.length} 页 associatedFiles 全部存在`
+      : `${associatedIssues.length} 页 associatedFiles 指向不存在的文件或目录`,
+    associatedIssues.length === 0
+      ? undefined
+      : associatedIssues
+          .map((i) => `${i.slug}：${i.missing.join(', ')}`)
+          .slice(0, 12),
+  );
+
+  await verifyTraceability(root, pages, contents, report, manifest, symbols);
 
   return { root, variant, legacy, checks: report.checks, ok: report.ok };
 }
@@ -382,76 +347,62 @@ function proseFloorOf(page: WikiPage): number {
   return proseFloor(page);
 }
 
-/** 溯源校验：路径真实 / 行号有效 / 跨页重复声明 */
+/** 溯源校验：路径真实 / 行号有效 / 跨页重复声明 / 符号可溯（委托 traceability.ts） */
 async function verifyTraceability(
   root: string,
   pages: WikiPage[],
   contents: Map<string, string>,
   report: Report,
+  manifest: Parameters<typeof checkTraceability>[0]['manifest'],
+  symbols: Parameters<typeof checkTraceability>[0]['symbols'],
 ): Promise<void> {
-  const allRefs: SourceRef[] = [];
-  for (const page of pages) {
-    allRefs.push(...parseSourceRefs(contents.get(page.slug) ?? '', page.slug));
+  const result = await checkTraceability({ root, pages, contents, manifest, symbols });
+
+  // 符号可溯（WARN）：与 Sources 正交，始终执行。符号缓存缺失时跳过
+  // （脚本决定源里有什么——没有台账就无据可判）
+  if (result.symbolsUnavailable) {
+    report.emit('SKIP', 'traceability', '符号缓存缺失（未扫描源码），跳过符号溯源校验');
+  } else if (result.unresolvedSymbols.length === 0) {
+    report.emit('PASS', 'traceability', '正文引用的标识符在符号缓存里全部存在');
+  } else {
+    report.emit(
+      'PASS',
+      'traceability',
+      `${result.unresolvedSymbols.length} 个行内代码标识符未在符号缓存中找到（WARN，供人工确认）`,
+      result.unresolvedSymbols.slice(0, 12),
+    );
   }
 
-  if (allRefs.length === 0) {
+  // 无 Sources 行是硬失败；路径 / 行号 / 重复声明检查在无引用时无意义，跳过
+  if (result.noSources) {
     report.emit('FAIL', 'traceability', '没有任何 Sources 溯源引用（页面 prompt 已强约束，机械校验兜底）');
     return;
   }
 
-  // 路径真实 + 行号有效
-  const badPath: string[] = [];
-  const badLine: string[] = [];
-  for (const ref of allRefs) {
-    const absPath = join(root, ref.path);
-    if (!existsSync(absPath)) {
-      badPath.push(`${ref.pageSlug} -> ${ref.path}`);
-      continue;
-    }
-    if (ref.lineFrom !== undefined && ref.lineTo !== undefined) {
-      const lineCount = await countLines(absPath);
-      if (lineCount === undefined) {
-        badLine.push(`${ref.pageSlug} -> ${ref.path}（无法读取行数）`);
-      } else if (!(ref.lineFrom <= ref.lineTo && ref.lineTo <= lineCount)) {
-        badLine.push(
-          `${ref.pageSlug} -> ${ref.path}#L${ref.lineFrom}-${ref.lineTo}（文件共 ${lineCount} 行）`,
-        );
-      }
-    }
-  }
   report.emit(
-    badPath.length === 0 ? 'PASS' : 'FAIL',
+    result.badPaths.length === 0 ? 'PASS' : 'FAIL',
     'traceability',
-    badPath.length === 0
-      ? `${allRefs.length} 个溯源路径全部真实存在`
-      : `${badPath.length} 个溯源路径不存在`,
-    badPath.length === 0 ? undefined : badPath.slice(0, 12),
+    result.badPaths.length === 0
+      ? `${result.refs.length} 个溯源路径全部真实存在`
+      : `${result.badPaths.length} 个溯源路径不存在`,
+    result.badPaths.length === 0 ? undefined : result.badPaths.slice(0, 12),
   );
   report.emit(
-    badLine.length === 0 ? 'PASS' : 'FAIL',
+    result.badLines.length === 0 ? 'PASS' : 'FAIL',
     'traceability',
-    badLine.length === 0
+    result.badLines.length === 0
       ? '全部行号区间落在文件长度内'
-      : `${badLine.length} 个行号区间越界`,
-    badLine.length === 0 ? undefined : badLine.slice(0, 12),
+      : `${result.badLines.length} 个行号区间越界`,
+    result.badLines.length === 0 ? undefined : result.badLines.slice(0, 12),
   );
 
-  // 跨页重复声明（同一文件 + 同一行号区间被 ≥2 个页面声明）：WARN，列出供人工裁决
-  const seen = new Map<string, string[]>();
-  const duplicates: string[] = [];
-  for (const ref of allRefs) {
-    if (ref.lineFrom === undefined) continue;
-    const key = `${ref.path}#L${ref.lineFrom}-${ref.lineTo}`;
-    const owners = seen.get(key) ?? [];
-    if (owners.length > 0 && !owners.includes(ref.pageSlug)) {
-      duplicates.push(`${key}：${owners[0]} 与 ${ref.pageSlug}`);
-    }
-    seen.set(key, [...owners, ref.pageSlug]);
-  }
-  if (duplicates.length > 0) {
-    // WARN 语义：重复声明未必错（同一核心事实被两篇引用），列出供人工裁决
-    report.emit('PASS', 'traceability', `${duplicates.length} 组跨页重复声明（WARN，供人工裁决）`, duplicates.slice(0, 12));
-  } else {
-    report.emit('PASS', 'traceability', '无跨页重复声明');
-  }
+  // 跨页重复声明（WARN 语义：重复声明未必错——同一核心事实被两篇引用，列出供人工裁决）
+  report.emit(
+    'PASS',
+    'traceability',
+    result.duplicateClaims.length === 0
+      ? '无跨页重复声明'
+      : `${result.duplicateClaims.length} 组跨页重复声明（WARN，供人工裁决）`,
+    result.duplicateClaims.length === 0 ? undefined : result.duplicateClaims.slice(0, 12),
+  );
 }

@@ -31,7 +31,7 @@ export type { ContentGateMetrics, ContentGateReport } from './wiki/content-gate.
 // 交付闸门（quality.verifyAfterGenerate / `zread-pi verify`）：
 // 移植自 lecture-to-notes 的 verify_notes.py（检查组 + PASS/FAIL/SKIP + OVERALL）。
 // 只读：不写任何产物；verify.json 由 CLI / generate-wiki 集成按需落盘。
-export { verifyWiki, parseSourceRefs } from './wiki/verify-wiki.js'
+export { verifyWiki } from './wiki/verify-wiki.js'
 export type {
   VerifyReport,
   VerifyCheck,
@@ -39,6 +39,25 @@ export type {
   VerifyGroup,
   VerifyWikiOptions,
 } from './wiki/verify-wiki.js'
+
+// 溯源台账（claims ledger 的代码版，移植自 extract_claims.py 的两段式「提取 → 逐条 check」）：
+// 纯函数 + 只读；复用 repo-analyzer 已产出的缓存清单（last_manifest.json / last_symbols.json）。
+export {
+  parseSourceRefs,
+  collectKnownSymbols,
+  findUnresolvedSymbols,
+  collectManifestPaths,
+  isPathReal,
+  countLines,
+  checkAssociatedFiles,
+  checkTraceability,
+} from './wiki/traceability.js'
+export type {
+  SourceRef,
+  AssociatedFileIssue,
+  TraceabilityInput,
+  TraceabilityResult,
+} from './wiki/traceability.js'
 
 // Phase 3: Wiki Sync
 // 三阶段增量修补：diff → （按需）分类合并 → 按变更 section 分主题 / 标题；SyncDiff 语义与旧实现一致

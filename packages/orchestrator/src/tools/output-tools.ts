@@ -12,8 +12,10 @@
  * 每次提交都带「数量反馈」；越界提交**不落盘、不报错**，返回归并 / 补充策略文本请求重提；
  * 连续两次不收敛后标记 `state.exhausted`，由阶段驱动器开缩编 subagent 或代码兜底。
  *
- * `generate_blueprint` / `generate_sync_blueprint` 是旧版一次性蓝图的工具，
+ * `generate_blueprint` / `generate_sync_blueprint` / `validate_blueprint` 是旧版工具，
  * 保留仅归档（当前流程不再使用；提示词与测试均不引用）。
+ * 存在性校验已迁移到交付闸门 `verify-wiki` 的页面维度（wiki/traceability.ts
+ * 的 `checkAssociatedFiles`）。
  */
 
 import type { ToolDefinition, ToolInputParams, ToolInputSchemaProperty, ToolContext, ToolResult } from '@zread-pi/agent-runtime'
@@ -674,6 +676,13 @@ export const GenerateBlueprintTool: ToolDefinition = {
  * Validate Blueprint Tool
  *
  * Validates that associatedFiles in pages point to real files or directories.
+ */
+/**
+ * ValidateBlueprintTool（旧版，仅归档）
+ *
+ * 存在性校验已迁移到交付闸门 `verify-wiki` 的页面维度
+ * （`checkAssociatedFiles`，见 wiki/traceability.ts），当前流程不再使用本工具。
+ * 保留与 `generate_blueprint` 同策略：提示词与测试均不引用。
  */
 export const ValidateBlueprintTool: ToolDefinition = {
   name: 'validate_blueprint',
