@@ -18,12 +18,25 @@ export interface TranslationKeys {
     historyDesc: string;
     historyConcurrencyDesc: string;
     logviewDesc: string;
+    verifyDesc: string;
+    verifyDetailDesc: string;
+    verifyEnforceDesc: string;
   };
   history: {
     pruned: string;
     remaining: string;
     empty: string;
     failed: string;
+  };
+  /** 交付闸门输出（机器可解析的行格式，文案随语言） */
+  verify: {
+    skipped: string;
+    legacy: string;
+    variant: string;
+    overallPass: string;
+    overallFail: string;
+    detailsPrefix: string;
+    summary: string;
   };
   versionGuard: {
     incompatible: string;
