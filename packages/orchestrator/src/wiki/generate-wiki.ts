@@ -13,7 +13,7 @@
 import pLimit from 'p-limit';
 import { copyFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { ensureDir, fileExists, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, writeTextFile, createLogger, withRunLog, buildPageStartEvent, buildPageEndEvent, type RunLogWriter } from '@zread-pi/utils';
+import { ensureDir, fileExists, getRunDir, getWikiDir, joinPath, loadConfig, loadWikiBlueprint, writeJsonFile, writeTextFile, createLogger, withRunLog, buildPageStartEvent, buildPageEndEvent, type RunLogWriter } from '@zread-pi/utils';
 import { createAgent } from '../agents/create-agent.js';
 import { getDetailSpec, MINIMAL_PANORAMA_REQUIREMENT, type BlueprintDetailSpec } from '../agents/blueprint-detail.js';
 import { createWritePageTool, buildPageFrontmatter, resolvePageOutputPath } from '../tools/page-tools.js';
@@ -33,10 +33,11 @@ import {
   type ToolDefinition,
 } from '@zread-pi/agent-runtime';
 import { polishPageFile } from './polish.js';
+import { verifyWiki } from './verify-wiki.js';
 import { createRunLogSink } from '../agents/run-log-sink.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
-import type { BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
+import type { AppConfig, BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
 /** 本模块的命名 logger（页面生成管线）。 */
@@ -321,6 +322,36 @@ async function writeDegradedPage(options: {
   }
 
   return { ...gateReport, mode: 'enforce-degraded' };
+}
+
+/**
+ * 生成后自动校验（`quality.verifyAfterGenerate`）：跑一次交付闸门并把摘要落盘。
+ *
+ * 摘要文件为 `<runDir>/verify.json`——**不改动 `RunMeta`**（run.json 是固定字段结构，
+ * 见 plan.md §3.2 的审查修订），trajectory replay 无感知。
+ * 校验本身只读、失败不影响生成结果（生成永不悬挂：闸门是事后体检，不是交付前置）。
+ */
+async function maybeWriteVerifyReport(
+  config: AppConfig,
+  variant: BlueprintDetailLevel,
+  runLog: RunLogWriter | undefined,
+): Promise<void> {
+  if (!config.quality?.verifyAfterGenerate) return;
+  if (!runLog) return;
+
+  try {
+    const report = await verifyWiki({ detail: variant });
+    const runDir = getRunDir(runLog.runId, process.cwd());
+    await ensureDir(runDir);
+    await writeJsonFile(joinPath(runDir, 'verify.json'), report);
+    pagesLogger.info(
+      `[OK] 交付闸门已落盘（${report.ok ? 'OVERALL PASS' : 'OVERALL FAIL'}）：${joinPath(runDir, 'verify.json')}`,
+    );
+  } catch (err: unknown) {
+    // 校验失败不判生成失败（闸门是增强不是必需）
+    const message = err instanceof Error ? err.message : String(err);
+    pagesLogger.warn(`交付闸门自动校验失败（不影响生成结果）：${message}`);
+  }
 }
 
 /**
@@ -726,6 +757,10 @@ async function generatePages(
 
   // 6. Wait for all tasks
   await Promise.all(tasks);
+
+  // 生成后可选自动校验（quality.verifyAfterGenerate，缺省 false）。
+  // 摘要落成 `<runDir>/verify.json`（不改动 run.json 契约；trajectory replay 无感知）。
+  await maybeWriteVerifyReport(config, variant, runLog);
 
   const durationMs = Math.round(performance.now() - startTime);
 
