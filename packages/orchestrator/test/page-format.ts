@@ -53,16 +53,30 @@ console.log("\n▶ A. zh / en 资产条数与编号一一对应");
 	const en = getPageFormat("en");
 	const zhSections = (zh.match(/^## /gm) ?? []).length;
 	const enSections = (en.match(/^## /gm) ?? []).length;
-	check("page-format 两语言节数一致（5）", zhSections === enSections && zhSections === 5, `${zhSections}/${enSections}`);
+	check("page-format 两语言节数一致（6）", zhSections === enSections && zhSections === 6, `${zhSections}/${enSections}`);
+
+	// §4 反注水三条必须写进自检清单（zh / en 一一对应）
+	check(
+		"自检清单含「同义改写注水」禁令（zh/en）",
+		zh.includes("同义改写注水") && en.includes("padding by paraphrase"),
+	);
+	check(
+		"自检清单含「不复制 README/AGENTS.md 当散文」（zh/en）",
+		zh.includes("AGENTS.md") && en.includes("AGENTS.md"),
+	);
+	check(
+		"资产含「源没有就应该是 0」口径（zh/en）",
+		zh.includes("正确答案是 **0**") && en.includes("correct number of code blocks is **0**"),
+	);
 
 	const zhMermaidRules = (zh.match(/^-\s/gm) ?? []).length;
 	const enMermaidRules = (en.match(/^-\s/gm) ?? []).length;
 	check("page-format 两语言列表项数量接近（±3）", Math.abs(zhMermaidRules - enMermaidRules) <= 3, `${zhMermaidRules}/${enMermaidRules}`);
 
-	// 自检清单条数必须一致（对齐 lecture-to-notes 的清单形态）
-	const zhChecklist = (zh.match(/^\d\. /gm) ?? []).length;
-	const enChecklist = (en.match(/^\d\. /gm) ?? []).length;
-	check("page-format 交付前自检清单条数一致（8）", zhChecklist === enChecklist && zhChecklist >= 8, `${zhChecklist}/${enChecklist}`);
+	// 自检清单条数必须一致（对齐 lecture-to-notes 的清单形态；`^\\d+\\. ` 兼容一位/两位编号）
+	const zhChecklist = (zh.match(/^\d+\. /gm) ?? []).length;
+	const enChecklist = (en.match(/^\d+\. /gm) ?? []).length;
+	check("page-format 交付前自检清单条数一致（11）", zhChecklist === enChecklist && zhChecklist >= 11, `${zhChecklist}/${enChecklist}`);
 
 	// reader-first：8 节 + 最终清单
 	const rzh = getReaderDiscipline("zh");
