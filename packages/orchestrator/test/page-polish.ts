@@ -366,6 +366,83 @@ process.chdir(join(repo, ".."));
 await rm(repo, { recursive: true, force: true });
 await rm(home, { recursive: true, force: true });
 
+// ---- checkPolishDiff 纯函数：只许改散文（frontmatter / Sources / Mermaid 逐字不变） ----
+{
+	const { checkPolishDiff } = await import("../src/wiki/polish.js");
+
+	const original = [
+		"---",
+		'title: "原标题"',
+		'slug: "p1"',
+		"---",
+		"",
+		"# 原标题",
+		"",
+		"这是第一段散文，可以被润色。",
+		"",
+		"> Sources: [a.ts](src/a.ts#L1-10)",
+		"",
+		"```mermaid",
+		'flowchart TB\n  A["节点"] --> B["下游"]',
+		"```",
+	].join("\n");
+
+	// 只改散文：安全
+	const onlyProse = original.replace("这是第一段散文，可以被润色。", "这是被润色过的第一段散文，更通顺。");
+	check(
+		"checkPolishDiff：只改散文 -> 无越界",
+		checkPolishDiff(original, onlyProse).length === 0,
+		JSON.stringify(checkPolishDiff(original, onlyProse)),
+	);
+
+	// 改 frontmatter：越界
+	const fmChanged = original.replace('title: "原标题"', 'title: "被改的标题"');
+	check(
+		"checkPolishDiff：改 frontmatter -> frontmatter 越界",
+		checkPolishDiff(original, fmChanged).some((v) => v.kind === "frontmatter"),
+	);
+
+	// 改 Sources 行号：越界
+	const srcChanged = original.replace("src/a.ts#L1-10", "src/a.ts#L5-99");
+	check(
+		"checkPolishDiff：改 Sources 行号 -> sources 越界",
+		checkPolishDiff(original, srcChanged).some((v) => v.kind === "sources"),
+	);
+
+	// 删 Sources 行：越界
+	check(
+		"checkPolishDiff：删 Sources 行 -> sources 越界",
+		checkPolishDiff(original, original.replace("> Sources: [a.ts](src/a.ts#L1-10)", "")).some((v) => v.kind === "sources"),
+	);
+
+	// 改 Mermaid 块内容：越界
+	const mermaidChanged = original.replace('A["节点"] --> B["下游"]', 'A["改名"] --> B["下游"]');
+	check(
+		"checkPolishDiff：改 Mermaid 节点 -> mermaid 越界",
+		checkPolishDiff(original, mermaidChanged).some((v) => v.kind === "mermaid"),
+	);
+
+	// Mermaid 块外的散文解释可以改（块内不动）
+	const withExplanation = original + "\n\n图表说明：这张图展示了调用关系。";
+	const explanationPolished = withExplanation.replace("这张图展示了调用关系。", "该图刻画了模块间的调用方向。");
+	check(
+		"checkPolishDiff：改 Mermaid 块外的散文 -> 无越界",
+		checkPolishDiff(withExplanation, explanationPolished).length === 0,
+		JSON.stringify(checkPolishDiff(withExplanation, explanationPolished)),
+	);
+
+	// 多项同时越界：全部列出
+	const allBroken = fmChanged.replace("src/a.ts#L1-10", "src/a.ts#L5-99");
+	check(
+		"checkPolishDiff：多项越界全部列出（2）",
+		checkPolishDiff(original, allBroken).length === 2,
+		JSON.stringify(checkPolishDiff(original, allBroken).map((v) => v.kind)),
+	);
+
+	// 完全相同：安全
+	check("checkPolishDiff：完全相同 -> 无越界", checkPolishDiff(original, original).length === 0);
+}
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\n结果：${checks.length - failed.length}/${checks.length} 通过`);
 if (failed.length > 0) {
