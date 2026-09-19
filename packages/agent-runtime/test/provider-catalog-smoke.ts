@@ -138,6 +138,56 @@ try {
 		JSON.stringify(bogusDetailConfig.blueprint),
 	);
 
+	// quality（内容质量门）归一化：旧配置缺省「启用 + warn + 不自动校验」（老用户零变化）；
+	// 非法值回退默认；合法值保留
+	check(
+		"旧 config.yaml（缺 quality 段）补默认 contentGate 启用 + warn",
+		defaultDetailConfig.quality.contentGate.enabled === true &&
+			defaultDetailConfig.quality.contentGate.mode === "warn",
+		JSON.stringify(defaultDetailConfig.quality),
+	);
+	check(
+		"旧 config.yaml（缺 quality 段）补默认 verifyAfterGenerate=false",
+		defaultDetailConfig.quality.verifyAfterGenerate === false,
+		JSON.stringify(defaultDetailConfig.quality),
+	);
+
+	await writeHomeConfig([
+		"quality:",
+		"  contentGate:",
+		"    enabled: false",
+		"    mode: enforce",
+		"  verifyAfterGenerate: true",
+	]);
+	const enforceQualityConfig = await loadConfig();
+	check(
+		"quality.contentGate: enabled=false + mode=enforce 保留",
+		enforceQualityConfig.quality.contentGate.enabled === false &&
+			enforceQualityConfig.quality.contentGate.mode === "enforce",
+		JSON.stringify(enforceQualityConfig.quality),
+	);
+	check(
+		"quality.verifyAfterGenerate: true 保留",
+		enforceQualityConfig.quality.verifyAfterGenerate === true,
+		JSON.stringify(enforceQualityConfig.quality),
+	);
+
+	await writeHomeConfig([
+		"quality:",
+		"  contentGate:",
+		"    enabled: notabool",
+		"    mode: strict",
+		"  verifyAfterGenerate: 3",
+	]);
+	const illegalQualityConfig = await loadConfig();
+	check(
+		"quality 非法值回退默认（启用 + warn + false）",
+		illegalQualityConfig.quality.contentGate.enabled === true &&
+		illegalQualityConfig.quality.contentGate.mode === "warn" &&
+		illegalQualityConfig.quality.verifyAfterGenerate === false,
+		JSON.stringify(illegalQualityConfig.quality),
+	);
+
 	// llm.context_window / max_tokens 归一化（配置界面 /config/model-size）：
 	// 旧配置缺省 null（= 跟随模型目录默认）；合法正值保留；0 / 负数 / 非数字回退 null
 	check(

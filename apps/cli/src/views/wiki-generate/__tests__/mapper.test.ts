@@ -364,4 +364,154 @@ describe('articleEventToState', () => {
       cache_read_input_tokens: 0,
     });
   });
+
+  // ==================== 内容门（quality.contentGate） ====================
+
+  test('page_complete 携带未通过的内容门报告（warn 只报告）', () => {
+    const gate = {
+      passed: false,
+      mode: 'warn' as const,
+      metrics: {
+        proseChars: 400,
+        headings: 2,
+        headingLevels: [1, 2],
+        mermaidBlocks: 0,
+        codeBlocks: 0,
+        sourceNotes: 1,
+        repeatOpenings: 0,
+      },
+      durationMs: 3,
+      failures: ['散文篇幅不足：当前 400 / 下限 1200'],
+      advisories: [],
+    };
+
+    let state = createInitialArticlesState([makePage()]);
+    state = articleEventToState(state, {
+      type: 'page_complete',
+      slug: 'a',
+      usage,
+      durationMs: 1,
+      gate,
+    });
+
+    expect(state.pages.a.status).toBe('completed');
+    expect(state.pages.a.gate).toBe(gate);
+    expect(state.pages.a.gate?.passed).toBe(false);
+  });
+
+  test('page_complete 携带 enforce-degraded 报告（降级计成功）', () => {
+    let state = createInitialArticlesState([makePage()]);
+    state = articleEventToState(state, {
+      type: 'page_complete',
+      slug: 'a',
+      usage,
+      durationMs: 1,
+      gate: {
+        passed: false,
+        mode: 'enforce-degraded',
+        metrics: {
+          proseChars: 400,
+          headings: 2,
+          headingLevels: [1, 2],
+          mermaidBlocks: 0,
+          codeBlocks: 0,
+          sourceNotes: 1,
+          repeatOpenings: 0,
+        },
+        durationMs: 3,
+        failures: ['散文篇幅不足：当前 400 / 下限 1200'],
+        advisories: [],
+      },
+    });
+
+    expect(state.pages.a.status).toBe('completed');
+    expect(state.pages.a.gate?.mode).toBe('enforce-degraded');
+  });
+
+  test('page_error 也携带内容门报告（失败页仍可见质量告警）', () => {
+    let state = createInitialArticlesState([makePage()]);
+    state = articleEventToState(state, {
+      type: 'page_error',
+      slug: 'a',
+      error: 'boom',
+      gate: {
+        passed: false,
+        mode: 'warn',
+        metrics: {
+          proseChars: 400,
+          headings: 2,
+          headingLevels: [1, 2],
+          mermaidBlocks: 0,
+          codeBlocks: 0,
+          sourceNotes: 1,
+          repeatOpenings: 0,
+        },
+        durationMs: 3,
+        failures: ['散文篇幅不足'],
+        advisories: [],
+      },
+    });
+
+    expect(state.pages.a.status).toBe('failed');
+    expect(state.pages.a.gate?.passed).toBe(false);
+  });
+
+  test('重新生成（page_start）清空上一轮的内容门报告', () => {
+    let state = createInitialArticlesState([makePage()]);
+    state = articleEventToState(state, {
+      type: 'page_complete',
+      slug: 'a',
+      usage,
+      durationMs: 1,
+      gate: {
+        passed: false,
+        mode: 'warn',
+        metrics: {
+          proseChars: 400,
+          headings: 2,
+          headingLevels: [1, 2],
+          mermaidBlocks: 0,
+          codeBlocks: 0,
+          sourceNotes: 1,
+          repeatOpenings: 0,
+        },
+        durationMs: 3,
+        failures: ['散文篇幅不足'],
+        advisories: [],
+      },
+    });
+    expect(state.pages.a.gate).toBeDefined();
+
+    state = articleEventToState(state, { type: 'page_start', slug: 'a' });
+    expect(state.pages.a.gate).toBeUndefined();
+  });
+
+  test('pageStatusEquals 把 gate 纳入比较（报告变化触发重渲染）', () => {
+    const gate = {
+      passed: false,
+      mode: 'warn' as const,
+      metrics: {
+        proseChars: 400,
+        headings: 2,
+        headingLevels: [1, 2],
+        mermaidBlocks: 0,
+        codeBlocks: 0,
+        sourceNotes: 1,
+        repeatOpenings: 0,
+      },
+      durationMs: 3,
+      failures: ['散文篇幅不足'],
+      advisories: [],
+    };
+
+    let state = createInitialArticlesState([makePage()]);
+    state = articleEventToState(state, { type: 'page_complete', slug: 'a', usage, durationMs: 1 });
+    const withoutGate = state.pages.a;
+
+    state = articleEventToState(state, { type: 'page_complete', slug: 'a', usage, durationMs: 1, gate });
+    const withGate = state.pages.a;
+
+    expect(withoutGate).not.toEqual(withGate);
+    expect(withGate.gate).toBe(gate);
+  });
 });
