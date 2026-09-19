@@ -10,7 +10,8 @@ export { generateWikiCatalog } from './orchestrator.js'
 // Phase 2: Wiki Content Generation
 export { generateWikiContent } from './wiki/generate-wiki.js'
 // Phase 2b: 页面落盘后的兜底润色（polish.mode = 'full' 时启用）
-export { polishPageFile, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
+export { polishPageFile, checkPolishDiff, DEFAULT_POLISH_TOKEN_BUDGET } from './wiki/polish.js'
+export type { PolishDiffViolation } from './wiki/polish.js'
 export type { WikiResult, ProgressState, PageResult, PolishOutcome, GenerateWikiOptions, ArticleEventPayload } from './wiki/types.js'
 
 // 内容密度门（quality.contentGate）：把「页面是否干瘪」变成机械可判定的指标
@@ -86,6 +87,23 @@ export {
   buildPolishTaskPrompt,
 } from './agents/style-discipline.js'
 export type { StyleLanguage } from './agents/style-discipline.js'
+
+// 页面格式契约（frontmatter / 标题层级 / Mermaid 引号 / 溯源格式 / 交付前自检清单）：
+// 从 page-agent.ts 抽出的硬性约束，与语气正交（见 MIGRATION.md §32.1）。
+export { getPageFormat, formatPageFormat, withPageFormat } from './agents/page-format.js'
+export type { FormatLanguage } from './agents/page-format.js'
+export { PAGE_FORMAT_TAG } from './agents/page-format.js'
+
+// 读者优先纪律（reader-first）：「教会了读者」，与 humanizer 正交、拼在其之后
+// （见 MIGRATION.md §32.2）。
+export {
+  getReaderDiscipline,
+  formatReaderDiscipline,
+  withReaderDiscipline,
+  READER_SELF_CHECK,
+} from './agents/reader-first.js'
+export type { ReaderLanguage } from './agents/reader-first.js'
+export { READER_FIRST_TAG } from './agents/reader-first.js'
 
 // 蓝图细节档位（blueprint.detail）：数量区间 / 数量反馈 / 归并策略 / 缩编与代码兜底
 // 纯函数（数量控制四层机制的第 1、2、4 层；第 3 层缩编 subagent 在 blueprint-stages.ts）

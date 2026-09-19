@@ -13,6 +13,7 @@
  */
 import humanizerEn from '../prompts/humanizer.en.md' with { type: 'text' }
 import humanizerZh from '../prompts/humanizer.zh.md' with { type: 'text' }
+import { READER_SELF_CHECK } from './reader-first.js'
 
 /** 文档语言（与 config.doc_language 的取值一致；`en` 之外一律按中文处理） */
 export type StyleLanguage = 'zh' | 'en'
@@ -58,9 +59,12 @@ export const POLISH_EMBEDDED_MODE = `## Embedded mode（本 Agent 的输出约�
 4. 最终回复只允许一行：\`POLISHED\` 或 \`NO_CHANGE\`。不要输出解释、总结或修改清单。
    没有把握在事实范围内改进时，回 \`NO_CHANGE\`，不要为「有改动」而改写。`
 
-/** polish Agent 的系统提示：纪律全文 + Embedded mode 输出约定 */
+/**
+ * polish Agent 的系统提示：纪律全文 + 读者优先自检 + Embedded mode 输出约定
+ * （`polish.mode = 'full'` 时做一次「教学型」结构化自检，见 MIGRATION.md §32.3）
+ */
 export function buildPolishSystemPrompt(language: string | null | undefined): string {
-  return `${getStyleDiscipline(language).trim()}\n\n${POLISH_EMBEDDED_MODE}\n`
+  return `${getStyleDiscipline(language).trim()}\n\n${READER_SELF_CHECK}\n\n${POLISH_EMBEDDED_MODE}\n`
 }
 
 /** polish Agent 的任务提示（文件路径由调用方传入，避免模型自己猜路径） */

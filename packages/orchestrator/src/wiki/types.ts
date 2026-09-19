@@ -67,8 +67,8 @@ export interface PageResult {
  */
 export interface PolishOutcome {
   /**
-   * 文件是否被实际修改且通过 Mermaid 复检。
-   * 例外：Mermaid 回滚失败时 applied=false，error 里带失败详情（页面内容已被改坏，需人工检查）。
+   * 文件是否被实际修改且通过结构复检（frontmatter / Sources / Mermaid 三项 diff 断言）。
+   * 例外：回滚失败时 applied=false，error 里带失败详情（页面内容已被改坏，需人工检查）。
    */
   applied: boolean;
   /**
@@ -78,9 +78,11 @@ export interface PolishOutcome {
    * - missing-file：页面文件不存在（理论上不会发生，防御性分支）；
    * - no-change：polish Agent 未改动文件；
    * - mermaid-rollback：polish 改坏了 Mermaid，已回滚到润色前内容；
-   * - error：polish Agent 抛错（文件若已被改动且 Mermaid 复检通过则 applied=true）。
+   * - structure-rollback：polish 改动了 frontmatter / `Sources:` 溯源行 / Mermaid 代码块
+   *   （只许改散文，见 `checkPolishDiff`），已回滚到润色前内容；
+   * - error：polish Agent 抛错（文件若已被改动且复检通过则 applied=true）。
    */
-  reason?: 'disabled' | 'mode' | 'missing-file' | 'no-change' | 'mermaid-rollback' | 'error';
+  reason?: 'disabled' | 'mode' | 'missing-file' | 'no-change' | 'mermaid-rollback' | 'structure-rollback' | 'error';
   /** 错误/回滚原因详情（诊断用） */
   error?: string;
   /** 耗时（毫秒） */
@@ -188,4 +190,9 @@ export interface GenerateWikiOptions {
    * 目录 + 页面阶段共享同一个 run）
    */
   runLog?: RunLogWriter;
+  /**
+   * 页面提示词的文语言（覆盖 config.doc_language；缺省 = config.doc_language，
+   * `en` 选英文格式契约与读者优先纪律，其余按中文）
+   */
+  language?: string | null;
 }
