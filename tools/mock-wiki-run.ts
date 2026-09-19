@@ -44,10 +44,9 @@ const slugify = (value: string): string =>
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-|-$/g, "") || "page";
 
-/** 分类阶段交给 mock LLM 的分类清单（概览/快速开始/核心架构是强制基础分类；low 档位 3~5 个） */
+/** 分类阶段交给 mock LLM 的分类清单（概览/核心架构是强制基础分类；low 档位 2~5 个） */
 const SECTIONS = [
 	{ title: "概览", description: "项目定位与整体速览" },
-	{ title: "快速开始", description: "安装、运行与最小示例" },
 	{ title: "核心架构", description: "核心模块与实现细节" },
 ];
 
@@ -59,14 +58,6 @@ const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
 			slug: "project-overview",
 			level: "Beginner",
 			associatedFiles: entries.filter((entry) => entry.toLowerCase().includes("readme")).slice(0, 1),
-		},
-	],
-	快速开始: [
-		{
-			title: "快速开始",
-			slug: "quick-start",
-			level: "Beginner",
-			associatedFiles: entries.slice(0, 1),
 		},
 	],
 	核心架构: entries.slice(0, 3).map((relative) => ({

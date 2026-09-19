@@ -45,7 +45,6 @@ await writeFile(join(repo, "src", "b.ts"), 'export const b = (): string => "b";\
 
 const BASE_SECTIONS = [
 	{ title: "概览", description: "项目定位与整体速览" },
-	{ title: "快速开始", description: "安装与运行示例" },
 	{ title: "核心架构", description: "核心模块与实现细节" },
 ];
 
@@ -65,11 +64,6 @@ const GENERATE_TOPICS: Record<string, Array<Record<string, unknown>>> = {
 		{ title: "项目概览", slug: "project-overview", level: "Beginner", associatedFiles: ["README.md"] },
 		{ title: "核心特性", slug: "feature-tour", level: "Beginner", associatedFiles: ["README.md"] },
 		{ title: "设计目标", slug: "design-goals", level: "Intermediate", associatedFiles: ["README.md"] },
-	],
-	快速开始: [
-		{ title: "安装与运行", slug: "install-run", level: "Beginner", associatedFiles: ["README.md"] },
-		{ title: "最小示例", slug: "minimal-example", level: "Beginner", associatedFiles: ["README.md"] },
-		{ title: "常见问题", slug: "faq", level: "Beginner", associatedFiles: ["README.md"] },
 	],
 	核心架构: [
 		{ title: "整体架构", slug: "architecture", level: "Intermediate", associatedFiles: ["README.md"] },
@@ -269,7 +263,7 @@ const readBlueprintFile = async (): Promise<{
 
 console.log("▶ 基线：generateWikiCatalog()（三阶段）…");
 const baselineResult = await generateWikiCatalog();
-check("基线生成 12 个页面", baselineResult.pagesCount === 12, String(baselineResult.pagesCount));
+check("基线生成 9 个页面", baselineResult.pagesCount === 9, String(baselineResult.pagesCount));
 
 // 模拟 CLI 控制器：生成后保存 manifest 缓存（同步依赖它做 diff）
 await saveCachedManifest(await scanFiles());

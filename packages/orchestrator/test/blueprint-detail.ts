@@ -38,7 +38,6 @@ await writeFile(join(repo, "README.md"), "# detail-fixture\n", "utf-8");
 /** 基础分类（与代码强补的标题一致） */
 const BASE_SECTIONS = [
 	{ title: "概览", description: "项目定位与整体速览" },
-	{ title: "快速开始", description: "安装与运行示例" },
 	{ title: "核心架构", description: "核心模块与实现细节" },
 ];
 
@@ -51,6 +50,7 @@ const OVER_SECTIONS = [
 	{ title: "领域D", description: "领域 D 说明" },
 	{ title: "领域E", description: "领域 E 说明" },
 	{ title: "领域F", description: "领域 F 说明" },
+	{ title: "领域G", description: "领域 G 说明" },
 ];
 
 /** C1：缩编 subagent 返回的收敛清单（5 个业务分类；落盘时再强补 3 个基础分类 → 8） */
@@ -62,7 +62,7 @@ const CONDENSED_SECTIONS = [
 	{ title: "合并域E", description: "补充的运维链路" },
 ];
 
-/** C2：合规分类（4 个，含核心模块） */
+/** C2：合规分类（3 个，含核心模块） */
 const COMPLIANT_SECTIONS = [...BASE_SECTIONS, { title: "核心模块", description: "问候模块实现" }];
 
 /** C3：minimal 下模型仍返回 4 个分类（应被代码收敛到「概览」） */
@@ -83,7 +83,7 @@ function topicsFor(section: string): Array<Record<string, unknown>> {
 	return [1, 2, 3].map((index) => ({
 		title: `${section}主题${index}`,
 		summary: `${section}主题${index}：一句话摘要`,
-		slug: `${section === "概览" ? "overview" : section === "快速开始" ? "quickstart" : section === "核心架构" ? "architecture" : "topic"}-${index}`,
+		slug: `${section === "概览" ? "overview" : section === "核心架构" ? "architecture" : "topic"}-${index}`,
 		level: "Intermediate",
 		associatedFiles: ["README.md"],
 	}));
@@ -353,23 +353,23 @@ check(
 	JSON.stringify(minimal),
 );
 check(
-	"A1 low 规格：3~5 / 1~3 / 跳标题",
-	low.sections.min === 3 && low.sections.max === 5 && low.topics.min === 1 && low.topics.max === 3 && !low.refineTitles,
+	"A1 low 规格：2~5 / 1~3 / 跳标题",
+	low.sections.min === 2 && low.sections.max === 5 && low.topics.min === 1 && low.topics.max === 3 && !low.refineTitles,
 	JSON.stringify(low),
 );
 check(
-	"A1 medium 规格：4~6 / 3~5 / 保留标题",
-	medium.sections.min === 4 && medium.sections.max === 6 && medium.topics.min === 3 && medium.topics.max === 5 && medium.refineTitles,
+	"A1 medium 规格：3~6 / 3~5 / 保留标题",
+	medium.sections.min === 3 && medium.sections.max === 6 && medium.topics.min === 3 && medium.topics.max === 5 && medium.refineTitles,
 	JSON.stringify(medium),
 );
 check(
-	"A1 high 规格（默认）：4~8 / 3~10",
-	high.sections.min === 4 && high.sections.max === 8 && high.topics.min === 3 && high.topics.max === 10 && high.refineTitles,
+	"A1 high 规格（默认）：3~8 / 3~10",
+	high.sections.min === 3 && high.sections.max === 8 && high.topics.min === 3 && high.topics.max === 10 && high.refineTitles,
 	JSON.stringify(high),
 );
 check(
-	"A1 max 规格：4~8 / 5~12 / exhaustive",
-	max.sections.min === 4 && max.sections.max === 8 && max.topics.min === 5 && max.topics.max === 12 && max.exhaustive && max.refineTitles,
+	"A1 max 规格：3~8 / 5~12 / exhaustive",
+	max.sections.min === 3 && max.sections.max === 8 && max.topics.min === 5 && max.topics.max === 12 && max.exhaustive && max.refineTitles,
 	JSON.stringify(max),
 );
 check("A1 非法档位回退 high", getDetailSpec("bogus").level === "high");
@@ -381,7 +381,7 @@ check("A2 超限判 over", judgeQuantity(9, { min: 4, max: 8 }) === "over");
 check("A2 sync 忽略下限", judgeQuantity(1, { min: 4, max: 8 }, { enforceMin: false }) === "ok");
 check(
 	"A2 常驻反馈格式（区间内也发）",
-	formatQuantityFeedback({ kind: "sections", count: 8, spec: high }) === "分类数量反馈：当前 8 / 要求 4~8（当前档位：high）",
+	formatQuantityFeedback({ kind: "sections", count: 8, spec: high }) === "分类数量反馈：当前 8 / 要求 3~8（当前档位：high）",
 	formatQuantityFeedback({ kind: "sections", count: 8, spec: high }),
 );
 check(
@@ -424,7 +424,7 @@ check(
 	});
 	check(
 		"A4 缩编分类任务：数量 / 清单 / 输出工具",
-		task.includes("要求数量为 4~8") && task.includes("- 概览：定位") && task.includes("submit_condensed_sections"),
+		task.includes("要求数量为 3~8") && task.includes("- 概览：定位") && task.includes("submit_condensed_sections"),
 	);
 	check("A4 缩编分类任务（不足）：给拆分/补充规则", task.includes("拆成更细的子领域"));
 	const overTask = buildCondenseSectionTask({
@@ -458,9 +458,8 @@ check(
 		"A5 代码兜底：基础分类保序取前 N",
 		fallback.length === 8 &&
 			fallback[0].title === "概览" &&
-			fallback[1].title === "快速开始" &&
-			fallback[2].title === "核心架构" &&
-			fallback[3].title === "领域A",
+			fallback[1].title === "核心架构" &&
+			fallback[2].title === "领域A",
 		JSON.stringify(fallback.map((section) => section.title)),
 	);
 	const minimalFallback = codeFallbackSections({ input: many, language: "zh", spec: minimal });
@@ -473,11 +472,12 @@ check(
 		input: many,
 		language: "zh",
 		spec: high,
-		existing: [{ title: "概览" }, { title: "快速开始" }, { title: "核心架构" }, { title: "既有领域" }, { title: "既有领域2" }, { title: "既有领域3" }, { title: "既有领域4" }, { title: "既有领域5" }],
+		existing: [{ title: "概览" }, { title: "核心架构" }, { title: "既有领域" }, { title: "既有领域2" }, { title: "既有领域3" }, { title: "既有领域4" }, { title: "既有领域5" }],
 	});
 	check(
 		"A5 sync 代码兜底：既有分类必留且不超上限",
-		syncFallback.length === 8 && syncFallback.every((section) => section.title.startsWith("既有") || section.title === "概览" || section.title === "快速开始" || section.title === "核心架构"),
+		syncFallback.length === 8 &&
+			syncFallback.every((section) => section.title.startsWith("既有") || section.title === "概览" || section.title === "核心架构" || section.title === "领域A"),
 		JSON.stringify(syncFallback.map((section) => section.title)),
 	);
 }
@@ -522,9 +522,30 @@ check(
 	check("A7 英文 minimal：Overview", enMinimal.length === 1 && enMinimal[0].title === "Overview", JSON.stringify(enMinimal));
 	const zhDefault = normalizeBlueprintSections([{ title: "领域A" }], "zh", 8);
 	check(
-		"A7 非 minimal：仍强补三个基础分类",
-		zhDefault.length === 4 && zhDefault[3].title === "领域A",
+		"A7 非 minimal：仍强补两个基础分类",
+		zhDefault.length === 3 && zhDefault[2].title === "领域A",
 		JSON.stringify(zhDefault.map((section) => section.title)),
+	);
+	// 回归断言：「快速开始」基础分类已移除（防回潮）
+	// 判据：空输入强补出的基础分类只有概览 / 核心架构两个（旧版本会强补出 3 个，含快速开始）
+	const zhForced = normalizeBlueprintSections([], "zh", 8);
+	check(
+		"A7 回归：空输入只强补两个基础分类（中文，不含快速开始）",
+		zhForced.length === 2 && zhForced[0].title === "概览" && zhForced[1].title === "核心架构",
+		JSON.stringify(zhForced.map((section) => section.title)),
+	);
+	const enForced = normalizeBlueprintSections([], "en", 8);
+	check(
+		"A7 回归：空输入只强补两个基础分类（英文，不含 Quick Start）",
+		enForced.length === 2 && enForced[0].title === "Overview" && enForced[1].title === "Core Architecture",
+		JSON.stringify(enForced.map((section) => section.title)),
+	);
+	// 模型仍可主动命名「快速开始」——它只是变成普通分类，不再被强制、不再强制 Mermaid
+	const zhSubmitted = normalizeBlueprintSections([{ title: "快速开始" }], "zh", 8);
+	check(
+		"A7 回归：模型主动提交「快速开始」仍作为普通分类保留（不强补、不报错）",
+		zhSubmitted.length === 3 && zhSubmitted.some((section) => section.title === "快速开始"),
+		JSON.stringify(zhSubmitted.map((section) => section.title)),
 	);
 }
 
@@ -532,7 +553,7 @@ check(
 	const classifyHigh = renderClassifyPrompt({ spec: high });
 	const classifyMinimal = renderClassifyPrompt({ spec: minimal });
 	const classifyMax = renderClassifyPrompt({ spec: max });
-	check("A8 分类提示词 high：数量目标 4~8", classifyHigh.includes("数量 4~8 个"), "");
+	check("A8 分类提示词 high：数量目标 3~8", classifyHigh.includes("数量 3~8 个"), "");
 	check(
 		"A8 分类提示词 minimal：固定 1 个概览",
 		classifyMinimal.includes("数量固定 1 个") && classifyMinimal.includes("只输出「概览」这一个分类"),
@@ -585,8 +606,8 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	const firstText = String(first.content);
 	check("B1 越界提交：不报错（is_error 未置位）", first.is_error !== true);
 	check(
-		"B1 越界提交：带数量反馈（当前 9 / 要求 4~8）",
-		firstText.includes("分类数量反馈：当前 9 / 要求 4~8（当前档位：high）"),
+		"B1 越界提交：带数量反馈（当前 9 / 要求 3~8）",
+		firstText.includes("分类数量反馈：当前 9 / 要求 3~8（当前档位：high）"),
 		firstText.split("\n")[0],
 	);
 	check("B1 越界提交：返回归并策略并请求重提", firstText.includes("分类数超出上限") && firstText.includes("重新调用 submit_sections"));
@@ -597,9 +618,9 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	const second = await tool.call({ sections: compliant }, ctx);
 	const secondText = String(second.content);
 	check("B1 第 2 轮合规：落盘成功", state.persisted === true);
-	check("B1 第 2 轮合规：反馈当前 8", secondText.includes("分类数量反馈：当前 8 / 要求 4~8（当前档位：high）"));
+	check("B1 第 2 轮合规：反馈当前 7", secondText.includes("分类数量反馈：当前 7 / 要求 3~8（当前档位：high）"));
 	const blueprint = await loadWikiBlueprint(undefined, "high");
-	check("B1 第 2 轮合规：wiki.json sections=8", blueprint.sections?.length === 8, JSON.stringify(blueprint.sections?.map((section) => section.title)));
+	check("B1 第 2 轮合规：wiki.json sections=7", blueprint.sections?.length === 7, JSON.stringify(blueprint.sections?.map((section) => section.title)));
 }
 
 {
@@ -648,17 +669,17 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	const over = await tool.call({ sections: [{ title: "领域C" }, { title: "领域D" }] }, ctx);
 	const overText = String(over.content);
 	check(
-		"B4 sync：越界（既有 5 + 新增 2 > 上限 5）返回 sync 策略",
+		"B4 sync：越界（既有 4 + 新增 2 > 上限 5）返回 sync 策略",
 		overText.includes("分类数超出上限") && overText.includes("sync") && overText.includes("既有分类必须全部保留"),
 		overText.split("\n")[0],
 	);
 	const before = await loadWikiBlueprint(undefined, "low");
-	check("B4 sync：越界不落盘（仍 5 个分类）", before.sections?.length === 5, JSON.stringify(before.sections?.map((section) => section.title)));
+	check("B4 sync：越界不落盘（仍 4 个分类）", before.sections?.length === 4, JSON.stringify(before.sections?.map((section) => section.title)));
 
 	const ok = await tool.call({ sections: [{ title: "领域A" }] }, ctx);
 	const after = await loadWikiBlueprint(undefined, "low");
 	const titles = (after.sections ?? []).map((section) => section.title);
-	check("B4 sync：既有分类必留 + 合规合并成功", state.persisted === true && titles.includes("领域A") && titles.includes("领域B") && titles.length === 5, JSON.stringify(titles));
+	check("B4 sync：既有分类必留 + 合规合并成功", state.persisted === true && titles.includes("领域A") && titles.includes("领域B") && titles.length === 4, JSON.stringify(titles));
 	check("B4 sync：成功结果带只校验上限的数量反馈", String(ok.content).includes("只校验上限"));
 }
 
@@ -853,7 +874,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	const legacySections = normalizeBlueprintSections([{ title: "领域A" }], "zh", 8);
 	check(
 		"B9 旧数据兼容：无 scope 字段照常归一化",
-		legacySections.length === 4 && legacySections.every((section) => section.scope === undefined),
+		legacySections.length === 3 && legacySections.every((section) => section.scope === undefined),
 		JSON.stringify(legacySections.map((section) => section.title)),
 	);
 }
@@ -862,7 +883,7 @@ console.log("\n▶ B) 输出工具（越界不落盘 / 常驻反馈 / 代码收�
 	await resetWiki();
 	const config = await loadConfig();
 	await initWikiSkeleton(
-		[{ title: "概览" }, { title: "快速开始" }, { title: "核心架构" }, { title: "领域A" }],
+		[{ title: "概览" }, { title: "核心架构" }, { title: "领域A" }],
 		config,
 		undefined,
 		{ variant: "low" },
@@ -898,8 +919,8 @@ console.log("\n▶ C1) 分类越界 → 缩编 subagent 收敛");
 	const blueprint = await loadWikiBlueprint(undefined, "high");
 	const titles = (blueprint.sections ?? []).map((section) => section.title);
 	check(
-		"C1 缩编结果落盘（基础 3 + 缩编 5 = 8）",
-		titles.length === 8 && ["合并域A", "合并域B", "合并域C", "合并域D", "合并域E"].every((title) => titles.includes(title)),
+		"C1 缩编结果落盘（基础 2 + 缩编 5 = 7）",
+		titles.length === 7 && ["合并域A", "合并域B", "合并域C", "合并域D", "合并域E"].every((title) => titles.includes(title)),
 		JSON.stringify(titles),
 	);
 	check(
@@ -908,13 +929,13 @@ console.log("\n▶ C1) 分类越界 → 缩编 subagent 收敛");
 	);
 	check(
 		"C1 越界策略进入原对话（带数量反馈）",
-		seenToolResults.some((text) => text.includes("分类数超出上限") && text.includes("分类数量反馈：当前 9 / 要求 4~8")),
+		seenToolResults.some((text) => text.includes("分类数超出上限") && text.includes("分类数量反馈：当前 9 / 要求 3~8")),
 	);
 	check(
 		"C1 两次不收敛后不再要求重提",
 		seenToolResults.some((text) => text.includes("已连续 2 次未收敛")),
 	);
-	check("C1 最终页面数 = 8 分类 × 3 = 24", result.pagesCount === 24, String(result.pagesCount));
+	check("C1 最终页面数 = 7 分类 × 3 = 21", result.pagesCount === 21, String(result.pagesCount));
 	check("C1 无失败分类", result.failedSections === undefined, JSON.stringify(result.failedSections));
 	check(
 		"C1 分类 scope 全链路落盘（缩编结果保留边界）",

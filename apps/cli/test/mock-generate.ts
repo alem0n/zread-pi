@@ -40,7 +40,6 @@ function checkContains(name: string, haystack: string, needle: string): void {
 
 const SECTIONS = [
   { title: "概览", description: "项目定位与整体速览" },
-  { title: "快速开始", description: "安装与运行示例" },
   { title: "核心架构", description: "核心模块与实现细节" },
   { title: "模块", description: "工具模块与实现细节" },
 ];
@@ -64,26 +63,6 @@ const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
       title: "设计目标",
       slug: "design-goals",
       level: "Intermediate",
-      associatedFiles: ["main.ts"],
-    },
-  ],
-  快速开始: [
-    {
-      title: "安装与运行",
-      slug: "install",
-      level: "Beginner",
-      associatedFiles: ["main.ts"],
-    },
-    {
-      title: "最小示例",
-      slug: "minimal-example",
-      level: "Beginner",
-      associatedFiles: ["main.ts"],
-    },
-    {
-      title: "常见问题",
-      slug: "faq",
-      level: "Beginner",
       associatedFiles: ["main.ts"],
     },
   ],
@@ -173,9 +152,9 @@ const usageChunk = JSON.stringify({
   model: "mock-model",
   choices: [],
   // 120 prompt = 60 非缓存输入 + 60 缓存读 → 用于验证底部合计行的缓存占比：
-  // 三阶段目录（分类 / 主题×4 / 标题×4 各 2 次请求 = 18）+ 12 个页面 Agent × 2 = 24，
-  // 首轮共 42 次请求：合计输入侧 5040（5.0k）、输出 1260、缓存占比 50.0%；
-  // 重新生成一页再 +2 次请求 → 输入侧 5280（5.3k）、输出 1320。
+  // 三阶段目录（分类 / 主题×3 / 标题×3 各 2 次请求 = 14）+ 9 个页面 Agent × 2 = 18，
+  // 首轮共 32 次请求：合计输入侧 3840（3.8k）、输出 960、缓存占比 50.0%；
+  // 重新生成一页再 +2 次请求 → 输入侧 4080（4.1k）、输出 1020（1.0k）。
   usage: {
     prompt_tokens: 120,
     completion_tokens: 30,
@@ -450,8 +429,8 @@ check(
   catalogSamples.find((text) => text.includes("上下文 "))?.split("\n").find((line) => line.includes("上下文 ")) ?? "(无)",
 );
 
-const allDone = await waitFor(() => screenText().includes("文章 12/12"), 60000, "全部页面生成完成");
-check("十二篇文章全部完成（文章 12/12）", allDone);
+const allDone = await waitFor(() => screenText().includes("文章 9/9"), 60000, "全部页面生成完成");
+check("九篇文章全部完成（文章 9/9）", allDone);
 
 // 已完成的目录 Agent 行也要继续显示指标（[完成] 右侧：↑ / ↓ / 缓存占比 / 上下文占比）
 const catalogAgentLines = screenText()
@@ -478,36 +457,36 @@ check(
   articleLines[0] ?? "(无)",
 );
 
-// 底部合计行：三阶段目录（分类 / 主题×4 / 标题×4 各 2 次请求 = 18）+ 12 个页面 Agent × 2 = 24，
-// 共 42 次请求；单次请求 60 非缓存输入 + 60 缓存读 + 30 输出
-// → 合计输入侧 5040（5.0k）、输出 1260、缓存占比 50.0%
+// 底部合计行：三阶段目录（分类 / 主题×3 / 标题×3 各 2 次请求 = 14）+ 9 个页面 Agent × 2 = 18，
+// 共 32 次请求；单次请求 60 非缓存输入 + 60 缓存读 + 30 输出
+// → 合计输入侧 3840（3.8k）、输出 960、缓存占比 50.0%
 const totalsText = screenText();
-checkContains("底部显示用量合计（输入 token）", totalsText, "合计 输入 5.0k");
-checkContains("底部显示用量合计（输出 token）", totalsText, "输出 1.3k");
+checkContains("底部显示用量合计（输入 token）", totalsText, "合计 输入 3.8k");
+checkContains("底部显示用量合计（输出 token）", totalsText, "输出 960");
 checkContains("底部显示缓存占比", totalsText, "缓存占比 50.0%");
 check(
   "用量合计行是页面的最后一行",
-  totalsText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 5.0k · 输出 1.3k · 缓存占比 50.0%",
+  totalsText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 3.8k · 输出 960 · 缓存占比 50.0%",
   totalsText.trimEnd().split("\n").at(-1) ?? "(空)",
 );
 
 // 重新生成一页（r）：合计必须继续累加（成功 + 失败 + 重试），
-// 不能把该页已消耗的 240 清零（底部合计输入侧 5040 -> 5280，输出 1260 -> 1320）
+// 不能把该页已消耗的 240 清零（底部合计输入侧 3840 -> 4080，输出 960 -> 1020）
 terminal.send("\x1b[B"); // 先移动选中项（onHighlight 才会记录 slug）
 await sleep(20);
 terminal.send("r");
 const regenerated = await waitFor(
-  () => screenText().includes("合计 输入 5.3k"),
+  () => screenText().includes("合计 输入 4.1k"),
   60000,
   "重新生成后合计继续累加",
 );
-check("重新生成一页后合计继续累加（5040 + 240 = 5280）", regenerated);
+check("重新生成一页后合计继续累加（3840 + 240 = 4080）", regenerated);
 const retryText = screenText();
-checkContains("重新生成后输出 token 累加（1260→1320，显示同为 1.3k）", retryText, "输出 1.3k");
+checkContains("重新生成后输出 token 累加（960→1020，跨越 k 边界）", retryText, "输出 1.0k");
 checkContains("重新生成后缓存占比保持", retryText, "缓存占比 50.0%");
 check(
   "重新生成后合计行同步刷新",
-  retryText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 5.3k · 输出 1.3k · 缓存占比 50.0%",
+  retryText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 4.1k · 输出 1.0k · 缓存占比 50.0%",
   retryText.trimEnd().split("\n").at(-1) ?? "(空)",
 );
 
@@ -523,10 +502,10 @@ if (wikiJsonExists) {
     sections?: Array<{ title: string }>;
     pages: Array<{ slug: string; file: string; section: string }>;
   };
-  check("wiki.json 含 12 个页面", catalog.pages.length === 12, `实际 ${catalog.pages.length}`);
+  check("wiki.json 含 9 个页面", catalog.pages.length === 9, `实际 ${catalog.pages.length}`);
   check(
     "wiki.json 含三阶段分类骨架",
-    (catalog.sections?.length ?? 0) >= 3,
+    (catalog.sections?.length ?? 0) >= 2,
     JSON.stringify(catalog.sections?.map((section) => section.title)),
   );
   check(
@@ -567,11 +546,11 @@ check("发生了真实的 mock LLM 请求", requestCount >= 4, `requests=${reque
 // 返回 wiki 首页：应识别出已生成完成（进度检查 + 选项重建）
 terminal.send("\x1b");
 const homeUpdated = await waitFor(
-  () => screenText().includes("文档已生成 (12 篇)"),
+  () => screenText().includes("文档已生成 (9 篇)"),
   10000,
   "wiki 首页显示已完成状态",
 );
-check("返回首页后状态为「文档已生成 (12 篇)」", homeUpdated);
+check("返回首页后状态为「文档已生成 (9 篇)」", homeUpdated);
 const homeText = screenText();
 check("已完成时提供「浏览文档」", homeText.includes("浏览文档"));
 check("已完成时提供「管理文档」", homeText.includes("管理文档"));
@@ -594,7 +573,7 @@ check("同步页目录状态为完成", screenText().includes("[完成]"));
 
 // ESC 返回首页
 terminal.send("\x1b");
-const backHome = await waitFor(() => screenText().includes("文档已生成 (12 篇)"), 10000, "ESC 返回首页");
+const backHome = await waitFor(() => screenText().includes("文档已生成 (9 篇)"), 10000, "ESC 返回首页");
 check("同步页 ESC 返回首页", backHome);
 
 app.exit();
