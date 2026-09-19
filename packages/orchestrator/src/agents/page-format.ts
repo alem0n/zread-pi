@@ -1,10 +1,12 @@
 /**
  * 页面格式契约 —— 与叙述语气无关的硬性格式约束
  *
- * 来源：`prompts/page-format.zh.md`（从 `prompts/page-agent.ts` 抽出的硬性格式契约：
- * frontmatter 注入 / 标题层级 / Mermaid 引号 / 溯源格式 / 交付前自检清单）
+ * 来源：`prompts/page-format.zh.md`（中文源为 lecture-to-notes 的
+ * `skills/lecture-to-md/lecture-to-md/assets/notes-prompt.md`，先逐字复制四段
+ * 「Markdown 格式要求 / 配图规则 / 图片引用语法 / 最终检查清单」再做语境改写；
+ * 格式事实部分同时从 zread-pi 的 `prompts/page-agent.ts` 抽出）
  *       `prompts/page-format.en.md`（同等翻译）
- * 语境改写与条目对应见 MIGRATION.md §32.1（plan.md §3.4.1）。
+ * 语境改写与条目对应见 MIGRATION.md §32.1（plan.md §3.4.1 / §5.5）。
  *
  * 与 humanizer（反 AI 腔）/ reader-first（教会读者）**正交**：
  * 这里只规定「格式必须成立」，不规定「怎么写得好读」。

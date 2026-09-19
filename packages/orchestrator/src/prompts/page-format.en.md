@@ -1,9 +1,16 @@
 # Page format contract (hard constraints, independent of narrative tone)
 
-> This asset is extracted from `prompts/page-agent.ts` and holds the page's **hard
-> format contract**. It is orthogonal to the style discipline (`humanizer.*.md`,
-> anti-AI prose) and the reader-first discipline (`reader-first.*.md`, teaching the
-> reader): this file only states what the format must satisfy, not how to write well.
+<!-- Source: lecture-to-notes' skills/lecture-to-md/lecture-to-md/assets/notes-prompt.md
+     (Chinese source; this is the translation of prompts/page-format.zh.md with equal
+     adaptation — see plan.md §3.4.1 / §5.5). The four carried-over sections
+     (Markdown format rules / figure rules / image reference syntax / final checklist)
+     keep the source's rule numbering and checklist order one-to-one.
+     Only edit together with the zh version, prompts/page-agent.ts, MIGRATION.md §32.1. -->
+
+> This asset holds the page's **hard format contract**. It is orthogonal to the style
+> discipline (`humanizer.*.md`, anti-AI prose) and the reader-first discipline
+> (`reader-first.*.md`, teaching the reader): this file only states what the format must
+> satisfy, not how to write well.
 
 ## YAML frontmatter
 
@@ -30,6 +37,9 @@
   CJK/Latin text, never write the bare form `A[Node text]` — always `A["Node text"]`.
 - Re-check the syntax before emitting a Mermaid diagram, especially to avoid unquoted labels
   such as `A[O(n) note]`; the correct form is `A["O(n) note"]`.
+- **Anti-padding**: draw a diagram only when the page genuinely covers module topology. When
+  it does not, the correct number of Mermaid diagrams is **0** (the `minimal` panorama
+  overview is the only mandatory exception); **never add a diagram just to have a diagram**.
 
 ## Provenance format (`Sources:`)
 
@@ -48,6 +58,16 @@ Correct example:
 >
 > Sources: [agent.ts](packages/core/src/agent/agent.ts#L1-L50), [package.json](packages/core/package.json)
 
+## Code blocks
+
+- Code snippets may **only** come from the associated files (copied or excerpted); never
+  invent "example code" on the spot.
+- **Anti-padding**: when the associated files contain nothing writable as code (pure config,
+  pure type declarations, pure Markdown), the correct number of code blocks is **0** —
+  forcing one in means fabricating source code, which is a failure, not compliance.
+- Never pad length with glossaries; a glossary is warranted only when terms are genuinely
+  dense and need a single shared explanation.
+
 ## Pre-delivery checklist
 
 Confirm each item before emitting `write_page` (aligned with lecture-to-notes' delivery
@@ -63,3 +83,11 @@ checklist, adapted from "lecture notes" to "code wiki"):
 7. No chatbot residue ("let's take a look", "it's worth noting"), marketing-style long
    sentences, or decorative bold (bold is only for a core concept introduced for the first time).
 8. Sections end on **concrete facts**, not on empty phrases like "the future is promising".
+9. No padding by paraphrase (the same claim restated in different words, or one idea split
+   across two paragraphs to look longer).
+10. No copying README / AGENTS.md / CHANGELOG prose wholesale — project docs are injected
+    automatically via `<project_context>`; the page explains the code itself and must not
+    restate those documents.
+11. Mermaid and code-block counts follow the "0 is the right answer when the source has none"
+    rule (0 diagrams when the page covers no topology; 0 code blocks when the associated
+    files hold nothing writable as code).
