@@ -31,7 +31,7 @@ import type { Api, AssistantMessage, Model, Models, RetryPolicy, Usage } from "@
 import { isContextOverflow } from "@earendil-works/pi-ai";
 import type { TSchema } from "@earendil-works/pi-ai";
 import { BudgetController, usageTokens } from "./budget.js";
-import { mapAssistantContent, mapPartialEvent, mapToolResult, mapUsage } from "./events.js";
+import { mapAssistantContent, mapPartialEvent, mapToolResult, mapUsage, extractRequestId } from "./events.js";
 import { AsyncQueue } from "./queue.js";
 import { toHarnessTools, unwrapBridgedDetails, type BridgedToolDetails, type ToolBridgeContext } from "./tools.js";
 import { blockedByHookResult, runToolHooks, type HookConfig } from "../hooks.js";
@@ -131,6 +131,8 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 	let currentQueue: AsyncQueue<SDKMessage> | undefined;
 	let totals: Usage | undefined;
 	let lastAssistant: AssistantMessage | undefined;
+	/** 最近一次 provider 响应的 request id（after_response 钩子捕获，挂到下一条 assistant 消息） */
+	let lastRequestId: string | undefined;
 
 	const push = (message: SDKMessage): void => currentQueue?.push(message);
 
@@ -242,6 +244,21 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 			),
 		);
 
+		unsubscribe.push(
+			harness.hooks.on(
+				"after_response",
+				(event) => {
+					// 捕获 provider 响应头里的 request id（OpenAI / Anthropic / Bedrock 头名不同，
+					// 由 extractRequestId 归一化），挂到紧随其后的 assistant（message_end）事件上。
+					// after_response 在 message_end 之前触发，且每次响应对应一条消息，顺序可靠。
+					const requestId = extractRequestId(event.headers);
+					if (requestId !== undefined) lastRequestId = requestId;
+					return undefined;
+				},
+				{ id: "zread-pi-request-id" },
+			),
+		);
+
 		// ----------------------------------------------------------------
 		// 事件：harness → SDKMessage（含权威 usage ledger）
 		// ----------------------------------------------------------------
@@ -266,7 +283,9 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 					type: "assistant",
 					message: { role: "assistant", content: mapAssistantContent(message) },
 					usage: mapUsage(message.usage),
+					...(lastRequestId !== undefined ? { request_id: lastRequestId } : {}),
 				});
+				lastRequestId = undefined;
 			}),
 			harness.events.on("tool_end", (event) => {
 				request.budget.observeToolEnd(event.toolName, event.isError);

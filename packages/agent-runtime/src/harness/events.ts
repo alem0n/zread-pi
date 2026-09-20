@@ -90,3 +90,33 @@ export function mapToolResult(toolUseId: string, toolName: string, content: unkn
 		},
 	};
 }
+
+/**
+ * 已知的 request-id 响应头名（小写；匹配时大小写不敏感）。
+ *
+ * 各 provider 用不同的头名回传请求标识：
+ *   · OpenAI / Mistral / OpenRouter：`x-request-id`
+ *   · Anthropic：`request-id`
+ *   · AWS Bedrock：`x-amzn-requestid`
+ * pi-ai 的 `headersToRecord` 透传原始键名，这里统一做归一化提取。
+ */
+const REQUEST_ID_HEADERS = ["x-request-id", "request-id", "x-amzn-requestid"];
+
+/**
+ * 从 provider 响应头提取 request id（大小写不敏感；取第一个非空值）。
+ *
+ * 用于排障：把 provider 侧的请求标识与本地轨迹关联起来。
+ * 返回 undefined 表示该 provider / 该次响应没有回传 request id（不做硬性要求）。
+ */
+export function extractRequestId(headers: Record<string, string> | undefined): string | undefined {
+	if (!headers) return undefined;
+	const normalized: Record<string, string> = {};
+	for (const [key, value] of Object.entries(headers)) {
+		normalized[key.toLowerCase()] = value;
+	}
+	for (const name of REQUEST_ID_HEADERS) {
+		const value = normalized[name];
+		if (typeof value === "string" && value.trim() !== "") return value.trim();
+	}
+	return undefined;
+}

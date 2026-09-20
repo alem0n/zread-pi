@@ -54,6 +54,9 @@ let initContextWindow: number | undefined;
 let capturedReasoning: SimpleStreamOptions["reasoning"];
 let capturedMaxRetries: number | undefined;
 let capturedMaxRetryDelayMs: number | undefined;
+/** 模拟 provider 在响应头里回传 request id（OpenAI 风格的 x-request-id） */
+const TEST_REQUEST_ID = "req_abc123";
+let assistantRequestIds: string[] = [];
 
 const agent = createAgent({
 	model: String(model.id),
@@ -70,7 +73,15 @@ const agent = createAgent({
 			capturedReasoning = o?.reasoning;
 			capturedMaxRetries = o?.maxRetries;
 			capturedMaxRetryDelayMs = o?.maxRetryDelayMs;
-			return models.streamSimple(m, c, o);
+			// 拦截 harness 的 onResponse 回调，在响应头里注入 request id，
+			// 模拟真实 provider 的 x-request-id 回传（faux 本身只回空 headers）
+			const upstream = o?.onResponse;
+			return models.streamSimple(m, c, {
+				...o,
+				onResponse: async (response, responseModel) => {
+					await upstream?.({ status: response.status, headers: { "x-request-id": TEST_REQUEST_ID } }, responseModel);
+				},
+			});
 		},
 	},
 	hooks: {
@@ -116,6 +127,7 @@ for await (const event of agent.query("把结果写入文件")) {
 		assistantTexts = message.message.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
 			.map((block) => block.text);
+		if (message.request_id !== undefined) assistantRequestIds.push(message.request_id);
 		if (message.usage) {
 			finalUsage = { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens };
 		}
@@ -155,6 +167,11 @@ check(
 	String(capturedMaxRetryDelayMs),
 );
 check("模型答复文本可见", assistantTexts.some((text) => text.includes("已写入")), assistantTexts.join("|"));
+check(
+	"provider 响应头的 request id 透传到 assistant 事件",
+	assistantRequestIds.length > 0 && assistantRequestIds.every((id) => id === TEST_REQUEST_ID),
+	JSON.stringify(assistantRequestIds),
+);
 
 // 纯函数：RetryConfig → pi 的 RetryPolicy / streamOptions（不依赖运行）
 const noRetry = { maxRetries: 0, baseDelayMs: 1, maxDelayMs: 1, retryableStatusCodes: [] };

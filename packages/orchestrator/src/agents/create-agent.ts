@@ -437,6 +437,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
           contextWindow,
           model,
           provider: providerId,
+          requestId: msg.request_id,
         }),
       );
       streamText = '';

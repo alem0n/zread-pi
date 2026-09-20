@@ -106,6 +106,13 @@ export interface SDKAssistantMessage {
   parent_tool_use_id?: string | null
   /** Token usage from this API response */
   usage?: TokenUsage
+  /**
+   * 本次 provider 响应分配的 request id（取自响应头，见 `extractRequestId`）。
+   *
+   * 可选：provider 未返回 request id 时缺省，旧调用方零改动。主要用于
+   * 排障——把 provider 侧的请求标识落进轨迹日志（`message_end.requestId`）。
+   */
+  request_id?: string
 }
 
 export interface SDKToolResultMessage {

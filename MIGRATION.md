@@ -54,6 +54,13 @@ createProvider(providerIdOrApiType, { apiKey, baseURL })
 `agentKey?` / `agentRole?` / `agentStatus?` / `agentUsage?`（逐 Agent 行；带 `agentKey` 的 `complete` / `error`
 是**单个 Agent 的终态**，不带才是目录整体终态）；`ArticleEventPayload` 新增 `contextTokens?` / `contextWindow?`。
 
+**request id 透传（排障用，第三十五步）**：`SDKAssistantMessage` 新增**可选** `request_id?`
+（provider 响应头分配的请求标识）；适配层订阅 harness 的 `after_response` 钩子，经
+`extractRequestId()` 从响应头归一化提取（兼容 `x-request-id` / `request-id` / `x-amzn-requestid`，
+大小写不敏感），挂在紧随其后的 `assistant`（`message_end`）事件上；编排层写入
+`message_end` 的可选字段 `requestId?`。provider 未返回时缺省，旧日志无该字段照常读取，
+replay / 布局 / UI 均不依赖它。
+
 ## 4. 与旧实现的行为差异（有意为之，均已验证）
 
 | 差异 | 说明 |
@@ -2926,4 +2933,92 @@ group / level / associatedFiles / topicSummary 结构性不可能被改动；
 这无害，它会变成一个普通业务分类（不再强制 Mermaid），数量门照常校验区间。
 wiki 由此不再提供「怎么跑起来」的入口，这是**有意为之**：wiki 定位是源码理解
 而非使用指南，安装说明应由人工维护的 README 承担。
+
+---
+
+## 35. request id 透传（v1.20.0）
+
+### 背景
+
+向 provider 报障 / 排查限流时，服务商支持侧的标准索要物是**它分配的
+request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `onResponse` →
+`AssistantResponseMetadata`（含响应头）只在 harness 内部流转，zread-pi 的
+适配层没有订阅 `after_response` 钩子，响应头里的 request id 连同排障入口
+一起被丢掉。pi 内核的通道是现成的，本步只把它接出来。
+
+### 决策
+
+- **挂在 `assistant`（`message_end`）事件上，不新增事件类型**。
+  `after_response` 钩子在 `message_end` **之前**触发且与消息 1:1 配对
+  （见 `vendor/…/harness/execution/assistant.ts` 的 `consumeAssistantStream`：
+  `stream.result()` → `afterResponse` → `observer.end`），因此「捕获 →
+  挂到紧随其后的消息」顺序可靠，不需要额外的时序协议或新事件 kind。
+- **头名归一化，不做 provider 特判**：`extractRequestId()` 依次匹配
+  `x-request-id`（OpenAI / Mistral / OpenRouter）/ `request-id`（Anthropic）/
+  `x-amzn-requestid`（Bedrock），键名大小写不敏感（pi-ai 的 `headersToRecord`
+  透传原始键名），取第一个非空值。这是纯函数，单测直接覆盖。
+- **全程可选**：provider 未返回 request id 时字段缺省，不报错、不降级。
+  旧 `events.jsonl` 无 `requestId` 字段照常读取（replay / 布局 / UI 均不依赖它）。
+- **只读不改**：钩子只读取响应头，返回 `undefined` 不替换消息，
+  对 harness 的响应处理零影响。
+
+### 改动
+
+#### 35.1 适配层（`packages/agent-runtime`）
+
+- `src/harness/events.ts`：新增导出纯函数 `extractRequestId(headers)`
+  （多头名 + 大小写不敏感 + trim + 空值跳过）。
+- `src/harness/driver.ts`：`queryHarness()` 订阅 `harness.hooks.on("after_response")`
+  （id `zread-pi-request-id`）捕获 request id，在 `message_end` 事件映射里
+  填入 `assistant.request_id` 并清空暂存。
+- `src/types.ts`：`SDKAssistantMessage` 新增**可选** `request_id?`。
+- `src/index.ts`：导出 `extractRequestId`（业务层 / 测试复用）。
+
+#### 35.2 编排层与轨迹（`packages/orchestrator` / `packages/types` / `packages/utils`）
+
+- `packages/types/src/run-event.ts`：`MessageEndEvent` 新增**可选** `requestId?`。
+- `packages/utils/src/trajectory-store/run-log-writer.ts`：
+  `buildMessageEndEvent()` 接受并透传 `requestId`（非空才写字段）。
+- `packages/orchestrator/src/agents/create-agent.ts`：把 `msg.request_id`
+  传进 `buildMessageEndEvent()`，落进 `events.jsonl`。
+
+### 行为差异
+
+| 维度 | 迁移前 | 迁移后 |
+| --- | --- | --- |
+| provider request id | 响应头到达后被丢弃，业务层 / 轨迹日志均不可见 | 经 `after_response` 捕获，挂在 `assistant` 事件并落进 `message_end.requestId` |
+| `SDKAssistantMessage` | — | 新增可选 `request_id?`（缺省 = provider 未返回） |
+| `message_end` 轨迹事件 | — | 新增可选 `requestId?`（旧日志无字段照常读取） |
+| 事件时序 / 结果归类 | — | 不变（钩子只读，不替换消息） |
+
+注意：**客户端发出去的** session 亲和头（`x-client-request-id` /
+`session_id`，值为编排层生成的 `zread-pi-<时间戳>-<随机>`，见
+`run-log-sink.ts`）与此**不同**——那是客户端造的关联 id，已在轨迹事件的
+`agent.sessionId` 里；本步拿到的是 **provider 分配的** id，两者正交互补。
+
+### 未覆盖（有意为之）
+
+- **未接入 UI**：request id 只落 `events.jsonl`，TUI 生成页 / browse 轨迹页
+  不展示它。排障是低频操作，直接读日志即可；真机长期使用后再决定是否需要
+  可视化。`CatalogEvent` / `ArticleEventPayload` 因此**未**新增字段。
+- **失败诊断里的 request id 未额外提取**：Bedrock 在失败时把 requestId 写进
+  `AssistantMessage.diagnostics`（`bedrock_response_failure`），而响应头路径
+  （`x-amzn-requestid`）在成功与失败时都可用，已由 `extractRequestId` 覆盖，
+  不再走 diagnostics 分支。
+- **`createProvider().createMessage()`（browse-chat 路径）未接入**：
+  它走 `completeSimple` 而非 harness，没有 `after_response` 钩子；
+  该路径是一次性问答，不记录轨迹，暂无需求。
+
+### 验证（实际执行结果）
+
+- `test:agent` **21/21**：新增断言——faux 经 `streamFn` 拦截注入
+  `x-request-id` 后，3 条 `assistant` 事件全部携带（`["req_abc123"×3]`）。
+- `test:tools` **109/109**（+7）：`extractRequestId` 纯函数——OpenAI /
+  Anthropic / Bedrock 三种头名、键名大小写不敏感、空白 trim、
+  空值跳过、无已知头 / 空 headers 返回 undefined、多头按优先级。
+- `test:blueprint` 的 `e2e-blueprint` **54/54**（+2）：mock server 每请求
+  回传自增 `x-request-id`，断言 14 条 `message_end` **全部**携带、
+  且 14 个 id 互不相同（每响应一个）。
+- `bun run mock:wiki`：`completed=4 failed=0`，交付闸门 `overall=PASS`。
+- `bun run typecheck` 0 错误；`bun run test` 全量套件绿（含 51 项组件测试）。
 

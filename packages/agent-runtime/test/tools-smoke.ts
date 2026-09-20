@@ -58,6 +58,7 @@ import {
   toTruncationDetails,
   truncateHead,
   truncateLine,
+  extractRequestId,
   type SDKMessage,
   type ToolContext,
   type ToolInputParams,
@@ -793,6 +794,38 @@ try {
   await rm(fixture, { recursive: true, force: true })
   await rm(toolsHome, { recursive: true, force: true })
 }
+
+// -------------------------------------------------------------------------
+console.log('\n▶ 11. extractRequestId：多 provider 响应头归一化（纯函数）')
+// -------------------------------------------------------------------------
+check(
+  'OpenAI 风格 x-request-id',
+  extractRequestId({ 'x-request-id': 'req_abc' }) === 'req_abc',
+  JSON.stringify(extractRequestId({ 'x-request-id': 'req_abc' })),
+)
+check(
+  'Anthropic 风格 request-id',
+  extractRequestId({ 'request-id': 'req_xyz' }) === 'req_xyz',
+  JSON.stringify(extractRequestId({ 'request-id': 'req_xyz' })),
+)
+check(
+  'Bedrock 风格 x-amzn-requestid',
+  extractRequestId({ 'x-amzn-requestid': 'amzn-1' }) === 'amzn-1',
+  JSON.stringify(extractRequestId({ 'x-amzn-requestid': 'amzn-1' })),
+)
+check(
+  '键名大小写不敏感（真实头可能混合大小写）',
+  extractRequestId({ 'X-Request-ID': 'req_MIXED' }) === 'req_MIXED',
+  JSON.stringify(extractRequestId({ 'X-Request-ID': 'req_MIXED' })),
+)
+check('空白被 trim', extractRequestId({ 'x-request-id': '  req-spaces  ' }) === 'req-spaces')
+check('无已知头时返回 undefined', extractRequestId({ 'content-type': 'text/event-stream' }) === undefined)
+check('空 headers 返回 undefined', extractRequestId(undefined) === undefined)
+check('空字符串头被跳过', extractRequestId({ 'x-request-id': '', 'request-id': 'fallback' }) === 'fallback')
+check(
+  '多个已知头并存时按优先级取第一个非空',
+  extractRequestId({ 'x-request-id': 'first', 'request-id': 'second' }) === 'first',
+)
 
 const failed = checks.filter((entry) => !entry.ok)
 console.log(`\n结果：${checks.length - failed.length}/${checks.length} 通过`)

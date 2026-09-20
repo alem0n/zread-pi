@@ -147,6 +147,12 @@ export interface MessageEndEvent extends RunEventBase {
   contextWindow?: number;
   model?: string;
   provider?: string;
+  /**
+   * 本次 provider 响应分配的 request id（取自响应头，排障用）。
+   *
+   * 可选：provider 未返回时缺省，旧日志无该字段照常读取（replay / 布局均不依赖它）。
+   */
+  requestId?: string;
 }
 
 export interface ToolStartEvent extends RunEventBase {
