@@ -5,7 +5,7 @@
      adaptation — see plan.md §3.4.1 / §5.5). The four carried-over sections
      (Markdown format rules / figure rules / image reference syntax / final checklist)
      keep the source's rule numbering and checklist order one-to-one.
-     Only edit together with the zh version, prompts/page-agent.ts, MIGRATION.md §32.1. -->
+     Only edit together with the zh version and prompts/page-agent.ts. -->
 
 > This asset holds the page's **hard format contract**. It is orthogonal to the style
 > discipline (`humanizer.*.md`, anti-AI prose) and the reader-first discipline

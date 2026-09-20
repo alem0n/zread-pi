@@ -13,7 +13,7 @@
  *   - 上下文压缩：harness 内建 threshold / overflow 压缩（`compaction` 设置）
  *   - 首尾机制：token 预算（usage 事件/ledger）替代轮数硬顶，
  *     `before_run` 注入两段式提示，`before_run_end` 决定终止或强制交卷
- *     —— 详见 `harness/budget.ts` 与 MIGRATION.md §12
+ *     —— 详见 `harness/budget.ts`（token 预算与两段式提示）
  */
 
 import type { Api, Model, Models, Provider } from "@earendil-works/pi-ai";

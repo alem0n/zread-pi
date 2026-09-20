@@ -1,7 +1,7 @@
 /**
  * replay —— 把 RunEvent 流折叠成 TrajectorySnapshot。
  *
- * 与 dsh 的差异（写入 MIGRATION.md）：
+ * 与 dsh 的差异（见下方逐条注释）：
  * ① 无 Cordis / Assembler，折叠是对自有 JSONL 的单遍 replay；
  * ② turn 由 agent_start / agent_end 推导（一个 Agent = 一个 turn），
  *    而不是 user 消息边界 —— zread-pi 的 Agent 内部没有用户插话；

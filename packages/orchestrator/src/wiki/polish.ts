@@ -11,7 +11,6 @@
  * polish 完成后跑 `checkPolishDiff`，若它改动了 frontmatter / `Sources:` 溯源行 /
  * Mermaid 代码块（只许改散文），就回滚到 polish 前的内容并告警。
  *
- * 详见 MIGRATION.md §15 / §32.3。
  */
 
 import { readFile } from 'node:fs/promises';

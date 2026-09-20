@@ -4,9 +4,9 @@
  * 来源：`prompts/reader-first.zh.md`（移植自 lecture-to-notes 的
  * `references/reader-first-writing.md`，先逐条复制再做「代码 wiki」语境兼容改写）
  *       `prompts/reader-first.en.md`（同等翻译）
- * 条目对应与改写理由见 MIGRATION.md §32.2（plan.md §3.4.2）。
+ * 条目逐条对应，改写理由见各条目行内注释。
  *
- * 与 humanizer 的分工（重要决策，见 MIGRATION.md §32.2 / §5.2）：
+ * 与 humanizer 的分工（重要决策）：
  * - humanizer = 「像人写的」（反 AI 腔，`style-discipline.ts`）；
  * - reader-first = 「教会了读者」（本模块）。
  * 两者正交，本块拼在 humanizer **之后**。

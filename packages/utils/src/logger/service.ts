@@ -17,7 +17,7 @@
  * 文本文件 exporter 默认关闭（`ZREAD_PI_LOG_TEXT=1` 开启，needle 兼容 / 人工翻阅用）。
  * console exporter **默认不注册**（显式 `ZREAD_PI_LOG_CONSOLE=1` 才开），
  * 因为 TUI 期间 console-guard 会把 console 输出转回总线，两者同时开启会往
- * 日志文件里双写（详见 MIGRATION.md）。
+ * 日志文件里双写。
  */
 
 import { LoggerFormat, resolveExporterLevel } from './format.js';

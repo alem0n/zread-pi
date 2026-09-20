@@ -456,7 +456,7 @@ console.log('▶ 旧日志兼容（无 sessionId → 回退 agent.key）');
 
 // v1.13.0 之前落盘的事件没有 sessionId。若 replay 不回退 agent.key，这些日志
 // 在轨迹视图里会整段不可见（agent_start 建不出 turn，消息 / 工具全部因
-// 「未知 Agent」被丢弃）。文档（MIGRATION.md / AGENTS.md）承诺的是回退 key。
+// 「未知 Agent」被丢弃）。文档（AGENTS.md §1.2）承诺的是回退 key。
 const LEGACY_PAGE: RunEvent['agent'] = { key: 'page:legacy', role: 'page', pageSlug: 'legacy' };
 const LEGACY_TOPICS: RunEvent['agent'] = { key: 'topics:core', role: 'topics', section: 'core' };
 

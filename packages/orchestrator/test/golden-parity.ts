@@ -9,7 +9,7 @@
  *   python3 tools/golden-parity-gen.py
  * 样本 SAMPLES 与该脚本逐字一致；改动样本必须两边同步并重新生成黄金值。
  *
- * 有意偏差（不在本测试对照范围，已在 MIGRATION §29 / §31 声明）：
+ * 有意偏差（不在本测试对照范围，已在 AGENTS.md §1.1 / §1.2 声明）：
  * - Python 的 CJK 门基于视频时长；zread-pi 基于 level + 关联文件规模（§0.2 不照搬公式）；
  * - Python 在 LaTeX 上计数；zread-pi 在 Markdown 上剥离围栏后计数（§3.1）。
  *   本测试只对照**字符级正则语义**（哪些字符算 CJK / 哪些串算数字），

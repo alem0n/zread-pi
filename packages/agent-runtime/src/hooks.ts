@@ -3,7 +3,7 @@
  *
  * 迁移前的契约形状（`PreToolUse` / `PostToolUse` 匹配器 + 超时）保持不变，
  * 执行位置从裸 loop 的 `beforeToolCall` / `afterToolCall` 换成 harness 的
- * `before_tool` / `after_tool` 钩子（语义一一对应，见 MIGRATION.md §12）。
+ * `before_tool` / `after_tool` 钩子（语义一一对应）。
  *
  * 预算相关的终止/提示钩子不在这里，而在 `harness/budget.ts`（BudgetController）。
  */

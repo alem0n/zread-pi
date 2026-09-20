@@ -3,7 +3,6 @@
  *
  * 来源：`prompts/humanizer.en.md`（blader/humanizer SKILL.md v3.0.0，MIT）
  *       `prompts/humanizer.zh.md`（humanizer-zh，翻译自 blader/humanizer）
- * 精炼方式与裁剪理由见 MIGRATION.md §15。
  *
  * 两层用法：
  * - 预防层（`polish.enabled = true`，默认）：`withStyleDiscipline()` 把纪律块拼进蓝图 /
@@ -61,7 +60,7 @@ export const POLISH_EMBEDDED_MODE = `## Embedded mode（本 Agent 的输出约�
 
 /**
  * polish Agent 的系统提示：纪律全文 + 读者优先自检 + Embedded mode 输出约定
- * （`polish.mode = 'full'` 时做一次「教学型」结构化自检，见 MIGRATION.md §32.3）
+ * （`polish.mode = 'full'` 时做一次「教学型」结构化自检）
  */
 export function buildPolishSystemPrompt(language: string | null | undefined): string {
   return `${getStyleDiscipline(language).trim()}\n\n${READER_SELF_CHECK}\n\n${POLISH_EMBEDDED_MODE}\n`

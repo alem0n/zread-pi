@@ -76,7 +76,7 @@ export {
 } from './agents/context-files.js'
 export type { ProjectContextFile, LoadProjectContextFilesOptions } from './agents/context-files.js'
 
-// 文风纪律（humanizer）：预防层注入 + polish Agent 提示词（见 MIGRATION.md §15）
+// 文风纪律（humanizer）：预防层注入 + polish Agent 提示词
 export {
   STYLE_DISCIPLINE_TAG,
   getStyleDiscipline,
@@ -89,13 +89,12 @@ export {
 export type { StyleLanguage } from './agents/style-discipline.js'
 
 // 页面格式契约（frontmatter / 标题层级 / Mermaid 引号 / 溯源格式 / 交付前自检清单）：
-// 从 page-agent.ts 抽出的硬性约束，与语气正交（见 MIGRATION.md §32.1）。
+// 从 page-agent.ts 抽出的硬性约束，与语气正交。
 export { getPageFormat, formatPageFormat, withPageFormat } from './agents/page-format.js'
 export type { FormatLanguage } from './agents/page-format.js'
 export { PAGE_FORMAT_TAG } from './agents/page-format.js'
 
 // 读者优先纪律（reader-first）：「教会了读者」，与 humanizer 正交、拼在其之后
-// （见 MIGRATION.md §32.2）。
 export {
   getReaderDiscipline,
   formatReaderDiscipline,

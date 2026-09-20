@@ -54,7 +54,7 @@ export interface PageResult {
    * 内容密度门报告（quality.contentGate 未关闭时才有值）。
    *
    * warn 模式只记录不拦截；enforce 拦截失败后预算用尽时 best-effort 落盘，
-   * mode 记为 'enforce-degraded'，页面仍计成功（见 MIGRATION §29）。
+   * mode 记为 'enforce-degraded'，页面仍计成功（见 AGENTS.md §1.1）。
    */
   gate?: ContentGateReport;
 }

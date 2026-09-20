@@ -24,7 +24,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { defineTool, getNumber, getRequiredString, getString } from './types.js'
 import type { ToolCallReturn } from './types.js'
 import type { ToolInputParams } from '../types.js'
-// 图片判型直接用 pi 内核实现（不再本地维护副本，见 MIGRATION.md §13）
+// 图片判型直接用 pi 内核实现（不再本地维护副本，直接复用 pi 内核实现）
 import { detectSupportedImageMimeType } from '@earendil-works/pi-agent-core/harness/tools/image'
 // 图片处理管线（格式归一化 + 缩放 + 提示），移植自 pi coding-agent
 import { processImage } from './image/image-process.js'

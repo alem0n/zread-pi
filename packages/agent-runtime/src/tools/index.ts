@@ -4,7 +4,7 @@
  * Orchestrator 的三条工作流按名称引用这些工具（read / write / edit / find / grep / ls，
  * 已对齐上游 pi 的小写命名），因此导出常量名保持不变。
  *
- * 实现说明（详见 MIGRATION.md §3）：
+ * 实现说明：
  *  - 搜索类（Glob / Grep / Ls）与写入类（Write / Edit）已按上游 pi 的实现重写，
  *    共享 `truncate` / `file-walk` / `glob-match` / `file-mutation-queue` 等基础设施；
  *  - 工具名与既有参数名保持向后兼容，新增参数均为可选。

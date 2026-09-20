@@ -2,7 +2,7 @@
  * context-compaction.ts —— 上下文压缩 + 首尾机制（token 预算 / 两段式提示 / before_run_end）冒烟测试
  *（离线、不调用外部 API）
  *
- * 迁移后的验证点（对应 MIGRATION.md §12 的四项升级）：
+ * 迁移后的验证点（对应 AGENTS.md §1.1「首尾机制 harness 化」的四项升级）：
  *  1. 上下文压缩由 harness 内建承担：run 边界处按 `contextWindow - reserveTokens` 触发摘要，
  *     发出 `system/compact_boundary`，压缩后继续运行并最终 success；
  *  2. 上下文溢出（provider 报错）→ harness 归类 overflow → 适配层映射回 `error_context_full`

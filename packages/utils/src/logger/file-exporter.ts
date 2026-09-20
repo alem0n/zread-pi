@@ -2,7 +2,7 @@
  * File exporter —— harness 没有（logger-console 只管终端），这是本仓库新增的
  * 文本 sink，沿用 zread-pi 既定产物位置 `~/.zread-pi/logs/zread-pi-<date>.log`。
  *
- * 与旧 `logger.ts` 实现的差异（详见 MIGRATION.md）：
+ * 与旧 `logger.ts` 实现的差异：
  *  1. 日期按**写入时刻**计算（旧实现在模块加载期定死 `LOG_FILE`，跨天运行会写错文件）；
  *  2. 行内带上命名 logger 的名字（`[时间] [级别] 名字 消息`），便于按模块过滤；
  *  3. 启动时清理超过保留期的旧日志（默认 30 天，`ZREAD_PI_LOG_RETENTION_DAYS` 可覆盖）；

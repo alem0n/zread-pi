@@ -8,7 +8,7 @@
      语境词替换：课堂笔记 → 代码 wiki；课程标题 → 页面标题；课件截图/视频帧
      → Mermaid 架构图；图片相对路径 → `Sources:` 溯源行；LaTeX 公式 → 代码块。
      原文的规则编号与清单顺序**必须保留**（清单条数与编号与源一一对应）。
-     仅与 en 版本（同等翻译）、prompts/page-agent.ts、MIGRATION.md §32.1 一起改动。 -->
+     仅与 en 版本（同等翻译）、prompts/page-agent.ts 一起改动。 -->
 
 > 本资产是页面的**硬性格式契约**。
 > 与文风纪律（`humanizer.*.md`，反 AI 腔）和读者优先纪律

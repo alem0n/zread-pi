@@ -20,7 +20,7 @@ import { defineTool, getString } from './types.js'
 import type { ToolCallReturn } from './types.js'
 import { withFileMutationQueue } from './file-mutation-queue.js'
 import { resolveToCwd } from './path-utils.js'
-// 精确替换与 diff 计算直接用 pi 内核实现（不再本地维护副本，见 MIGRATION.md §13）
+// 精确替换与 diff 计算直接用 pi 内核实现（不再本地维护副本，直接复用 pi 内核实现）
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
