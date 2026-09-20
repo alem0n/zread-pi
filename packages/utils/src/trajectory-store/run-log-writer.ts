@@ -13,17 +13,13 @@
 import { appendFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import type {
+  AgentConfigEvent,
   AgentEndEvent,
-  AgentStartEvent,
   BlueprintDetailLevel,
-  CompactEvent,
   FailedSectionsEvent,
-  MessageDeltaEvent,
-  MessageEndEvent,
-  MessageStartEvent,
   PageEndEvent,
   PageStartEvent,
-  RetryEvent,
+  ProviderRequestEvent,
   RunEndEvent,
   RunEvent,
   RunEventAgentMeta,
@@ -32,11 +28,10 @@ import type {
   RunMeta,
   RunStartEvent,
   RunTokenUsage,
+  ScanEndEvent,
+  ScanStartEvent,
   SectionEvent,
   StageEvent,
-  StatusEvent,
-  ToolEndEvent,
-  ToolStartEvent,
 } from '@zread-pi/types';
 import { RUN_LEVEL_AGENT } from '@zread-pi/types';
 import { ensureDir, writeTextFileAtomic } from '../file-io.js';
@@ -49,6 +44,7 @@ import {
   getMetaPath,
   getRunDir,
   getRunsDir,
+  getSessionsRoot,
   isValidRunId,
   listRuns,
   META_FILE_NAME,
@@ -62,10 +58,6 @@ export const DEFAULT_RUNS_RETENTION = 20;
 
 /** 单个字符串载荷的截断上限（64 KiB） */
 export const PAYLOAD_MAX_CHARS = 65_536;
-/** 流式预览的字符上限 */
-export const PREVIEW_MAX_CHARS = 512;
-/** 单条消息的流式更新节流间隔（毫秒） */
-export const DELTA_THROTTLE_MS = 1_000;
 
 /** 本模块的命名 logger（运行日志写入） */
 const logger = createLogger('orchestrator.run-log');
@@ -96,17 +88,6 @@ export function clipJson(value: RunJsonValue, max: number = PAYLOAD_MAX_CHARS): 
   return value;
 }
 
-/** 从内容块生成单行预览（流式事件用；与 trajectory 包的 previewOfBlocks 同语义） */
-export function previewOfBlocks(blocks: Array<{ type: string; text?: string }>): string {
-  const text = blocks
-    .filter((block) => (block.type === 'text' || block.type === 'thinking') && typeof block.text === 'string')
-    .map((block) => (block.type === 'text' ? block.text! : block.text!))
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return text.slice(0, PREVIEW_MAX_CHARS);
-}
-
 export interface RunLogWriterOptions {
   kind: RunKind;
   detail?: BlueprintDetailLevel;
@@ -123,6 +104,8 @@ export type AppendRunEvent = {
 
 export class RunLogWriter {
   readonly runId: string;
+  /** pi 会话落盘根目录（`<runDir>/sessions/`）；适配层按它把每个 Agent 的完整会话写进该目录 */
+  readonly sessionsRoot: string;
   private readonly projectRoot: string;
   private seq = 0;
   private chain: Promise<void> = Promise.resolve();
@@ -136,6 +119,7 @@ export class RunLogWriter {
   private constructor(projectRoot: string, runId: string, meta: RunMeta) {
     this.projectRoot = projectRoot;
     this.runId = runId;
+    this.sessionsRoot = getSessionsRoot(runId, projectRoot);
     this.meta = meta;
   }
 
@@ -174,7 +158,6 @@ export class RunLogWriter {
     await writer.writeMeta();
     await RunLogWriter.healInterruptedRuns(projectRoot, runId);
     await RunLogWriter.enforceRetention(projectRoot, runId);
-    logger.info(`run 开始：${runId}（${options.kind}）→ ${runsDir}`);
     return writer;
   }
 
@@ -226,7 +209,6 @@ export class RunLogWriter {
     if (error) this.meta.error = error;
     if (usage) this.meta.usage = usage;
     await this.writeMeta();
-    logger.info(`run 结束：${this.runId}（${status}，${Math.round(durationMs)}ms）`);
   }
 
   /** 只读 meta（不落盘） */
@@ -251,7 +233,7 @@ export class RunLogWriter {
   /** 按事件种类更新 meta 计数（agent / page / 用量合计） */
   private tally(event: RunEvent): void {
     switch (event.kind) {
-      case 'agent_start': {
+      case 'agent_config': {
         this.meta.agents.count += 1;
         const role = event.agent?.role;
         if (role) this.meta.agents.byRole[role] = (this.meta.agents.byRole[role] ?? 0) + 1;
@@ -411,17 +393,20 @@ export async function withRunLog<T>(
 }
 
 // 事件载荷的便捷构造函数（编排层用；自动截断超长载荷；返回不含 seq / ts 的载荷）
-export function buildAgentStartEvent(input: {
+export function buildAgentConfigEvent(input: {
   agent?: RunEventAgentMeta;
   prompt: string;
   systemPrompt?: string;
   toolCatalog: Array<{ name: string; inputSchema: unknown }>;
   model?: string;
   provider?: string;
+  thinkingLevel?: string;
   tokenBudget?: number;
-}): Omit<AgentStartEvent, 'seq' | 'ts'> {
+  contextWindow?: number;
+  sessionId?: string;
+}): Omit<AgentConfigEvent, 'seq' | 'ts'> {
   return {
-    kind: 'agent_start',
+    kind: 'agent_config',
     ...(input.agent ? { agent: input.agent } : {}),
     prompt: clipText(input.prompt),
     ...(input.systemPrompt ? { systemPrompt: clipText(input.systemPrompt) } : {}),
@@ -431,113 +416,44 @@ export function buildAgentStartEvent(input: {
     })),
     ...(input.model ? { model: input.model } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
+    ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
     ...(input.tokenBudget ? { tokenBudget: input.tokenBudget } : {}),
+    ...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
+    // pi 会话 id：投影层据此把 agent_config 与会话文件 join
+    ...(input.sessionId !== undefined ? { agent: { ...(input.agent ?? {}), sessionId: input.sessionId } as RunEventAgentMeta } : {}),
   };
 }
 
-export function buildMessageEndEvent(input: {
+export function buildProviderRequestEvent(input: {
   agent?: RunEventAgentMeta;
-  blocks: Array<{ type: string; text?: string; thinking?: string; callId?: string; id?: string; name?: string; input?: unknown }>;
-  usage?: RunTokenUsage;
-  stopReason?: string;
-  contextWindow?: number;
+  requestId: string;
   model?: string;
   provider?: string;
-  requestId?: string;
-}): Omit<MessageEndEvent, 'seq' | 'ts'> {
+}): Omit<ProviderRequestEvent, 'seq' | 'ts'> {
   return {
-    kind: 'message_end',
+    kind: 'provider_request',
     ...(input.agent ? { agent: input.agent } : {}),
-    blocks: input.blocks.map((block) => {
-      if (block.type === 'text') return { type: 'text', text: clipText(block.text ?? '') };
-      if (block.type === 'thinking') return { type: 'thinking', text: clipText(block.thinking ?? block.text ?? '') };
-      return {
-        type: 'tool_use',
-        callId: String(block.callId ?? block.id ?? ''),
-        name: String(block.name ?? ''),
-        input: clipJson((block.input ?? {}) as RunJsonValue),
-      };
-    }),
-    ...(input.usage ? { usage: input.usage } : {}),
-    ...(input.stopReason ? { stopReason: input.stopReason } : {}),
-    ...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
+    requestId: clipText(input.requestId, 1_024),
     ...(input.model ? { model: input.model } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
-    ...(input.requestId ? { requestId: input.requestId } : {}),
   };
 }
 
-export function buildToolStartEvent(input: {
+export function buildScanStartEvent(input: { agent?: RunEventAgentMeta }): Omit<ScanStartEvent, 'seq' | 'ts'> {
+  return { kind: 'scan_start', ...(input.agent ? { agent: input.agent } : {}) };
+}
+
+export function buildScanEndEvent(input: {
   agent?: RunEventAgentMeta;
-  callId: string;
-  name: string;
-  args: unknown;
-}): Omit<ToolStartEvent, 'seq' | 'ts'> {
+  fileCount?: number;
+  durationMs?: number;
+}): Omit<ScanEndEvent, 'seq' | 'ts'> {
   return {
-    kind: 'tool_start',
+    kind: 'scan_end',
     ...(input.agent ? { agent: input.agent } : {}),
-    callId: input.callId,
-    name: input.name,
-    input: clipJson((input.args ?? {}) as RunJsonValue),
+    ...(input.fileCount !== undefined ? { fileCount: input.fileCount } : {}),
+    ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
   };
-}
-
-export function buildToolEndEvent(input: {
-  agent?: RunEventAgentMeta;
-  callId: string;
-  name?: string;
-  output: string;
-  details?: RunJsonValue;
-  isError?: boolean;
-}): Omit<ToolEndEvent, 'seq' | 'ts'> {
-  return {
-    kind: 'tool_end',
-    ...(input.agent ? { agent: input.agent } : {}),
-    callId: input.callId,
-    ...(input.name ? { name: input.name } : {}),
-    output: clipText(input.output),
-    ...(input.details ? { details: clipJson(input.details, 16_384) } : {}),
-    ...(input.isError ? { isError: true } : {}),
-  };
-}
-
-export function buildRetryEvent(input: {
-  agent?: RunEventAgentMeta;
-  attempt: number;
-  maxRetries: number;
-  delayMs: number;
-  error: string;
-}): Omit<RetryEvent, 'seq' | 'ts'> {
-  return {
-    kind: 'retry',
-    ...(input.agent ? { agent: input.agent } : {}),
-    attempt: input.attempt,
-    maxRetries: input.maxRetries,
-    delayMs: input.delayMs,
-    error: clipText(input.error, 2_048),
-  };
-}
-
-export function buildMessageStartEvent(input: {
-  agent?: RunEventAgentMeta;
-  preview: string;
-}): Omit<MessageStartEvent, 'seq' | 'ts'> {
-  return { kind: 'message_start', ...(input.agent ? { agent: input.agent } : {}), preview: clipText(input.preview, PREVIEW_MAX_CHARS) };
-}
-
-export function buildMessageDeltaEvent(input: {
-  agent?: RunEventAgentMeta;
-  preview: string;
-}): Omit<MessageDeltaEvent, 'seq' | 'ts'> {
-  return { kind: 'message_delta', ...(input.agent ? { agent: input.agent } : {}), preview: clipText(input.preview, PREVIEW_MAX_CHARS) };
-}
-
-export function buildCompactEvent(input: { agent?: RunEventAgentMeta; summary?: string }): Omit<CompactEvent, 'seq' | 'ts'> {
-  return { kind: 'compact', ...(input.agent ? { agent: input.agent } : {}), ...(input.summary ? { summary: clipText(input.summary, 8_192) } : {}) };
-}
-
-export function buildStatusEvent(input: { agent?: RunEventAgentMeta; text: string }): Omit<StatusEvent, 'seq' | 'ts'> {
-  return { kind: 'status', ...(input.agent ? { agent: input.agent } : {}), text: clipText(input.text, 2_048) };
 }
 
 export function buildStageEvent(input: { agent?: RunEventAgentMeta; stage: StageEvent['stage'] }): Omit<StageEvent, 'seq' | 'ts'> {

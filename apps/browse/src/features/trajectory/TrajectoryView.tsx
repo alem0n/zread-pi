@@ -39,7 +39,7 @@ export function TrajectoryView({ runId }: TrajectoryViewProps) {
   const [detailsWidth, setDetailsWidth] = useState(DETAILS_MIN_WIDTH);
 
   const events = useTrajectoryEvents(runId);
-  const layout = useTrajectoryLayout(events.events, query);
+  const layout = useTrajectoryLayout(events.events, query, true, events.sessions);
 
   // 按需隐藏 session：被隐藏的会话从台账与时间线中同时移除（时间线重新投影）
   const visibleTurns = useMemo(

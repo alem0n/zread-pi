@@ -32,7 +32,21 @@ export type {
 } from './types.js';
 export { trajectoryRecordId } from './types.js';
 
-export { replayRunEvents } from './replay.js';
+export { replayRunEvents, replayRun, summarizeRunEvents, type RunDigest } from './replay.js';
+export {
+  type SessionBlock,
+  type SessionMessage,
+  type SessionEntry,
+  type SessionUsage,
+  type SessionUsageRow,
+  type SessionFacts,
+  sessionIdFromHeader,
+  sessionIdFromFileName,
+  parseSessionLines,
+  sumSessionUsage,
+  previewOfSessionMessage,
+  toolCallArguments,
+} from './session.js';
 export { deriveTrajectoryLayout, appendTrajectoryPartialLayout } from './layout.js';
 export {
   deriveTrajectoryTimeline,

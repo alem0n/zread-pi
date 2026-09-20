@@ -160,6 +160,13 @@ export interface AgentOptions {
 	 * 缺省由适配层生成全局唯一值。编排层传入它作为轨迹回放的 session 归属键。
 	 */
 	sessionId?: string;
+	/**
+	 * pi 会话落盘根目录（`<runDir>/sessions/`）：给定后本次 query 的完整会话
+	 * （消息 / 工具调用 / 用量 / 压缩摘要）由 pi 的 `JsonlSessionRepo` 写进
+	 * `<sessionRoot>/--<cwd>--/<ts>_<sessionId>.jsonl`，成为唯一完整事实源。
+	 * 缺省 = 内存会话（用完即弃，与迁移前一致）。编排层按 run 注入。
+	 */
+	sessionRoot?: string;
 	/** 自动上下文压缩（harness 内建 compaction），缺省启用 */
 	compaction?: CompactionOptions;
 	/**
@@ -327,6 +334,9 @@ class AgentRuntimeImpl implements AgentInstance {
 			// 同时启动时会撞车，故补随机后缀。
 			sessionId: options.sessionId ?? `zread-pi-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
 			cwd: options.cwd ?? process.cwd(),
+			// 会话落盘根目录：编排层按 run 注入（`<runDir>/sessions/`）；
+			// 缺省 = 内存会话。
+			...(options.sessionRoot !== undefined ? { sessionRoot: options.sessionRoot } : {}),
 			modelId: modelId ?? String(runtime.model.id),
 			apiType: runtime.apiType,
 			providerId: runtime.providerId,

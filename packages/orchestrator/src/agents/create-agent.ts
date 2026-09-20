@@ -14,22 +14,13 @@ import {
   getProjectHome,
   loadConfig,
   createLogger,
-  buildAgentStartEvent,
+  buildAgentConfigEvent,
   buildAgentEndEvent,
-  buildMessageStartEvent,
-  buildMessageDeltaEvent,
-  buildMessageEndEvent,
-  buildToolStartEvent,
-  buildToolEndEvent,
-  buildRetryEvent,
-  buildCompactEvent,
-  buildStatusEvent,
-  previewOfBlocks,
-  DELTA_THROTTLE_MS,
+  buildProviderRequestEvent,
 } from '@zread-pi/utils';
 import type { AppendRunEvent } from '@zread-pi/utils';
 import type { CatalogEvent } from '../types.js';
-import { isAssistantMessage, isPartialMessage, isResultMessage, isToolResultMessage, SYSTEM_PROMPTS } from './uitls.js';
+import { isAssistantMessage, isPartialMessage, isResultMessage, SYSTEM_PROMPTS } from './uitls.js';
 import { loadProjectContextFiles, withProjectContext } from './context-files.js';
 import { withStyleDiscipline } from './style-discipline.js';
 import { withReaderDiscipline } from './reader-first.js';
@@ -74,8 +65,8 @@ export interface CreateBlueprintAgentOptions {
  * （`packages/utils/src/trajectory-store/`），折叠 / 布局在 `@zread-pi/trajectory`。
  */
 export interface RunLogSink {
-  /** 本次 Agent 会话的全局唯一标识（同时是 pi 会话的 sessionId） */
-  readonly sessionId: string;
+  /** pi 会话落盘根目录（`<runDir>/sessions/`）；适配层据此把完整会话写盘 */
+  readonly sessionRoot: string;
   append(event: AppendRunEvent): void;
 }
 
@@ -209,7 +200,6 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       `${modelContextWindow ? `, 上下文窗口覆盖: ${modelContextWindow}` : ''}` +
       `${modelMaxTokens ? `, 最大输出覆盖: ${modelMaxTokens}` : ''}`,
   );
-
   // Token 累积统计：assistant 事件带的是「该次响应」的用量（见 test:agent:http 断言），
   // 这里累加成「本次 Agent 运行至今」的累计快照，供 UI 的每页展示与跨页合计使用；
   // 最终以 result 事件的 usage（harness usage ledger 的权威累计）为准覆盖。
@@ -224,22 +214,13 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     ...(contextTokens !== undefined ? { contextTokens } : {}),
   });
 
-  // 构建钩子配置（onEvent 回调 / runLog sink 任一存在即安装）
+  // 构建钩子配置：只做 onEvent 分发（TUI 实时进度依赖它）。
+  // 方案 C 后轨迹内容全部由 pi 会话条目承载，钩子里不再写捕获事件。
   const onEvent = options.onEvent;
-  // 工具结果的 isError 由 PostToolUse 钩子暂存（它先于流里的 tool_result 事件），
-  // details 在流里的 tool_result 上（两者合并后写入轨迹日志）
-  const toolErrors = new Map<string, boolean>();
-  const hooks = onEvent || options.runLog ? {
+  const hooks = onEvent ? {
     PreToolUse: [{
       hooks: [
-        async (input: Record<string, unknown>, toolUseId: string) => {
-          options.runLog?.append(
-            buildToolStartEvent({
-              callId: toolUseId,
-              name: input.toolName as string,
-              args: input.toolInput,
-            }),
-          );
+        async (input: Record<string, unknown>) => {
           onEvent?.({
             type: 'tool_start',
             toolName: input.toolName as string,
@@ -252,8 +233,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     }],
     PostToolUse: [{
       hooks: [
-        async (input: Record<string, unknown>, toolUseId: string) => {
-          if (options.runLog) toolErrors.set(toolUseId, input.isError === true);
+        async (input: Record<string, unknown>) => {
           onEvent?.({
             type: 'tool_result',
             toolName: input.toolName as string,
@@ -281,16 +261,7 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       maxRetryDelayMs: DEFAULT_PROVIDER_MAX_RETRY_DELAY_MS,
     },
     onRetry: (info) => {
-      // 轨迹日志：重试事件（挂在下一条 message_end 上，见 replay 的 pendingRetry）
-      options.runLog?.append(
-        buildRetryEvent({
-          attempt: info.attempt,
-          maxRetries: info.maxRetries,
-          delayMs: info.delayMs,
-          error: info.error,
-        }),
-      );
-      // 发射 retry 事件通知 UI
+      // 发射 retry 事件通知 UI（轨迹侧的重试语义由 pi 会话的操作记录承载）
       if (onEvent) {
         onEvent({
           type: 'retry',
@@ -307,7 +278,6 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
   } : undefined;
 
   // 创建 Agent
-  agentLogger.info(`System prompt doc_language: ${docLanguage} => "${SYSTEM_PROMPTS[docLanguage]}"`);
   // 目标仓库自述（AGENTS.md / CLAUDE.md …）注入系统提示：仓库若有架构说明/约定术语，
   // 让生成的 wiki 与仓库自述一致，减少纯靠读代码的猜测（见 context-files.ts）。
   // 文风纪律（humanizer）作为最后一段追加：排在 <project_context> 之后，蓝图与页面 Agent 同时生效。
@@ -318,9 +288,6 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     systemPrompt = options.systemPrompt;
   } else {
     const contextFiles = loadProjectContextFiles({ cwd: process.cwd(), agentDir: getProjectHome() });
-    if (contextFiles.length > 0) {
-      agentLogger.info(`注入项目上下文文件: ${contextFiles.map((file) => file.path).join(', ')}`);
-    }
     systemPrompt = withReaderDiscipline(
       withStyleDiscipline(
         withProjectContext(SYSTEM_PROMPTS[docLanguage], contextFiles),
@@ -330,8 +297,6 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
       docLanguage,
       styleEnabled,
     );
-    agentLogger.info(`文风纪律（humanizer）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
-    agentLogger.info(`读者优先纪律（reader-first）注入: ${styleEnabled ? `${docLanguage} 版本` : '已关闭'}`);
   }
   const agent = CreateAgentSdk({
     model,
@@ -342,9 +307,10 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     tools: options.tools,
     systemPrompt,
     maxTurns,
-    // 轨迹回放的 session 归属键（pi 会话 id = sink 的 sessionId；
-    // 缺省由适配层生成全局唯一值，仍能正常工作，只是事件里不带 sessionId）
-    sessionId: options.runLog?.sessionId,
+    // 会话落盘根目录（`<runDir>/sessions/`）：适配层据此把本次 Agent 的
+    // 完整会话写进 run 目录（缺省 = 内存会话）。pi 会话 id 由适配层生成，
+    // 经 system/init 流回后写进 agent_config，供投影层按它 join 会话文件。
+    ...(options.runLog?.sessionRoot !== undefined ? { sessionRoot: options.runLog.sessionRoot } : {}),
     contextWindow: modelContextWindow,
     maxTokens: modelMaxTokens,
     budget: {
@@ -361,22 +327,9 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     retryConfig,
   });
 
-  // 轨迹日志：Agent 启动（系统提示 / 工具目录 / 预算）
-  options.runLog?.append(
-    buildAgentStartEvent({
-      prompt: options.prompts,
-      systemPrompt,
-      toolCatalog: options.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema })),
-      model,
-      provider: providerId,
-      tokenBudget: effectiveTokenBudget > 0 ? effectiveTokenBudget : undefined,
-    }),
-  );
-
-  // 流式消息的累计状态（message_start / message_delta 的预览由它生成）
-  let streamText = '';
-  let streamStarted = false;
-  let streamLastDeltaAt = 0;
+  // agent_config 在 system/init 到达时发射（此时模型已解析，可拿到上下文窗口
+  // 与 pi 会话 id）；内容事件已退役，轨迹内容由 pi 会话条目承载
+  let agentConfigEmitted = false;
 
   // 发送开始事件
   options.onEvent?.({ type: 'requesting', usage: totalUsage, ...contextFields() });
@@ -385,91 +338,51 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     const msg = event as SDKMessage;
 
     // 模型上下文窗口（本次运行解析出的模型；UI 的「上下文占比」分母）
-    if (msg.type === 'system' && msg.subtype === 'init' && msg.context_window !== undefined) {
-      contextWindow = msg.context_window;
-    }
-
-    // in-run 压缩段：轨迹日志记一条 compact
-    if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-      options.runLog?.append(buildCompactEvent({ summary: msg.summary }));
-    }
-
-    // 长操作的状态文案（如压缩进行中）
-    if (msg.type === 'system' && msg.subtype === 'status') {
-      options.runLog?.append(buildStatusEvent({ text: msg.message }));
-    }
-
-    // Partial 流式输出（delta 累积成预览：首个 delta → message_start，
-    // 后续按 DELTA_THROTTLE_MS 节流 → message_delta）
-    if (isPartialMessage(msg)) {
-      if (msg.partial.type === 'text' && typeof msg.partial.text === 'string') {
-        streamText += msg.partial.text;
-        const preview = previewOfBlocks([{ type: 'text', text: streamText }]);
-        if (!streamStarted) {
-          streamStarted = true;
-          streamLastDeltaAt = Date.now();
-          options.runLog?.append(buildMessageStartEvent({ preview }));
-        } else if (Date.now() - streamLastDeltaAt >= DELTA_THROTTLE_MS) {
-          streamLastDeltaAt = Date.now();
-          options.runLog?.append(buildMessageDeltaEvent({ preview }));
-        }
+    if (msg.type === 'system' && msg.subtype === 'init') {
+      if (msg.context_window !== undefined) contextWindow = msg.context_window;
+      // 瘦业务事件：systemPrompt 全文 / toolCatalog schema / tokenBudget
+      // （这三个 harness 配置事实不在 pi 会话里）+ 会话 id（join 用）
+      if (!agentConfigEmitted) {
+        agentConfigEmitted = true;
+        options.runLog?.append(
+          buildAgentConfigEvent({
+            prompt: options.prompts,
+            systemPrompt,
+            toolCatalog: options.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema })),
+            model,
+            provider: providerId,
+            thinkingLevel,
+            tokenBudget: effectiveTokenBudget > 0 ? effectiveTokenBudget : undefined,
+            contextWindow: msg.context_window,
+            sessionId: msg.session_id,
+          }),
+        );
       }
+    }
+
+    // Partial 流式输出（仅转发给 UI；轨迹内容由 pi 会话条目承载）
+    if (isPartialMessage(msg)) {
       options.onEvent?.({ type: 'responding', usage: totalUsage, ...contextFields() });
     }
 
-    // Log progress
+    // 助手消息：累计用量 + request id 落点（瘦排障事件，零内容）
     if (isAssistantMessage(msg)) {
       if (msg.usage) {
         totalUsage = addTokenUsage(totalUsage, msg.usage);
         // 每次响应都带当前上下文报表值（最近一次响应为准）
         contextTokens = contextTokensFromUsage(msg.usage) ?? contextTokens;
       }
-
-      // 轨迹日志：消息完成（完整内容块 + 用量；流式状态在此时重置）
-      options.runLog?.append(
-        buildMessageEndEvent({
-          blocks: msg.message.content.map((block) =>
-            block.type === 'tool_use'
-              ? { type: 'tool_use', callId: block.id, name: block.name, input: block.input }
-              : block,
-          ),
-          usage: msg.usage,
-          contextWindow,
-          model,
-          provider: providerId,
-          requestId: msg.request_id,
-        }),
-      );
-      streamText = '';
-      streamStarted = false;
-
-      for (const block of msg.message?.content || []) {
-        if (block.type === 'tool_use') {
-          const toolName = block.name;
-          const toolInput = JSON.stringify(block.input || {});
-          // 消息体可能含 % 字符，用 %s 占位原样传递，避免被 printf 误解析
-          agentLogger.info('%s', `[${toolName}] ${toolInput}`);
-        }
-        if (block.type === 'text' && block.text) {
-          agentLogger.info('%s', block.text);
-        }
+      // 采集仍在适配层（只有它看得到响应头）；一 Agent 多响应是常态，
+      // 挂终态只能留最后一个，被独立事件保留全部
+      if (msg.request_id !== undefined) {
+        options.runLog?.append(
+          buildProviderRequestEvent({
+            requestId: msg.request_id,
+            model,
+            provider: providerId,
+          }),
+        );
       }
-    }
-
-    if (isToolResultMessage(msg)) {
-      const result = msg.result;
-      // 轨迹日志：工具完成（output + details；isError 由 PostToolUse 钩子暂存）
-      options.runLog?.append(
-        buildToolEndEvent({
-          callId: result.tool_use_id,
-          name: result.tool_name,
-          output: result.output,
-          details: result.details,
-          isError: toolErrors.get(result.tool_use_id),
-        }),
-      );
-      toolErrors.delete(result.tool_use_id);
-      agentLogger.info('%s', `[Tool Result: ${result.tool_name}] ${result.output}`);
     }
 
     if (isResultMessage(msg)) {

@@ -16,9 +16,9 @@
  * 运行：bun run test:logger
  */
 
-import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import {
   ConsoleExporter,
   FileExporter,
@@ -560,8 +560,76 @@ async function readLog(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// 收尾
+// ⑨ 源码守卫：业务层 logger 不得打印模型内容（方案 C：logger 纯诊断）
 // ---------------------------------------------------------------------------
+
+/**
+ * 扫描业务层源码，禁止 info/success/progress 级日志传入**内容引用**
+ * （`block.text` / `output` / `toolInput` / `prompt` / 消息正文 / 工具结果）。
+ *
+ * 内容的唯一事实源是 pi 会话条目；logger 只发 warn/error 级基础设施失败
+ * 与计数 / 耗时 / 路径这类元数据。warn / error 不受此限（失败诊断需要原文）。
+ */
+const CONTENT_TOKEN = /block\.text|\.text\b|\.output\b|\.toolInput\b|\.content\b|\.summary\b|\.message\b|\b(?:prompt|toolInput)\b|\boutput(?!\.)\b|\bcontent(?!\.)\b|\bsummary(?!\.)\b/;
+const INFO_LEVEL_CALL = /\.info\(|\.success\(|\.progress\(/;
+
+async function* walkSource(dir: string): AsyncGenerator<string> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const path = join(dir, entry);
+    let isDir = false;
+    try {
+      isDir = (await stat(path)).isDirectory();
+    } catch {
+      continue;
+    }
+    if (isDir) {
+      yield* walkSource(path);
+    } else if (entry.endsWith('.ts')) {
+      yield path;
+    }
+  }
+}
+
+{
+  console.log('▶ 源码守卫：业务层 logger 不打印模型内容');
+  const roots = ['packages/orchestrator/src', 'packages/agent-runtime/src', 'packages/utils/src'];
+  const violations: Array<{ file: string; line: number; text: string }> = [];
+  for (const root of roots) {
+    for await (const file of walkSource(join(process.cwd(), root))) {
+      const source = await readFile(file, 'utf-8');
+      const lines = source.split('\n');
+      // 把多行调用压成一行再判，避免参数跨行漏检
+      const joined = source.replace(/\n\s*/g, ' ');
+      const callRegex = /(?:\w+Logger|logger)\.(info|success|progress)\(([^;]*?)\);/g;
+      let match: RegExpExecArray | null;
+      while ((match = callRegex.exec(joined)) !== null) {
+        const args = match[2] ?? '';
+        if (CONTENT_TOKEN.test(args)) {
+          // 定位到源文件行号（取调用起始位置）
+          const before = joined.slice(0, match.index);
+          violations.push({
+            file: relative(process.cwd(), file),
+            line: before.split('\n').length,
+            text: match[0].slice(0, 160),
+          });
+        }
+      }
+      // 单行兜底（上面已压平，这里只用于行号对齐）
+      void lines;
+    }
+  }
+  check(
+    '业务层源码无内容 printf（info/success/progress）',
+    violations.length === 0,
+    violations.length > 0 ? violations.map((entry) => `${entry.file}:${entry.line} ${entry.text}`).join(' | ') : undefined,
+  );
+}
 
 await rm(home, { recursive: true, force: true });
 

@@ -19,10 +19,24 @@ import type {
   AgentStartEvent,
   RunEvent,
   RunEventAgentMeta,
+  RunJsonValue,
   RunTokenUsage,
 } from '@zread-pi/types';
 import { previewOfBlocks } from './format.js';
 import {
+  type SessionFacts,
+  type SessionMessage,
+  type SessionBlock,
+  type SessionUsage,
+  parseSessionLines,
+  previewOfSessionMessage,
+  sumSessionUsage,
+  toolCallArguments,
+} from './session.js';
+import {
+  type ReplayCompactedRecord,
+  type ReplayContextRecord,
+  type ReplayMessageRecord,
   type ReplayRecord,
   type ReplayToolRecord,
   type TrajectoryPartial,
@@ -602,3 +616,634 @@ function indexRequests(
 
   return numbered;
 }
+
+// ============================================================================
+// 方案 C：pi 会话 = 唯一完整事实源
+//
+// 内容（消息 / 工具调用 / 工具结果 / 用量 / 压缩摘要）全部从会话条目投影，
+// events.jsonl 只提供业务边界（run / stage / section / page）与三个 harness
+// 配置事实（agent_config：systemPrompt / toolCatalog / tokenBudget）+
+// provider request id（provider_request）。turn 与会话按 sessionId join。
+//
+// 旧格式 run（无会话目录）仍走 replayRunEvents，历史日志可读。
+// ============================================================================
+
+interface SessionTurnState {
+  key: string;
+  identity: string;
+  number: number;
+  role?: RunEventAgentMeta['role'];
+  section?: string;
+  pageSlug?: string;
+  messages: number;
+  endSubtype?: string;
+  endError?: string;
+  catalog: Map<string, string>;
+  /** 模型上下文窗口（agent_config 携带，供请求的 contextWindow） */
+  contextWindow?: number;
+  model?: string;
+  provider?: string;
+  /** 系统提示全文（agent_config 携带，system 记录的 promptDetail） */
+  systemPrompt?: string;
+  /** 用户提示词全文（agent_config 携带，user 记录） */
+  prompt?: string;
+  /** 该 turn 的会话事实；agent_config 与会话按 sessionId join */
+  facts?: SessionFacts;
+  /** turn 块的开始时刻（把 turn 块与 run 级记录按时间排序用） */
+  startedAt: number;
+  /** turn 内的 provider_request 记录（排障关联，追加在会话内容之后） */
+  requestRecords: ReplayContextRecord[];
+}
+
+/**
+ * 解析事件到自己所属的 turn。
+ *
+ * agent_config 建立的是「会话身份」键（agent.sessionId ?? agent.key）。
+ * 后续事件由 sink 绑定身份：create-agent 在 init 后能拿到 sessionId
+ * （agent_config / provider_request 携带），但 agent_end / page_end 只有
+ * key/role —— 这里对两个键都查，保证它们仍能归回自己建立的 turn。
+ * 并发 Agent 的 key 本身就互异，回退不会误归。
+ */
+function resolveTurnIdentity(
+  agent: RunEventAgentMeta | undefined,
+  turns: ReadonlyMap<string, unknown>,
+  keyToIdentity: ReadonlyMap<string, string>,
+): string | undefined {
+  if (agent === undefined) return undefined;
+  if (agent.sessionId !== undefined && turns.has(agent.sessionId)) return agent.sessionId;
+  const byKey = keyToIdentity.get(agent.key);
+  if (byKey !== undefined && turns.has(byKey)) return byKey;
+  // 旧日志（无 sessionId）：identity 就是 key 本身
+  return turns.has(agent.key) ? agent.key : undefined;
+}
+
+function usageOfSession(usage: SessionUsage | undefined): RunTokenUsage | undefined {
+  if (usage === undefined) return undefined;
+  return {
+    input_tokens: usage.input,
+    output_tokens: usage.output,
+    ...(usage.cacheRead ? { cache_read_input_tokens: usage.cacheRead } : {}),
+    ...(usage.cacheWrite ? { cache_creation_input_tokens: usage.cacheWrite } : {}),
+  };
+}
+
+/** 会话内容块 → replay 的消息块（与旧 message_end 的块形状对齐） */
+function mapSessionBlocks(
+  blocks: SessionBlock[],
+): Array<{ type: string; text?: string; callId?: string; name?: string; input?: RunJsonValue }> {
+  return blocks.map((block) => {
+    if (block.type === 'text') return { type: 'text', text: block.text };
+    if (block.type === 'thinking') return { type: 'thinking', text: block.thinking };
+    if (block.type === 'image') return { type: 'image' };
+    return {
+      type: 'tool_use',
+      callId: block.id,
+      name: block.name,
+      input: toolCallArguments(block) as RunJsonValue,
+    };
+  });
+}
+
+/** toolResult 消息的输出文本（存储格式：role=toolResult 的独立消息） */
+function toolResultOutput(message: SessionMessage | undefined): string | undefined {
+  if (!message) return undefined;
+  const content = message.content;
+  const blocks: SessionBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+  const text = blocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
+  return text === '' ? undefined : text;
+}
+
+/**
+ * 从「会话条目 + 瘦业务事件」投影快照。
+ *
+ * - events.jsonl 提供 run / agent_config / agent_end / stage / section /
+ *   page_* / failed_sections / scan_* / provider_request / run_end
+ * - 会话条目提供消息正文 / 工具调用与结果 / 每响应用量 / 压缩摘要
+ * - 一个 Agent 一个会话文件，并发归属结构性成立（无交错事件需要解析）
+ */
+function replayFromSessions(
+  events: readonly RunEvent[],
+  sessions: readonly SessionFacts[],
+): TrajectorySnapshot {
+  const ordered = [...events].sort((left, right) => left.seq - right.seq);
+  const factsBySession = new Map(sessions.map((facts) => [facts.sessionId, facts]));
+
+  const turns = new Map<string, SessionTurnState>();
+  const keyToIdentity = new Map<string, string>();
+  let turnCounter = 0;
+  /** run 级独立记录（scan / failed_sections / run_end …），按 ts 与 turn 块排序 */
+  const runLevel: Array<{ ts: number; record: ReplayRecord }> = [];
+
+  const runSummary: TrajectoryRunSummary = {
+    status: 'running',
+    stages: [],
+    pages: { total: 0, completed: 0, failed: 0 },
+  };
+
+  const groupOf = (step: number): string => (step <= 1 ? 'Message' : `Step ${step}`);
+
+  for (const event of ordered) {
+    switch (event.kind) {
+      case 'run_start': {
+        const payload = event;
+        runSummary.status = 'running';
+        runSummary.kind = payload.runKind;
+        if (payload.detail) runSummary.detail = payload.detail;
+        runSummary.startedAt = event.ts;
+        if (payload.model) (runSummary as TrajectoryRunSummary & { model?: string }).model = payload.model;
+        break;
+      }
+      case 'run_end': {
+        const payload = event;
+        runSummary.status = payload.status;
+        runSummary.endedAt = event.ts;
+        runSummary.durationMs = payload.durationMs;
+        if (payload.error) runSummary.error = payload.error;
+        if (payload.usage) runSummary.usage = payload.usage;
+        runLevel.push({
+          ts: event.ts,
+          record: {
+            kind: 'context',
+            seq: 0,
+            ts: event.ts,
+            turnKey: null,
+            turn: null,
+            group: 'Run',
+            text: `Run ${payload.status} · ${payload.durationMs} ms`,
+            ...(payload.error ? { isError: true } : {}),
+          },
+        });
+        break;
+      }
+      case 'agent_config': {
+        const payload = event;
+        const agent = event.agent;
+        if (agent === undefined) break;
+        const identity = agent.sessionId ?? agent.key;
+        turnCounter += 1;
+        const turn: SessionTurnState = {
+          key: agent.key,
+          identity,
+          number: turnCounter,
+          role: agent.role,
+          ...(agent.section ? { section: agent.section } : {}),
+          ...(agent.pageSlug ? { pageSlug: agent.pageSlug } : {}),
+          messages: 0,
+          catalog: indexCatalog(payload.toolCatalog),
+          startedAt: event.ts,
+          requestRecords: [],
+        };
+        if (payload.model) turn.model = payload.model;
+        if (payload.provider) turn.provider = payload.provider;
+        if (typeof payload.systemPrompt === 'string') turn.systemPrompt = payload.systemPrompt;
+        if (typeof payload.prompt === 'string') turn.prompt = payload.prompt;
+        if (payload.contextWindow !== undefined) turn.contextWindow = payload.contextWindow;
+        turns.set(identity, turn);
+        keyToIdentity.set(agent.key, identity);
+        const facts = factsBySession.get(identity);
+        if (facts !== undefined) turn.facts = facts;
+        break;
+      }
+      case 'agent_end': {
+        const identity = resolveTurnIdentity(event.agent, turns, keyToIdentity);
+        const turn = identity !== undefined ? turns.get(identity) : undefined;
+        if (turn) {
+          turn.endSubtype = event.subtype;
+          if (event.subtype !== 'success') turn.endError = event.subtype;
+        }
+        break;
+      }
+      case 'provider_request': {
+        // 排障关联：挂在自己的 turn 上（run 级事件归 run）。一 Agent 多响应，
+        // 每个响应一条事件，全部保留（挂 agent_end 只能留最后一个）。
+        const identity = resolveTurnIdentity(event.agent, turns, keyToIdentity);
+        const turn = identity !== undefined ? turns.get(identity) : undefined;
+        const record: ReplayContextRecord = {
+          kind: 'context',
+          seq: 0,
+          ts: event.ts,
+          turnKey: turn?.key ?? null,
+          turn: turn?.number ?? null,
+          group: turn ? groupOf(turn.messages) : 'Run',
+          text: `provider request ${event.requestId}`,
+        };
+        if (turn !== undefined) turn.requestRecords.push(record);
+        else runLevel.push({ ts: event.ts, record });
+        break;
+      }
+      case 'scan_start': {
+        runLevel.push({
+          ts: event.ts,
+          record: { kind: 'context', seq: 0, ts: event.ts, turnKey: null, turn: null, group: 'Run', text: 'Scanning repository' },
+        });
+        break;
+      }
+      case 'scan_end': {
+        runLevel.push({
+          ts: event.ts,
+          record: {
+            kind: 'context',
+            seq: 0,
+            ts: event.ts,
+            turnKey: null,
+            turn: null,
+            group: 'Run',
+            text: `Scan complete${event.fileCount !== undefined ? ` · ${event.fileCount} files` : ''}`,
+          },
+        });
+        break;
+      }
+      case 'stage': {
+        if (runSummary.stages[runSummary.stages.length - 1] !== event.stage) {
+          runSummary.stages.push(event.stage);
+        }
+        break;
+      }
+      case 'section':
+        break;
+      case 'page_start':
+        runSummary.pages.total += 1;
+        break;
+      case 'page_end': {
+        if (event.success) runSummary.pages.completed += 1;
+        else runSummary.pages.failed += 1;
+        if (!event.success) {
+          const identity = resolveTurnIdentity(event.agent, turns, keyToIdentity);
+          const turn = identity !== undefined ? turns.get(identity) : undefined;
+          runLevel.push({
+            ts: event.ts,
+            record: {
+              kind: 'context',
+              seq: 0,
+              ts: event.ts,
+              turnKey: turn?.key ?? null,
+              turn: turn?.number ?? null,
+              group: 'Run',
+              text: `Page failed${event.error ? `: ${event.error}` : ''}`,
+              isError: true,
+            },
+          });
+        }
+        break;
+      }
+      case 'failed_sections': {
+        for (const entry of event.sections) {
+          runLevel.push({
+            ts: event.ts,
+            record: {
+              kind: 'context',
+              seq: 0,
+              ts: event.ts,
+              turnKey: null,
+              turn: null,
+              group: 'Run',
+              text: `Section failed (${entry.stage}): ${entry.section} — ${entry.error}`,
+              isError: true,
+            },
+          });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // 会话内容 → turn 内记录（一个 Agent 一个会话，无交错）
+  // ----------------------------------------------------------------
+  const turnBlocks: Array<{ ts: number; records: ReplayRecord[] }> = [];
+
+  for (const turn of turns.values()) {
+    const records: ReplayRecord[] = [];
+
+    // system + user（prompt）来自 agent_config
+    records.push({
+      kind: 'system',
+      seq: 0,
+      ts: turn.startedAt,
+      turnKey: turn.key,
+      turn: turn.number,
+      group: 'Message',
+      text: 'Initial System Prompt',
+      promptDetail: {
+        system: turn.systemPrompt ?? '',
+        tools: [...turn.catalog.entries()].map(([name, schema]) => {
+          const parsed = JSON.parse(schema) as { name?: string } & RunJsonValue;
+          return { name, parameters: parsed as RunJsonValue };
+        }),
+      },
+    });
+    if (turn.prompt !== undefined) {
+      records.push({
+        kind: 'user',
+        seq: 0,
+        ts: turn.startedAt,
+        turnKey: turn.key,
+        turn: turn.number,
+        group: 'Message',
+        text: previewOfBlocks([{ type: 'text', text: turn.prompt }]) || 'Prompt',
+        preview: turn.prompt,
+        inputDetail: turn.prompt,
+        sourceBlocks: [{ type: 'text', content: turn.prompt }],
+      });
+    }
+
+    const pendingTools = new Map<string, ReplayToolRecord>();
+    let step = 0;
+
+    if (turn.facts !== undefined) {
+      for (const entry of turn.facts.entries) {
+        if (entry.type === 'compaction') {
+          records.push({
+            kind: 'compacted',
+            seq: 0,
+            ts: entry.timestamp,
+            turnKey: turn.key,
+            turn: turn.number,
+            group: `Compaction ${entry.seq}`,
+            ...(typeof entry.summary === 'string' ? { summary: entry.summary } : {}),
+            ...(usageOfSession(entry.usage) ? { usage: usageOfSession(entry.usage) } : {}),
+            running: false,
+          });
+          continue;
+        }
+        if (entry.type !== 'message' || entry.message === undefined) continue;
+        const message = entry.message;
+
+        if (message.role === 'assistant') {
+          step += 1;
+          const content: SessionBlock[] =
+            typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content;
+          // 工具调用块先建记录（与发出它的消息同组）
+          for (const block of content) {
+            if (block.type !== 'toolCall') continue;
+            const schema = turn.catalog.get(block.name);
+            const toolRecord: ReplayToolRecord = {
+              kind: 'tool',
+              seq: 0,
+              ts: entry.timestamp,
+              turnKey: turn.key,
+              turn: turn.number,
+              group: groupOf(step),
+              callId: block.id,
+              name: block.name,
+              input: toolCallArguments(block) as RunJsonValue,
+              running: true,
+              parentStep: step,
+              ...(schema ? { schemaDetail: schema } : {}),
+            };
+            pendingTools.set(block.id, toolRecord);
+            records.push(toolRecord);
+          }
+          records.push({
+            kind: 'message',
+            seq: 0,
+            ts: entry.timestamp,
+            turnKey: turn.key,
+            turn: turn.number,
+            group: groupOf(step),
+            step,
+            blocks: mapSessionBlocks(content),
+            preview: previewOfSessionMessage(message),
+            ...(usageOfSession(message.usage) ? { usage: usageOfSession(message.usage) } : {}),
+            ...(message.model ? { model: message.model } : turn.model ? { model: turn.model } : {}),
+            ...(message.provider ? { provider: message.provider } : turn.provider ? { provider: turn.provider } : {}),
+            ...(turn.contextWindow !== undefined ? { contextWindow: turn.contextWindow } : {}),
+          });
+        } else if (message.role === 'toolResult') {
+          const pending = message.toolCallId !== undefined ? pendingTools.get(message.toolCallId) : undefined;
+          const output = toolResultOutput(message);
+          if (pending !== undefined) {
+            pending.running = false;
+            pending.endedAt = entry.timestamp;
+            if (output !== undefined) pending.output = output;
+            pendingTools.delete(pending.callId);
+          } else {
+            records.push({
+              kind: 'tool',
+              seq: 0,
+              ts: entry.timestamp,
+              turnKey: turn.key,
+              turn: turn.number,
+              group: groupOf(step),
+              callId: message.toolCallId ?? 'unknown',
+              name: message.toolName ?? 'tool',
+              output,
+              endedAt: entry.timestamp,
+              parentStep: step,
+            });
+          }
+        }
+        // user 消息即 agent_config 的 prompt，不重复投影
+      }
+    }
+
+    // 排障 request id 追加在 turn 内容之后
+    records.push(...turn.requestRecords);
+    // 会话内 assistant 消息数（indexSessionRequests 的失败归属判据用）
+    turn.messages = step;
+
+    turnBlocks.push({ ts: turn.startedAt, records });
+  }
+
+  // ----------------------------------------------------------------
+  // 全局排序（turn 块按开始时刻与 run 级记录排序）+ seq 分配
+  // ----------------------------------------------------------------
+  const all: Array<{ ts: number; records: ReplayRecord[] }> = [
+    ...runLevel.map((entry) => ({ ts: entry.ts, records: [entry.record] })),
+    ...turnBlocks,
+  ];
+  all.sort((left, right) => {
+    const byTime = left.ts - right.ts;
+    return byTime !== 0 ? byTime : 0;
+  });
+
+  const records: ReplayRecord[] = [];
+  let seq = 0;
+  for (const block of all) {
+    for (const record of block.records) {
+      seq += 1;
+      records.push({ ...record, seq });
+    }
+  }
+
+  // 用量合计：优先读会话 usage 行（harness ledger 权威累计）
+  const sessionUsage = sessions.length > 0 ? sumSessionUsage(sessions.flatMap((facts) => facts.usageRows)) : undefined;
+  if (sessionUsage !== undefined && sessionUsage.totalTokens > 0) {
+    runSummary.usage = {
+      input_tokens: sessionUsage.input,
+      output_tokens: sessionUsage.output,
+      ...(sessionUsage.cacheRead ? { cache_read_input_tokens: sessionUsage.cacheRead } : {}),
+      ...(sessionUsage.cacheWrite ? { cache_creation_input_tokens: sessionUsage.cacheWrite } : {}),
+    };
+  }
+
+  const requestRecords = records.filter(
+    (record): record is ReplayMessageRecord | ReplayCompactedRecord =>
+      record.kind === 'message' || record.kind === 'compacted',
+  );
+  const requests = indexSessionRequests(requestRecords, turns, keyToIdentity);
+
+  const callSchemas = new Map<string, string>();
+  for (const turn of turns.values()) {
+    for (const [name, schema] of turn.catalog) callSchemas.set(name, schema);
+  }
+
+  const turnInfos = [...turns.values()].map((turn) => ({
+    number: turn.number,
+    key: turn.key,
+    label: turnLabel({
+      key: turn.key,
+      role: turn.role ?? 'run',
+      ...(turn.section ? { section: turn.section } : {}),
+      ...(turn.pageSlug ? { pageSlug: turn.pageSlug } : {}),
+    }),
+    sessionId: turn.identity,
+    ...(turn.role ? { role: turn.role } : {}),
+    ...(turn.section ? { section: turn.section } : {}),
+    ...(turn.pageSlug ? { pageSlug: turn.pageSlug } : {}),
+    ...(turn.endError ? { endError: turn.endError } : {}),
+  }));
+
+  return { records, requests, partial: null, callSchemas, turns: turnInfos, runSummary };
+}
+
+/** 会话路径的请求编号 + 累计用量（与旧路径同口径） */
+function indexSessionRequests(
+  records: readonly (ReplayMessageRecord | ReplayCompactedRecord)[],
+  turns: ReadonlyMap<string, SessionTurnState>,
+  keyToIdentity: ReadonlyMap<string, string>,
+): TrajectoryRequestNumber[] {
+  const numbered: TrajectoryRequestNumber[] = [];
+  let cumulative: TrajectoryUsage | undefined;
+
+  for (const record of records) {
+    const turn =
+      record.turnKey !== null
+        ? (turns.get(keyToIdentity.get(record.turnKey) ?? record.turnKey) as SessionTurnState | undefined)
+        : undefined;
+    const usage = usageOf(record.usage);
+    cumulative = addUsage(cumulative, record.usage);
+
+    if (record.kind === 'compacted') {
+      numbered.push({
+        seq: record.seq,
+        turn: record.turn,
+        step: 0,
+        group: record.group,
+        number: numbered.length + 1,
+        purpose: 'compaction',
+        status: record.running ? 'running' : record.error ? 'error' : 'complete',
+        ...(record.running ? { completedAt: null } : { completedAt: record.ts }),
+        startedAt: record.ts,
+        ...(record.error ? { error: record.error } : {}),
+        ...(usage ? { usage } : {}),
+        ...(cumulative ? { cumulativeUsage: cumulative } : {}),
+      });
+      continue;
+    }
+
+    const isTurnFailure = turn?.endError !== undefined && turn.messages === record.step && record.running !== true;
+    numbered.push({
+      seq: record.seq,
+      turn: record.turn,
+      step: record.step,
+      group: record.group,
+      number: numbered.length + 1,
+      purpose: 'assistant',
+      status: record.running ? 'running' : isTurnFailure ? 'error' : 'complete',
+      startedAt: record.ts,
+      ...(record.running ? { completedAt: null } : { completedAt: record.ts }),
+      ...(record.model ? { model: record.model } : {}),
+      ...(record.provider ? { provider: record.provider } : {}),
+      ...(record.contextWindow ? { contextWindow: record.contextWindow } : {}),
+      ...(usage ? { usage } : {}),
+      ...(cumulative ? { cumulativeUsage: cumulative } : {}),
+      ...(isTurnFailure && turn?.endError ? { error: turn.endError } : {}),
+    });
+  }
+
+  return numbered;
+}
+
+/**
+ * 统一入口：有会话事实时从会话投影（方案 C），否则走旧事件 replay（历史 run）。
+ *
+ * 内容只在会话里，故新 run 的 events.jsonl 不含 message_* / tool_* 等内容事件；
+ * 旧 run 没有会话目录，由 replayRunEvents 解析历史 kind。
+ */
+export function replayRun(input: {
+  events: readonly RunEvent[];
+  sessions?: readonly SessionFacts[];
+}): TrajectorySnapshot {
+  const sessions = input.sessions ?? [];
+  if (sessions.length > 0) return replayFromSessions(input.events, sessions);
+  return replayRunEvents(input.events);
+}
+
+/**
+ * run 级摘要的 digest（纯函数，不含内容）：从业务事件 + 会话用量投影
+ * 「名字 / 大小 / 耗时 / 用量」，供 run 列表 / telemetry 等不需要正文的视图。
+ */
+export interface RunDigest {
+  status: TrajectoryRunSummary['status'];
+  kind?: TrajectoryRunSummary['kind'];
+  detail?: string;
+  startedAt?: number;
+  endedAt?: number;
+  durationMs?: number;
+  /** Agent 数（= 会话数） */
+  agentCount: number;
+  /** 消息条目总数（会话投影） */
+  messageCount: number;
+  /** 用量合计（会话 usage 行；无会话时回退 run_end.usage） */
+  usage?: RunTokenUsage;
+}
+
+export function summarizeRunEvents(
+  events: readonly RunEvent[],
+  sessions?: readonly SessionFacts[],
+): RunDigest {
+  const digest: RunDigest = { status: 'running', agentCount: 0, messageCount: 0 };
+  let endUsage: RunTokenUsage | undefined;
+
+  for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
+    if (event.kind === 'run_start') {
+      digest.kind = event.runKind;
+      if (event.detail) digest.detail = event.detail;
+      digest.startedAt = event.ts;
+    } else if (event.kind === 'run_end') {
+      digest.status = event.status;
+      digest.endedAt = event.ts;
+      digest.durationMs = event.durationMs;
+      if (event.usage) endUsage = event.usage;
+    }
+  }
+
+  if (sessions !== undefined && sessions.length > 0) {
+    digest.agentCount = sessions.length;
+    const totals = sumSessionUsage(sessions.flatMap((facts) => facts.usageRows));
+    digest.messageCount = sessions.reduce(
+      (count, facts) => count + facts.entries.filter((entry) => entry.type === 'message').length,
+      0,
+    );
+    if (totals.totalTokens > 0) {
+      digest.usage = {
+        input_tokens: totals.input,
+        output_tokens: totals.output,
+        ...(totals.cacheRead ? { cache_read_input_tokens: totals.cacheRead } : {}),
+        ...(totals.cacheWrite ? { cache_creation_input_tokens: totals.cacheWrite } : {}),
+      };
+    }
+  }
+  if (digest.usage === undefined) digest.usage = endUsage;
+
+  return digest;
+}
+
+/** 解析会话文本行（便捷导出：服务端读取后直接调用，不依赖 node） */
+export { parseSessionLines };

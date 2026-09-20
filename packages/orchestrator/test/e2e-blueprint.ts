@@ -648,8 +648,9 @@ const {
 	listRuns,
 	readEvents,
 	readRunMeta,
+	readSessionFacts,
 } = await import("@zread-pi/utils");
-const { replayRunEvents } = await import("../../trajectory/src/index.js");
+const { replayRun } = await import("../../trajectory/src/index.js");
 // 不传 runLog：withRunLog 自动建 run（与真实 CLI 路径一致）
 // 失败时把根因带进断言 detail：withRunLog 只把异常记成 run failed，
 // 断言本身看不到根因，间歇失败会无法定位
@@ -681,47 +682,66 @@ check("首事件是 run_start", logEvents[0]?.kind === "run_start");
 check("末事件是 run_end", logEvents[logEvents.length - 1]?.kind === "run_end");
 
 // 事件携带 agent 身份与 sessionId（轨迹回放并发归属的依据）
-const agentStarts = logEvents.filter((event) => event.kind === "agent_start");
-check("有 agent_start 事件（1 分类 + N 主题 + N 标题）", agentStarts.length >= 7, `count=${agentStarts.length}`);
-const sessions = agentStarts
+const agentConfigs = logEvents.filter((event) => event.kind === "agent_config");
+check("有 agent_config 事件（1 分类 + N 主题 + N 标题）", agentConfigs.length >= 7, `count=${agentConfigs.length}`);
+const sessions = agentConfigs
 	.map((event) => event.agent?.sessionId)
 	.filter((value): value is string => typeof value === "string");
-check("agent_start 全部携带 sessionId", sessions.length === agentStarts.length, `missing=${agentStarts.length - sessions.length}`);
+check("agent_config 全部携带 sessionId", sessions.length === agentConfigs.length, `missing=${agentConfigs.length - sessions.length}`);
 check("各 Agent 的 sessionId 互不相同（并发会话隔离）", new Set(sessions).size === sessions.length, `${sessions.length} sessions`);
-check("agent_start 携带 role / key", agentStarts.every((event) => event.agent?.role !== undefined && event.agent?.key !== undefined));
+check("agent_config 携带 role / key", agentConfigs.every((event) => event.agent?.role !== undefined && event.agent?.key !== undefined));
+
+// pi 会话目录：一个 Agent 一个会话文件（方案 C：会话 = 唯一完整事实源）
+const facts = await readSessionFacts(latest!.id, repo);
+check("会话文件数 = agent_config 数", facts.length === agentConfigs.length, `${facts.length} / ${agentConfigs.length}`);
+const factIds = new Set(facts.map((fact) => fact.sessionId));
+check("会话 id 与 agent_config 的 sessionId 一一对应", sessions.every((id) => factIds.has(id)), `matched=${sessions.filter((id) => factIds.has(id)).length}`);
+// 内容事件已退役：events.jsonl 只剩瘦业务事件（内容在会话里）
+const retiredKinds = new Set(["agent_start", "message_start", "message_delta", "message_end", "tool_start", "tool_end", "retry", "compact", "status"]);
+const leaked = logEvents.filter((event) => retiredKinds.has(event.kind));
+check("内容类事件不再出现在 events.jsonl", leaked.length === 0, `leaked=${leaked.length}`);
 
 // provider 响应头的 request id 落进轨迹日志（排障关联：mock-req-<n> 每请求自增）
-const messageEnds = logEvents.filter((event) => event.kind === "message_end");
-const requestIds = messageEnds
-	.map((event) => (event.kind === "message_end" ? event.requestId : undefined))
+const providerRequests = logEvents.filter((event) => event.kind === "provider_request");
+const requestIds = providerRequests
+	.map((event) => (event.kind === "provider_request" ? event.requestId : undefined))
 	.filter((value): value is string => typeof value === "string");
 check(
-	"message_end 事件携带 requestId（provider 响应头）",
-	requestIds.length === messageEnds.length && messageEnds.length > 0,
-	`with=${requestIds.length} / total=${messageEnds.length}`,
+	"provider_request 事件携带 requestId（provider 响应头）",
+	providerRequests.length > 0 && requestIds.length === providerRequests.length,
+	`with=${requestIds.length} / total=${providerRequests.length}`,
 );
 check(
-	"requestId 与请求数一致且互不相同（每响应一个）",
+	"requestId 与响应数一致且互不相同（每响应一个）",
 	new Set(requestIds).size === requestIds.length && requestIds.every((id) => id.startsWith("mock-req-")),
 	`${new Set(requestIds).size} unique / ${requestIds.length} total`,
 );
 
-// 真实捕获的交错事件流直接即回归 replay 并发归属
-const snapshot = replayRunEvents(logEvents);
-const seqToKey = new Map<number, string>();
-for (const event of logEvents) {
-	if (event.agent !== undefined && event.agent.role !== "run") seqToKey.set(event.seq, event.agent.key);
-}
-let misattributed = 0;
-for (const record of snapshot.records) {
-	const expected = seqToKey.get(record.seq);
-	if (expected !== undefined && record.turnKey !== expected) misattributed += 1;
+// 真实捕获的事件流 + 会话文件直接回归方案 C 的 join（max_concurrent=4 交错）
+const sessionSnapshot = replayRun({ events: logEvents, sessions: facts });
+check("replay 的 turn 数 = agent_config 数", sessionSnapshot.turns.length === agentConfigs.length, `${sessionSnapshot.turns.length} / ${agentConfigs.length}`);
+const assistantBySession = new Map(
+	facts.map((fact) => [
+		fact.sessionId,
+		fact.entries.filter((entry) => entry.type === "message" && entry.message?.role === "assistant").length,
+	]),
+);
+let mismatches = 0;
+for (const turn of sessionSnapshot.turns) {
+	const expected = assistantBySession.get(turn.sessionId);
+	const actual = sessionSnapshot.records.filter((record) => record.kind === "message" && record.turn === turn.number).length;
+	if (expected !== actual) mismatches += 1;
 }
 check(
-	"端到端：max_concurrent=4 的交错事件流 replay 归托全部正确",
-	misattributed === 0,
-	`misattributed=${misattributed} / ${snapshot.records.length} records`,
+	"端到端：会话内容按 sessionId 正确归入各 turn",
+	mismatches === 0,
+	`mismatch=${mismatches}`,
 );
+
+// 旧格式回退路径不抛错（无会话事实时走事件 replay；新 run 的内容事件已退役，
+// 旧格式解析的覆盖在 trajectory-model / session-replay 里）
+const snapshot = replayRun({ events: logEvents });
+check("replay 在无会话事实时仍可运行", snapshot !== null && snapshot.records !== null);
 
 server.stop(true);
 

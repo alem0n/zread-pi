@@ -114,13 +114,65 @@ export interface AgentStartEvent extends RunEventBase {
   /** 显式 token 预算（0 / 缺省 = 不限制） */
   tokenBudget?: number;
 }
-
 export interface AgentEndEvent extends RunEventBase {
   kind: 'agent_end';
   /** result.subtype：success / error_context_full / error_budget_exhausted / error_during_execution … */
   subtype: string;
   durationMs: number;
   usage?: RunTokenUsage;
+}
+
+/**
+ * Agent 配置快照（方案 C：`agent_start` 的瘦替身）。
+ *
+ * pi 会话的 `LaneConfiguration` 已记录 model / provider / thinkingLevel；
+ * 会话条目记录消息 / 工具 / 用量 / 压缩。剩下的三个「harness 配置」事实
+ * （systemPrompt 全文 / toolCatalog schema / tokenBudget）不在会话里，
+ * 由本事件落到瘦业务层（进程局部配置 → events.jsonl）。
+ */
+export interface AgentConfigEvent extends RunEventBase {
+  kind: 'agent_config';
+  /** 用户提示全文（写入时截断到 64 KiB） */
+  prompt: string;
+  /** 系统提示全文（写入时截断到 64 KiB） */
+  systemPrompt?: string;
+  /** 工具目录（name + inputSchema，检查器展示 schema 用） */
+  toolCatalog: Array<{ name: string; inputSchema: RunJsonValue }>;
+  model?: string;
+  provider?: string;
+  /** pi 思考深度（LaneConfiguration 另存，这里仅作展示快照） */
+  thinkingLevel?: string;
+  /** 显式 token 预算（0 / 缺省 = 不限制） */
+  tokenBudget?: number;
+  /** 本次解析出的模型上下文窗口（system/init；UI 的「上下文占比」分母） */
+  contextWindow?: number;
+}
+
+/**
+ * provider 请求 id（方案 C：request id 的瘦替身）。
+ *
+ * 采集仍在适配层（`after_response` 钩子读响应头，只有它看得到协议细节）；
+ * 落点从 `message_end.requestId` 挪到本事件：一 Agent 多响应是常态，
+ * 挂终态只能留最后一个，独立事件能保留全部。纯元数据，零内容。
+ */
+export interface ProviderRequestEvent extends RunEventBase {
+  kind: 'provider_request';
+  requestId: string;
+  model?: string;
+  provider?: string;
+}
+
+/** 仓库扫描开始（RepoAnalyzer scanFiles / parseFiles 阶段） */
+export interface ScanStartEvent extends RunEventBase {
+  kind: 'scan_start';
+}
+
+/** 仓库扫描结束 */
+export interface ScanEndEvent extends RunEventBase {
+  kind: 'scan_end';
+  /** 扫描到的文件数（解析后的源文件数） */
+  fileCount?: number;
+  durationMs?: number;
 }
 
 /** 助手消息开始（首个 partial 到达时；标记消息进入 running） */
@@ -225,6 +277,10 @@ export interface FailedSectionsEvent extends RunEventBase {
 export type RunEvent =
   | RunStartEvent
   | RunEndEvent
+  | AgentConfigEvent
+  | ProviderRequestEvent
+  | ScanStartEvent
+  | ScanEndEvent
   | AgentStartEvent
   | AgentEndEvent
   | MessageStartEvent
@@ -240,6 +296,27 @@ export type RunEvent =
   | PageStartEvent
   | PageEndEvent
   | FailedSectionsEvent;
+
+/**
+ * 仍然会落盘的事件 kind（瘦业务层；方案 C 之后的「事实」集合）。
+ *
+ * 内容类 kind（`message_*` / `tool_*` / `retry` / `compact` / `status` /
+ * `agent_start`）不再由捕获层产生——完整内容在 pi 会话条目里，由投影层
+ * 读取；它们只保留在联合里以解析历史 run。
+ */
+export type ActiveRunEventKind =
+  | 'run_start'
+  | 'run_end'
+  | 'agent_config'
+  | 'provider_request'
+  | 'scan_start'
+  | 'scan_end'
+  | 'agent_end'
+  | 'stage'
+  | 'section'
+  | 'page_start'
+  | 'page_end'
+  | 'failed_sections';
 
 /** 所有事件 kind 的字面量联合（读取方做穷尽校验用） */
 export type RunEventKind = RunEvent['kind'];

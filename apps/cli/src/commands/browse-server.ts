@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import type { Server } from "http";
 import { fileURLToPath, pathToFileURL } from "url";
-import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant, listRuns, resolveRunId, readEvents, readRunMeta, isValidRunId, getDefaultLanguage, DEFAULT_CONFIG } from "@zread-pi/utils";
+import { isBlueprintDetailLevel, listWikiVariants, loadConfigSync, resolveWikiVariant, listRuns, resolveRunId, readEvents, readRunMeta, readSessionFacts, isValidRunId, getDefaultLanguage, DEFAULT_CONFIG } from "@zread-pi/utils";
 import type { BlueprintDetailLevel } from "@zread-pi/types";
 import { normalizeLanguageCode } from "../i18n/translations";
 import type { LanguageCode } from "../i18n/types";
@@ -615,6 +615,31 @@ function createWikiApp(projectPath: string) {
     } catch (error) {
       res.status(500).json({
         error: "Failed to load run events",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * 会话事实（方案 C）：一个 Agent 一个 pi 会话文件，内容全部在这里。
+   * 前端与 events.jsonl 的瘦业务事件一起 join 成轨迹快照（replayRun）。
+   * 旧 run 没有会话目录 → 空数组，前端回退到旧事件 replay。
+   */
+  app.get("/api/runs/:runId/sessions", async (req: Request, res: Response) => {
+    try {
+      const runId = req.params.runId;
+      if (!isValidRunId(runId)) {
+        return res.status(404).json({ error: `Unknown run id: ${runId}` });
+      }
+      const meta = await readRunMeta(runId, projectPath).catch(() => undefined);
+      if (meta === undefined) {
+        return res.status(404).json({ error: `Run not found: ${runId}` });
+      }
+      const sessions = await readSessionFacts(runId, projectPath);
+      res.json({ runId, sessions, runEnded: meta.status !== "running" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to load run sessions",
         message: error instanceof Error ? error.message : String(error),
       });
     }

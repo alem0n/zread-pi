@@ -3022,3 +3022,280 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
 - `bun run mock:wiki`：`completed=4 failed=0`，交付闸门 `overall=PASS`。
 - `bun run typecheck` 0 错误；`bun run test` 全量套件绿（含 51 项组件测试）。
 
+---
+
+## 36. 方案 C：pi 会话成为唯一完整事实源（v1.21.0）
+
+### 背景
+
+迁移到 pi 内核之后，轨迹数据一直有**两个事实源**：
+
+1. pi 自己的会话存储（harness 的 `SessionRepo`）——消息正文 / 工具调用与
+   结果 / 每响应用量 / 压缩摘要，**完整且权威**；
+2. zread-pi 的捕获层（`create-agent.ts` 里的一整套 `onEvent` / 钩子转发）
+   把同样的内容**再抄一遍**进 `events.jsonl`。
+
+双写带来三个已知硬伤：
+
+- **截断失真**：消息正文走 `previewOfBlocks`（512 字符）+ `message_end.blocks`
+  （块级截断），工具输出截到 64 KiB，压缩摘要 8 KiB；检查器看到的永远不是
+  原文，排障时得「对两份日志」。
+- **重复劳动**：捕获层维护流式状态机（`streamText` / `streamStarted` /
+  `streamLastDeltaAt` 节流）、工具错误暂存（`toolErrors` map）、
+  provider request id 的「挂下一条消息」时序协议，全是为了在「已经有原文」
+  的前提下再重建一遍原文。
+- **口径漂移**：两份拷贝各自演进（消息块形状、用量字段、压缩语义），
+  每改一处都要同步两处，已经是几次 bug 的来源。
+
+阶段 0–1（已落地：`probe-session-store.ts` 探针、
+`HarnessQueryRequest.sessionRoot` → `JsonlSessionRepo` 落盘到
+`<runDir>/sessions/`）把「会话能被 zread-pi 读到」这件事做完了。
+本步是**消费侧**：让会话成为唯一完整事实源，捕获层退回纯业务事件。
+
+### 决策
+
+- **内容全部从会话投影**：消息 / 工具 / 结果 / 用量 / 压缩摘要读 pi 会话
+  条目（`packages/trajectory/src/session.ts` 的纯解析，无 node 依赖，
+  可被 Vite 打包）；`events.jsonl` 只留**瘦业务事件**。
+- **三个 harness 配置事实不在会话里，仍由事件承载**：
+  `systemPrompt` 全文 / `toolCatalog` schema / `tokenBudget`（pi 会话的
+  `LaneConfiguration` 只记 model / provider / thinkingLevel，没有系统提示
+  全文与工具 schema）。这三个是「进程局部配置」，落 `agent_config`。
+- **provider request id 改走独立事件**：原来挂在 `message_end.requestId`
+  （一 Agent 多响应时**只能留最后一个**）。现在每响应一条
+  `provider_request` 事件，全部保留。采集仍在适配层（只有它看得到响应头）。
+- **sessionId 的生成方挪到适配层**：以前 `run-log-sink` 生成 sessionId，
+  同时用作「pi 会话 id」与「事件归属键」。现在 sink 只绑定 key / role /
+  section / pageSlug，pi 会话 id 由适配层在 `query()` 时生成，经
+  `system/init` 流回，由 `create-agent` 写进 `agent_config` 的
+  `agent.sessionId`。投影层按它 join 会话文件。
+- **旧 run 照常可读**：内容类 kind（`agent_start` / `message_*` / `tool_*` /
+  `retry` / `compact` / `status`）保留在 `RunEvent` 联合里，`replayRun`
+  在**没有会话事实**时回退到原 `replayRunEvents` 路径。历史 run 的轨迹视图
+  行为不变。
+- **浏览站跟进**：服务端新增 `GET /api/runs/:runId/sessions`；
+  前端 `useTrajectoryEvents` 并行拉会话（运行中按 sessionId 合并追加），
+  `useTrajectoryLayout` 用 `replayRun({ events, sessions })` 投影。
+
+### 改动
+
+#### 36.1 事件类型（`packages/types`）
+
+- `run-event.ts` 新增：`AgentConfigEvent`（`agent_start` 的瘦替身：
+  `prompt` / `systemPrompt` / `toolCatalog` / `model` / `provider` /
+  `thinkingLevel` / `tokenBudget` / `contextWindow`）、`ProviderRequestEvent`、
+  `ScanStartEvent` / `ScanEndEvent`（扫描边界，零内容）。
+- `RunEvent` 联合保留旧 kind；新增 `ActiveRunEventKind` = 方案 C 之后
+  **仍然会落盘**的 kind 集合，内容类 kind 刻意不在其中（仅用于解析历史 run）。
+- `index.ts` 导出新增类型与 `ActiveRunEventKind`。
+
+#### 36.2 捕获层退役（`packages/orchestrator/src/agents`）
+
+- `create-agent.ts`：
+  - 删除 `streamText` / `streamStarted` / `streamLastDeltaAt` 流式状态机、
+    `toolErrors` 暂存、`message_start/delta` 节流写入、`message_end` /
+    `tool_result` / `compact_boundary` / `status` 的捕获追加；
+  - `agent_start` → **在 `system/init` 到达时发 `agent_config`**（此时模型
+    已解析，可同时拿 `context_window` 与 `session_id`），只在首个 init 发一次；
+  - `provider request id` → 每条 assistant 消息发一条 `provider_request`；
+  - `sessionId` 不再透传给适配层（改由 init 回读）；`sessionRoot` 仍透传；
+  - `PreToolUse` / `PostToolUse` 钩子**只保留 `onEvent` 分发**（TUI 实时进度
+    依赖它），不再写捕获事件；`onRetry` 同理（只发 UI 事件 + 日志告警）；
+  - 删除内容 printf（助手正文 / 工具入参 / 工具结果 / 系统提示与纪律注入的
+    logger.info），logger 退回纯诊断。
+- `run-log-sink.ts`：删除 `generateSessionId()`；`createRunLogSink` 不再
+  生成 sessionId，只绑定 key/role/section/pageSlug + 暴露 `sessionRoot`。
+  `append` 改为**合并**事件自带的 `agent` 字段（让 `agent_config` 的
+  sessionId 与绑定身份共存）。
+- `run-log-writer.ts`：删除 `buildAgentStartEvent` / `buildMessage*Event` /
+  `buildTool*Event` / `buildRetryEvent` / `buildCompactEvent` /
+  `buildStatusEvent` 与 `previewOfBlocks` / `PREVIEW_MAX_CHARS` /
+  `DELTA_THROTTLE_MS`；新增 `buildAgentConfigEvent` /
+  `buildProviderRequestEvent` / `buildScanStartEvent` / `buildScanEndEvent`。
+  `tally()` 的 `agent_start` 分支改 `agent_config`。删除 run start / end 的
+  `logger.info`（由 `withRunLog` 的调用方按需打印）。
+
+#### 36.3 投影层（`packages/trajectory` + `packages/utils`）
+
+- 新增 `src/session.ts`：pi 会话 format-4 JSONL 的**纯解析**——
+  `parseSessionLines()`（header / value / list 行跳过，entry / usage 事务
+  数组行展开，损坏行跳过）、`SessionFacts` / `SessionEntry` / `SessionMessage`
+  / `SessionBlock` / `SessionUsage` / `SessionUsageRow`、
+  `sumSessionUsage()`（adjustment 行按增量）、`previewOfSessionMessage()`、
+  `toolCallArguments()`（兼容 `arguments` / `input`）、
+  `sessionIdFromHeader()` / `sessionIdFromFileName()`。
+- `src/replay.ts` 新增 `replayRun({ events, sessions })`：
+  - 有会话 → `replayFromSessions`：`agent_config` 建立会话身份 turn
+    （key = `agent.sessionId ?? agent.key`），会话条目按顺序投影成
+    system / user / message / tool 记录；`toolResult` 独立消息结算工具记录；
+    压缩条目投影成 `compacted`；run 级事件（scan / page 失败 /
+    failed_sections / run_end）按 ts 与 turn 块全局排序后**重新分配 seq**；
+    用量合计读会话 usage 行（harness ledger 权威）。
+  - 无会话 → 回退 `replayRunEvents`（历史 run）。
+  - `resolveTurnIdentity()`：身份解析双键回退——`agent_end` / `page_end`
+    由 sink 绑定、只有 key 没有 sessionId，按 `keyToIdentity` 仍能归回
+    自己建立的 turn（并发 Agent 的 key 本身互异，不会误归）。
+- 新增 `summarizeRunEvents(events, sessions?)` → `RunDigest`
+  （状态 / kind / detail / Agent 数 / 消息数 / 用量合计；无会话时回退
+  `run_end.usage`）。
+- `packages/utils/src/trajectory-store/session-reader.ts`：
+  `readSessionFacts(runId, projectRoot)`（node 侧 fs；无会话目录 → 空数组；
+  忽略非 `.jsonl`；损坏文件返回空条目），从 utils index 导出。
+  `packages/utils` 因此新增 `@zread-pi/trajectory` 工作区依赖（无循环：
+  trajectory 只依赖 types）。
+
+#### 36.4 CLI 与浏览站
+
+- `views/wiki-generate/controller.ts`：扫描前后发 `scan_start` /
+  `scan_end`（runLog 在扫描前已创建）。
+- `commands/browse-server.ts`：新增 `GET /api/runs/:runId/sessions`
+  （返回 `{ runId, sessions, runEnded }`；非法 / 未知 runId → 404）。
+- `apps/browse`：`api.ts` 增 `getSessions()`；`useTrajectoryEvents` 增
+  `sessions` 状态（初始加载 + 运行中按 sessionId 合并追加，失败保留空数组
+  回退旧 replay）；`useTrajectoryLayout` 第 4 参数 `sessions`，
+  有会话走 `replayRun`，无会话走 `replayRunEvents`。
+
+### 行为差异
+
+| 维度 | 迁移前 | 迁移后 |
+| --- | --- | --- |
+| 轨迹内容事实源 | 捕获层二次写入 `events.jsonl`（含截断） | pi 会话条目（完整原文）；`events.jsonl` 只剩瘦业务事件 |
+| `events.jsonl` 体量 | 每 Agent 数十~上百条内容事件 | 每 Agent 1 条 `agent_config` + 1 条 `agent_end`（+ 每响应 1 条 `provider_request`） |
+| provider request id | 挂终态 `message_end.requestId`（一 Agent 多响应只留最后一个） | 每响应一条 `provider_request`，全部保留 |
+| sessionId 生成 | `run-log-sink` 生成，同时用作会话 id 与归属键 | 适配层生成（`query()` 时），经 `system/init` 回写进 `agent_config`；sink 只绑定 key/role |
+| 检查器内容 | 截断后的块（预览 512 字符 / 输出 64 KiB / 摘要 8 KiB） | 会话原文 |
+| 用量合计 | 事件上的累计快照 | 会话 usage 行（harness ledger 权威）；`run_end.usage` 作为旧 run 回退 |
+| 浏览站实时流式预览 | partial 帧预览（`message_delta` 节流） | 会话在消息**结算后**才可见（partial 预览消失；TUI 生成页的实时进度不受影响，走 `onEvent`） |
+| 历史 run | — | 无会话目录 → 回退 `replayRunEvents`，行为不变 |
+
+### 已知取舍
+
+- **浏览站轨迹页在运行中不再有流式预览**：partial 帧语义来自内容事件，
+  方案 C 之后内容只在会话里、消息结算后才落盘。代价是「看着它长出来」
+  变成「逐条消息出现」。TUI 生成页的实时进度（token 计数 / 页面状态）
+  不受影响——那条链路走 `onEvent`，不依赖轨迹事件。若后续真机使用证明
+  需要实时预览，可在会话文件尾追加解析（会话是 append-only JSONL），
+  不用回到双写。
+
+#### 36.5 阶段 4：logger 守卫 + 完整性不变量
+
+- **logger 源码守卫**（`test:logger` 新增一组，115/115）：扫
+  `packages/orchestrator/src` / `packages/agent-runtime/src` /
+  `packages/utils/src` 的全部 `.ts`，禁止 `info` / `success` / `progress`
+  级日志传入**内容引用**——`block.text` / `.text` / `.output` /
+  `.toolInput` / `.content` / `.summary` / `.message` 成员访问，以及
+  `prompt` / `toolInput` / 未接成员访问的 `output` / `content` / `summary`
+  裸标识符。`warn` / `error` 不受此限（失败诊断需要原文）。
+  - 守卫**已验证真能抓到**：临时注入 `probe.info('%s', block.text)` 后
+    测试即失败并指出文件行，删除后恢复 115/115。
+  - 目前业务层剩下的 `info` 全是计数 / 耗时 / 路径 / 分类标题这类元数据
+    （如 `分类完成：N 个分类`、`[OK] [slug] 完成 (Nms)`），不含模型内容。
+- **完整性不变量**（`packages/utils/test/session-completeness.ts`，31/31，
+  随 `test:trajectory` 跑）：从**一个 run 目录**（会话文件 + 瘦业务事件，
+  logger 一行内容都没有）重建完整视图，断言自足地含：
+  模型正文 / thinking 原文 / 工具入参（`toolCall.arguments`）与结果
+  （`toolResult` 消息）/ 逐响应与累计用量 / 压缩摘要（且压缩点之前的条目
+  仍在磁盘）/ 扫描边界（文件数）/ provider request id（多条全保留，不只
+  最后一个）/ 系统提示与用户提示（`agent_config` 承载）/ 上下文窗口。
+- **保留期**：会话目录在 run 目录内（`<runDir>/sessions/`），
+  `RunLogWriter.enforceRetention` 删整个 run 目录时会话一并删除，
+  无需单独的会话保留期逻辑（默认仍保留最近 20 个 run）。
+
+#### 36.6 阶段 5（fork / resume）未做——接线清单
+
+
+
+会话已经 durable（`JsonlSessionRepo`，完整内容、可 fork），但**编排层仍然
+每次 `query()` 新建会话**：`driver.ts` 只 `repo.create({ id, cwd })`，从不
+`repo.open(既有 id)`。要启用「中断续跑」需要三步：
+
+1. 适配层 `createAgent` 重新接受显式 `sessionId`（阶段 2 删掉了透传，
+   现在改由 `system/init` 回读；续跑场景需重新开放为「传入即 open」）；
+2. `driver.ts` 按 id 判定 `open` 还是 `create`（pi 的 `JsonlSessionRepo`
+   两者都支持，`open` 读回全部条目并继续追加）；
+3. 编排层在 run 重开时，从同一 run 的 `events.jsonl` 里按 agent key 查回
+   上次的 `agent_config.agent.sessionId`，传给该 Agent。
+
+闸门：中断后续跑能接上既有会话上下文（新消息追加在同一会话文件里）。
+**当前 CLI 没有续跑入口**（重新生成 / 失败重试都是起新 Agent），所以这一步
+是新增产品能力，不是回归修复，单列一次改动更稳妥。
+
+- **`agent_end` / `page_end` 的归属靠 key 回退**：sink 绑定的身份没有
+  sessionId，投影层用 `keyToIdentity` 回查。并发 Agent 的 key 互异，所以
+  不会误归；唯一会失准的是「同一 key 的两次运行交错」，而一个 run 内
+  不会出现同 key 的两个活跃 Agent。
+- **内容类事件仍占联合类型**：为了读旧 run。新 run 不会再产生它们；
+  `ActiveRunEventKind` 标注了「仍然会落盘」的集合，读取方可用它做穷尽校验。
+- **logger 退回纯诊断**：`create-agent.ts` 不再 printf 助手正文 / 工具入参。
+  需要看内容时读会话文件（`<runDir>/sessions/--<cwd>--/<ts>_<sessionId>.jsonl`）
+  或用浏览站轨迹页。
+
+#### 36.7 vendor 补丁：并发会话创建的 ENOENT 竞态
+
+阶段 2/3 让所有 Agent 在**同一会话目录**（`<runDir>/sessions/--<cwd>--/`）创建会话，
+从而暴露了 pi 的一个真实缺陷：
+
+- `JsonlSessionRepo.create()` 写会话头时先写 `<file>.tmp` 再 rename
+  （`vendor/pi/.../session/jsonl/io.ts`）；
+- `create()` 内部的 `assertSessionIdAvailable()` 会 `listDir` 该目录；
+- `NodeExecutionEnv.listDir` 先 `readdir(withFileTypes)` 再对每个条目 `lstat`。
+  若另一路并发 `create` 的 `.tmp` 恰好在这两步之间被 rename 掉，`lstat` 抛
+  ENOENT，**整个 `listDir` 失败 → `create` 失败 → 该分类 Agent 失败**
+  （`result.failedSections` 出现 `stage: 'titles'`）。
+
+复现率：`test:blueprint` 的 C1 场景在本机约 2/7；master 源码（MemorySessionRepo，
+无落盘）20 次全过，分支 20 次内失败 2 次。
+
+**修复**（vendor `agent` 包，`harness/env/nodejs.ts`，带 `// zread-pi:` 注释）：
+单条目 `lstat` 抛 ENOENT 时跳过该条目，只让真正的目录级错误失败；新增
+`isENOENT` 辅助函数。这是上游缺陷的健壮性修正，语义上「目录列举不应因
+瞬态文件消失而失败」，对其他消费者（fork / open / list）同样有益。
+
+守卫（`test:agent` → `session-persist.ts`）：①24 路并发 `repo.create()`
+同一 sessionsRoot 全部成功且 `list` 可见全部；②**确定性复现**——在目录里放
+200 个 `.tmp` 文件，启动 `env.listDir` 的同时逐个删除，30 轮不得出现失败
+（禁用修复时 30/30 轮失败，启用后全绿）。修复后 `blueprint-detail` 14 次连跑 0 失败。
+
+> 改 vendor src 后必须 `bun run vendor:build` 重建 dist；dist 的同一处已验证含
+> `if (isENOENT(error)) continue;`。
+
+### 验证（实际执行结果）
+
+- `bun run typecheck` 0 错误（含 `apps/browse` 组件测试 tsconfig）。
+  - `trajectory-model` **106/106**（旧事件路径回归不变）；
+  - **新增 `session-replay` 78/78**：`parseSessionLines`（header / value /
+    entry+usage 数组行 / toolResult 独立消息 / 压缩条目 / 损坏行 / 字符串
+    content / 参数 sessionId）、`sumSessionUsage`（含 adjustment）、
+    `replayRun`（会话与事件按 sessionId join、system/user 记录来自
+    agent_config、工具结算与 schema、用量合计取会话、请求编号与累计用量、
+    失败 Agent 最后一条请求标 error、无会话回退、多 Agent 并发精确归属、
+    `summarizeRunEvents` digest）；
+  - `session-completeness` **31/31**（阶段 4 完整性不变量，见 §36.5）；
+  - `run-dir-order` **7/7**；
+  - `trajectory-store` **53/53**（+6）：`readSessionFacts`（无目录空数组、
+    header / 文件名两种 id 来源、损坏文件空条目、忽略非 jsonl）。
+- `test:blueprint` 的 `e2e-blueprint` **59/59**（+5）：`agent_config` 数 =
+  会话文件数、sessionId 一一对应、**内容类事件不再出现在 events.jsonl**
+  （leaked=0）、`provider_request` 每响应一条且互不相同、
+  **端到端会话内容按 sessionId 正确归入各 turn（mismatch=0，max_concurrent=4）**。
+- `test:pages`（24 + 7 + 24 + 76 + 8）、`test:catalog`、`test:agent`
+  （21 + 12 + 9）、`test:context`（45）、`blueprint-detail`（116）等全绿。
+- `test:browse` 的 `browse-server` **90/90**（+12）：会话接口（旧 run 空数组、
+  会话数 / id / 条目 / usage 行、runEnded、非法与未知 runId 404）；
+  组件测试 **51/51**。
+- `test:tui`：`mock-generate` **43/43**（底部用量合计、逐 Agent 行指标、
+  三阶段进度均不依赖轨迹事件）；`wiki-generate` 单元 **42/42**；
+  `smoke-tui` **313/313**；`browse-server` 见上。
+- `bun run mock:wiki`：`completed=4 failed=0`，交付闸门 `overall=PASS`；
+  产物核对——7 个 Agent → 7 个会话文件（`<ts>_zread-pi-<随机>.jsonl`），
+  会话内含 user / assistant(toolCall) / toolResult / usage 完整条目；
+  `events.jsonl` 只剩 28 行瘦业务事件（`run_*` / `agent_config` /
+  `agent_end` / `page_*` / `stage` / `section`）。
+- `test:components` **51/51**（JsonTree 95% / TrajectoryTable 93% /
+  TrajectoryTimeline 97% 行覆盖）。
+- `test:logger` **115/115**（+1 源码守卫，见 §36.5）。
+- `cli-target-dir` 在本机偶发超时（约 1/8 概率出现 ~180s 毛刺）：已在
+  **未改动的基线上复现同样的失败与同样的 6 项**，判定为环境抖动
+  （非本次改动引入），重跑即恢复 33/33。
+
+

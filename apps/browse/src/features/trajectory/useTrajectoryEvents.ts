@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { trajectoryApi, type EventsResponse } from './api';
+import { trajectoryApi, type EventsResponse, type SessionsResponse } from './api';
 import type { RunEvent } from '@zread-pi/types';
+import type { SessionFacts } from '@zread-pi/trajectory';
 
 export type TrajectoryLoadStatus = 'loading' | 'ready' | 'not-found' | 'error';
 
@@ -20,6 +21,8 @@ export interface TrajectoryEventsState {
   /** 实际加载的 runId（缺省 runId 时由最近一次运行解析得到） */
   resolvedRunId?: string;
   events: RunEvent[];
+  /** 会话事实（方案 C：内容源头；旧 run 为空） */
+  sessions: SessionFacts[];
   /** 是否还有更旧的事件可加载 */
   hasMoreOlder: boolean;
   /** 运行是否已结束（结束 = 停止轮询） */
@@ -55,6 +58,7 @@ export function useTrajectoryEvents(
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [resolvedRunId, setResolvedRunId] = useState<string | undefined>(undefined);
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [sessions, setSessions] = useState<SessionFacts[]>([]);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [hasNewer, setHasNewer] = useState(false);
   const [runEnded, setRunEnded] = useState(false);
@@ -82,6 +86,29 @@ export function useTrajectoryEvents(
     [],
   );
 
+  const loadSessions = useCallback(
+    async (id: string, mode: 'initial' | 'poll'): Promise<void> => {
+      try {
+        const response: SessionsResponse = await trajectoryApi.getSessions(id);
+        if (mode === 'initial' || response.runEnded) {
+          // 初始加载或 run 已结束时直接覆盖
+          setSessions(response.sessions);
+        } else {
+          // 运行中：按 sessionId / 文件名合并，新会话追加，既有会话覆盖（内容可能还在追加）
+          setSessions((previous) => {
+            const byKey = new Map<string, SessionFacts>();
+            for (const item of previous) byKey.set(item.sessionId, item);
+            for (const item of response.sessions) byKey.set(item.sessionId, item);
+            return [...byKey.values()];
+          });
+        }
+      } catch {
+        // 旧 run / 会话目录缺失 → 保留空数组，事件 replay 仍可用
+      }
+    },
+    [],
+  );
+
   const loadInitial = useCallback(
     async (id: string): Promise<void> => {
       setStatus('loading');
@@ -91,6 +118,7 @@ export function useTrajectoryEvents(
         setResolvedRunId(id);
         applyResponse(response, 'initial', false);
         setStatus('ready');
+        void loadSessions(id, 'initial');
       } catch (error) {
         if (isNotFoundError(error)) {
           setStatus('not-found');
@@ -102,6 +130,12 @@ export function useTrajectoryEvents(
     },
     [applyResponse, limit],
   );
+
+  // 会话拉取保持稳定身份（续页/轮询里按需调用，避免它们重复声明依赖）
+  const loadSessionsRef = useRef(loadSessions);
+  useEffect(() => {
+    loadSessionsRef.current = loadSessions;
+  }, [loadSessions]);
 
   // 初始加载：有 runId 直接加载；缺省时解析最近一次运行
   useEffect(() => {
@@ -150,6 +184,7 @@ export function useTrajectoryEvents(
         const response = await trajectoryApi.getEvents(resolvedRunId, { afterSeq: maxSeq, limit });
         if (token.cancelled) return;
         applyResponse(response, 'newer', hasMoreOlderRef.current);
+        void loadSessions(resolvedRunId, 'poll');
       } catch {
         // 续页失败保留已加载部分（reload 可恢复）
       }
@@ -171,6 +206,7 @@ export function useTrajectoryEvents(
         const response = await trajectoryApi.getEvents(resolvedRunId, { afterSeq: maxSeq, limit });
         if (token.cancelled) return;
         applyResponse(response, 'newer', hasMoreOlderRef.current);
+        void loadSessions(resolvedRunId, 'poll');
       } catch {
         // 单次轮询失败不改变整体状态（下一轮会重试）
       }
@@ -212,6 +248,7 @@ export function useTrajectoryEvents(
     errorMessage,
     resolvedRunId,
     events,
+    sessions,
     hasMoreOlder,
     runEnded,
     lastSeq,

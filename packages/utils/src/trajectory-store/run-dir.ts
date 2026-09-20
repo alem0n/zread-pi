@@ -15,6 +15,8 @@ import { readRunMeta } from './run-log-reader.js';
 export const RUNS_DIR_NAME = 'runs';
 export const EVENTS_FILE_NAME = 'events.jsonl';
 export const META_FILE_NAME = 'run.json';
+/** pi 会话落盘子目录名（方案 C：会话 = 唯一完整事实源） */
+export const SESSIONS_DIR_NAME = 'sessions';
 
 /** runId 的校验规则（年-月-日THH-mm-ss-4 位十六进制） */
 export const RUN_ID_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[0-9a-f]{4}$/;
@@ -50,6 +52,11 @@ export function getEventsPath(runId: string, projectRoot: string = process.cwd()
 
 export function getMetaPath(runId: string, projectRoot: string = process.cwd()): string {
   return join(getRunDir(runId, projectRoot), META_FILE_NAME);
+}
+
+/** 单次运行的 pi 会话根目录（`<runDir>/sessions/`，JsonlSessionRepo 的 sessionsRoot） */
+export function getSessionsRoot(runId: string, projectRoot: string = process.cwd()): string {
+  return join(getRunDir(runId, projectRoot), SESSIONS_DIR_NAME);
 }
 
 /** runId 合法 */

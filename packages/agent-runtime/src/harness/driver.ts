@@ -19,6 +19,7 @@
 import {
 	AgentHarness,
 	BACKGROUND_CONTEXT,
+	JsonlSessionRepo,
 	MemorySessionRepo,
 	type AgentHarnessTool,
 	type CompactionSettings,
@@ -27,6 +28,7 @@ import {
 	type Session,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, AssistantMessage, Model, Models, RetryPolicy, Usage } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai";
 import type { TSchema } from "@earendil-works/pi-ai";
@@ -79,9 +81,26 @@ export interface HarnessQueryRequest {
 	signal?: AbortSignal;
 	/** 重试回调（业务 UI 的 retry 事件） */
 	onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; error: string }) => void;
+	/**
+	 * pi 会话落盘根目录（`<runDir>/sessions/`）：给定后本次 query 用
+	 * `JsonlSessionRepo` 把完整会话（消息 / 工具调用 / 用量 / 压缩摘要）
+	 * 写进 `<sessionRoot>/--<cwd>--/<ts>_<sessionId>.jsonl`，成为唯一完整事实源。
+	 * 缺省 = 内存会话（与迁移前语义一致，用完即弃）。
+	 */
+	sessionRoot?: string;
 }
 
 const ROOT_CONTEXT: Context = BACKGROUND_CONTEXT;
+
+/**
+ * driver 只用到会话仓库的 create / close 两个方法。内存与 JSONL 仓库的
+ * 泛型参数（metadata / list options）不同，用结构类型统一；`create` 的
+ * 参数集合是两者的交集超集（cwd 仅 JSONL 仓库读取，内存仓库忽略）。
+ */
+interface SessionRepoLike {
+	create(options: { id?: string; parentSessionId?: string; cwd?: string }, context: Context): Promise<Session>;
+	close(context: Context): Promise<void>;
+}
 
 function toErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -124,10 +143,10 @@ function looksLikeContextOverflow(message: string): boolean {
  */
 export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerator<SDKMessage, void> {
 	const startedAt = Date.now();
-	const repo = new MemorySessionRepo();
 	const unsubscribe: Array<() => void> = [];
 	let harness: AgentHarness<ToolBridgeContext> | undefined;
 	let session: Session | undefined;
+	let repo: SessionRepoLike | undefined;
 	let currentQueue: AsyncQueue<SDKMessage> | undefined;
 	let totals: Usage | undefined;
 	let lastAssistant: AssistantMessage | undefined;
@@ -137,7 +156,16 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 	const push = (message: SDKMessage): void => currentQueue?.push(message);
 
 	try {
-		session = await repo.create({ id: request.sessionId }, ROOT_CONTEXT);
+		// 会话仓库：给定 sessionRoot 时落盘（pi 的 JsonlSessionRepo，format-4 JSONL，
+		// 完整内容一次写入、原子、可 fork）；否则用内存会话（用完即弃）。
+		// cwd 决定会话子目录名（`--<cwd 转义>--`），这里用 Agent 的工作目录，
+		// 让同一 run 的会话都落在同一个仓库目录下。
+		repo = request.sessionRoot !== undefined
+			? new JsonlSessionRepo({ fileSystem: new NodeExecutionEnv({ cwd: request.cwd }), sessionsRoot: request.sessionRoot })
+			: new MemorySessionRepo();
+		const sessionCreateOptions =
+			request.sessionRoot !== undefined ? { id: request.sessionId, cwd: request.cwd } : { id: request.sessionId };
+		session = await repo.create(sessionCreateOptions, ROOT_CONTEXT);
 
 		const toolBridge: ToolBridgeContext = {
 			cwd: request.cwd,
@@ -410,7 +438,7 @@ export async function* queryHarness(request: HarnessQueryRequest): AsyncGenerato
 		currentQueue?.close();
 		if (harness) await harness.close(ROOT_CONTEXT).catch(() => undefined);
 		if (session) await session.close(ROOT_CONTEXT).catch(() => undefined);
-		await repo.close(ROOT_CONTEXT).catch(() => undefined);
+		if (repo) await repo.close(ROOT_CONTEXT).catch(() => undefined);
 	}
 }
 
