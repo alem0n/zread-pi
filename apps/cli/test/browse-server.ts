@@ -315,6 +315,7 @@ console.log("▶ 轨迹 API（/api/runs*）");
 // 写两条 run：一条已完成（10 条事件），一条进行中（3 条事件）
 const RUN_ID_A = "2026-03-04T05-06-07-0a1b";
 const RUN_ID_B = "2026-03-05T06-07-08-1c2d";
+const RUN_ID_C = "2026-03-06T07-08-09-2e3f";
 const runsDir = join(repo, ".zread-pi", "runs");
 
 async function writeRun(
@@ -353,6 +354,85 @@ async function writeRun(
 
 function fakeEvent(seq: number, kind: string): Record<string, unknown> {
   return { kind, seq, ts: 1_000 * seq, agent: { key: `agent-${seq}`, role: "page" } };
+}
+
+// 方案 C：会话目录（一个 Agent 一个 pi 会话文件）+ 瘦业务事件
+async function writeSessionRun(runId: string, sessionId: string): Promise<void> {
+  const sessionDir = join(runsDir, runId, "sessions", "--session-root--");
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(
+    join(sessionDir, `2026-03-06T07-08-09-000Z_${encodeURIComponent(sessionId)}.jsonl`),
+    [
+      JSON.stringify({ v: 4, kind: "header", id: sessionId }),
+      JSON.stringify([
+        {
+          kind: "entry",
+          type: "message",
+          seq: 1,
+          timestamp: 1_000,
+          message: { role: "user", content: [{ type: "text", text: "生成页面" }] },
+        },
+      ]),
+      JSON.stringify([
+        {
+          kind: "entry",
+          type: "message",
+          seq: 2,
+          timestamp: 2_000,
+          message: {
+            role: "assistant",
+            model: "demo",
+            provider: "demo",
+            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 },
+            content: [
+              { type: "text", text: "正文" },
+              { type: "toolCall", id: "c1", name: "write_page", arguments: { file: "x.md" } },
+            ],
+          },
+        },
+        {
+          kind: "usage",
+          id: "u1",
+          seq: 2,
+          entryId: "e2",
+          adjustment: false,
+          usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 },
+        },
+      ]),
+      JSON.stringify([
+        {
+          kind: "entry",
+          type: "message",
+          seq: 3,
+          timestamp: 3_000,
+          message: {
+            role: "toolResult",
+            toolCallId: "c1",
+            toolName: "write_page",
+            content: [{ type: "text", text: "written" }],
+          },
+        },
+      ]),
+    ].join("\n") + "\n",
+    "utf-8",
+  );
+  await writeRun(runId, "completed", [
+    { kind: "run_start", seq: 1, ts: 100, runKind: "generate", targetDir: repo },
+    {
+      kind: "agent_config",
+      seq: 2,
+      ts: 200,
+      agent: { key: "page:x", role: "page", pageSlug: "x", sessionId },
+      prompt: "生成页面",
+      systemPrompt: "系统提示",
+      toolCatalog: [{ name: "write_page", inputSchema: { type: "object" } }],
+      model: "demo",
+      provider: "demo",
+      contextWindow: 200_000,
+    },
+    { kind: "agent_end", seq: 3, ts: 4_000, subtype: "success", durationMs: 3_800 },
+    { kind: "run_end", seq: 4, ts: 4_100, status: "completed", durationMs: 4_000 },
+  ]);
 }
 
 await writeRun(
@@ -457,6 +537,40 @@ checkEqual("afterSeq 超出范围返回空数组", tailEmptyPayload.events.lengt
 
 const badRunEvents = await fetch(`${info.url}/api/runs/not-a-run-id/events`);
 checkEqual("非法 runId 的事件接口 404", badRunEvents.status, 404);
+
+// ---------------------------------------------------------------------------
+// 会话事实接口（方案 C：内容源头）
+// ---------------------------------------------------------------------------
+await writeSessionRun(RUN_ID_C, "session-page-x");
+
+const noSessionsRes = await fetch(`${info.url}/api/runs/${RUN_ID_A}/sessions`);
+const noSessions = (await noSessionsRes.json()) as { sessions: unknown[]; runEnded: boolean };
+checkEqual("GET /api/runs/:runId/sessions 状态码（旧 run 无会话目录）", noSessionsRes.status, 200);
+checkEqual("旧 run 返回空会话数组", noSessions.sessions.length, 0);
+checkEqual("旧 run 的 runEnded 跟随 meta", noSessions.runEnded, true);
+
+const sessionsRes = await fetch(`${info.url}/api/runs/${RUN_ID_C}/sessions`);
+const sessionsPayload = (await sessionsRes.json()) as {
+  runId: string;
+  sessions: Array<{
+    sessionId: string;
+    entries: Array<{ type: string; message?: { role: string } }>;
+    usageRows: Array<{ id: string }>;
+  }>;
+  runEnded: boolean;
+};
+checkEqual("会话接口状态码", sessionsRes.status, 200);
+checkEqual("会话接口回带 runId", sessionsPayload.runId, RUN_ID_C);
+checkEqual("会话数 = 1", sessionsPayload.sessions.length, 1);
+checkEqual("会话 id = 文件名解析值", sessionsPayload.sessions[0]?.sessionId, "session-page-x");
+checkEqual("会话条目含 user / assistant / toolResult", sessionsPayload.sessions[0]?.entries.length, 3);
+checkEqual("usage 行被解析", sessionsPayload.sessions[0]?.usageRows.length, 1);
+checkEqual("会话接口的 runEnded", sessionsPayload.runEnded, true);
+
+const badSessions = await fetch(`${info.url}/api/runs/not-a-run-id/sessions`);
+checkEqual("非法 runId 的会话接口 404", badSessions.status, 404);
+const missingSessions = await fetch(`${info.url}/api/runs/2026-01-01T00-00-00-aaaa/sessions`);
+checkEqual("合法但不存在的 runId 会话接口 404", missingSessions.status, 404);
 
 // 仅存在档位变体的目录也算「有文档」
 const variantOnlyRepo = await mkdtemp(join(tmpdir(), "zread-browse-variant-only-"));

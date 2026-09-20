@@ -6,6 +6,7 @@
 
 import { api } from '@/utils/api';
 import type { RunEvent, RunMeta, RunSummary } from '@zread-pi/types';
+import type { SessionFacts } from '@zread-pi/trajectory';
 
 /** 服务端返回的运行列表 */
 export interface RunsResponse {
@@ -25,6 +26,14 @@ export interface EventsResponse {
   runEnded: boolean;
   status: RunMeta['status'];
   lastSeq: number;
+}
+
+export interface SessionsResponse {
+  runId: string;
+  /** 一个 Agent 一个 pi 会话；旧 run 无会话目录 → 空数组 */
+  sessions: SessionFacts[];
+  /** 运行已结束 */
+  runEnded: boolean;
 }
 
 export interface TrajectoryApiOptions {
@@ -62,6 +71,16 @@ export const trajectoryApi = {
     const response = await api.get<EventsResponse>(
       `/runs/${encodeURIComponent(runId)}/events`,
       { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * 会话事实（方案 C）：pi 会话条目携带完整消息/工具内容，与事件一起 replay。
+   */
+  getSessions: async (runId: string): Promise<SessionsResponse> => {
+    const response = await api.get<SessionsResponse>(
+      `/runs/${encodeURIComponent(runId)}/sessions`,
     );
     return response.data;
   },

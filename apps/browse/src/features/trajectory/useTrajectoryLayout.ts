@@ -12,7 +12,9 @@ import {
   appendTrajectoryPartialLayout,
   deriveTrajectoryLayout,
   replayRunEvents,
+  replayRun,
   SEARCH_INDEX_THROTTLE_MS,
+  type SessionFacts,
   type TrajectoryRequestNumber,
   type TrajectoryRunSummary,
   type TrajectoryTurnModel,
@@ -33,13 +35,19 @@ export function useTrajectoryLayout(
   events: RunEvent[],
   query: string,
   partialThrottle: boolean = true,
+  sessions: SessionFacts[] = [],
 ): TrajectoryLayoutResult {
   const [matchSet, setMatchSet] = useState<ReadonlySet<string> | null>(null);
   const [indexVersion, setIndexVersion] = useState(0);
   const indexRef = useRef(new TrajectorySearchIndex());
 
   // ① replay：事件 → 快照（记录 / 请求 / 进行中的消息 / run 摘要）
-  const snapshot = useMemo(() => replayRunEvents(events), [events]);
+  // 有会话事实时走方案 C 路径（会话 = 内容事实源，事件只做时序/计量骨架）；
+  // 旧 run 无会话 → 回退纯事件 replay。
+  const snapshot = useMemo(
+    () => (sessions.length > 0 ? replayRun({ events, sessions }) : replayRunEvents(events)),
+    [events, sessions],
+  );
 
   // ② layout：快照 → turn / group / cell（含流式 partial 的追加）
   const baseTurns = useMemo(() => deriveTrajectoryLayout(snapshot), [snapshot]);
