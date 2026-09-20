@@ -16,8 +16,11 @@
 
 ## 2. 命令
 
-要求：Bun ≥ 1.3、Node ≥ 22、Python 3.x（仅夹具用）。命令统一经 `bun run`（跨平台入口），
+要求：Bun ≥ 1.3、Node ≥ 22。命令统一经 `bun run`（跨平台入口），
 Windows 下推荐 Git Bash / WSL（PowerShell 亦可跑 `bun run *`，但不要依赖 CMD 内建语法）。
+
+> 全套测试、`mock:wiki` 与 CLI 均**不依赖 Python**：夹具是静态文件，由 Tree-sitter WASM 解析器扫描；
+> 黄金值也硬编码在 `golden-parity.ts` 里。只有改黄金值样本时才需要 Python 3（见 §3「一致性校验」行）。
 
 ```bash
 bun install                # 安装依赖
@@ -52,7 +55,7 @@ bun run cli history        # 全局记忆：清理失效项目并列出
 | 交付闸门（`wiki/verify-wiki.ts`、`commands/verify.ts`、`verifyAfterGenerate`） | `typecheck` + `test:verify` + `test`；**`verify-wiki.ts` 只读不写产物**；`RunMeta` 不得改；`verifyAfterGenerate` 缺省 false |
 | 溯源台账（`wiki/traceability.ts`、verify-wiki 检查组） | `typecheck` + `test:traceability` + `test:verify` + `test`；**只读不写产物**；符号层保持 WARN，蓝图 `associatedFiles` 是 FAIL |
 | 页面格式资产 / reader-first / 文风纪律（`prompts/page-format.*.md`、`prompts/reader-first.*.md`、`prompts/humanizer.*.md`、`agents/{page-format,reader-first,style-discipline}.ts`、`wiki/polish.ts`） | `typecheck` + `test:page-format` + `test:pages` + `mock:wiki` + `test`；**zh / en 两份资产必须同步改动，条数与编号一一对应**；反注水三条（同义改写注水 / 不复制 README·AGENTS.md /「源里没有就应该是 0」）必须在双语都存在；改资产后 `mock:wiki` 须 `overall=PASS`；纪律文件保持 60~80 行 + 头部来源注释 |
-| 一致性校验 / 黄金值对照（`tools/golden-parity-gen.py`、`packages/orchestrator/test/golden-parity.ts`、`content-gate.ts` 的 `countCjkChars` / `numbersIn`） | `python3 tools/golden-parity-gen.py` 重新生成 + `typecheck` + `test:golden-parity` + `test`；样本变动必须**两边同步**（Python 脚本与 TS 测试逐字一致）并重新生成黄金值；判定语义变动须声明为有意偏差；带 `g` 标志的正则不得用于逐元素 `test()`（`lastIndex` 状态会跳过元素） |
+| 一致性校验 / 黄金值对照（`tools/golden-parity-gen.py`、`packages/orchestrator/test/golden-parity.ts`、`content-gate.ts` 的 `countCjkChars` / `numbersIn`） | `python3 tools/golden-parity-gen.py` 重新生成 + `typecheck` + `test:golden-parity` + `test`；样本变动必须**两边同步**（Python 脚本与 TS 测试逐字一致）并重新生成黄金值；判定语义变动须声明为有意偏差；带 `g` 标志的正则不得用于逐元素 `test()`（`lastIndex` 状态会跳过元素）。黄金值已硬编码在 `golden-parity.ts`，只有样本 / 判定语义变动时才需重跑生成器（生成器导入本机的 `lecture-to-notes` 仓库，路径硬编码在脚本头）；`test:golden-parity` **不在** `bun run test` 聚合内，按需单跑 |
 | 重试策略（`agent-runtime/src/retry.ts`、`harness/driver.ts`、`create-agent.ts`） | `typecheck` + `test:agent` + `test:agent:http` + `test`；`RetryConfig` 形状改动同步 §4 |
 | 多档共存 / 浏览（`utils/output/wiki-content.ts`、`browse-server.ts`、`apps/browse/src/**`） | `typecheck` + `test:blueprint` + `test:browse` + `test:tui` + `test`（前端另跑 `browse:build`）；**组件行为改动必须补 `test:components`（测试先行）** |
 | 轨迹视图 / 会话投影（`packages/trajectory/**`、`trajectory-store/**`、捕获点、`/api/runs*`） | `typecheck` + `test:trajectory` + `test:browse` + `mock:wiki` + `test`；`packages/trajectory/src/session.ts` 必须**无 node 依赖**（被 Vite 打包）；捕获层改动跑 `mock:wiki` 核对「会话文件数 = `agent_config` 数」；新增事件 kind 不得是内容类 |
