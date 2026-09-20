@@ -128,6 +128,11 @@ function toFileError(error: unknown, fallbackPath?: string): FileError {
 	return new FileError("unknown", cause.message, path, cause);
 }
 
+function isENOENT(error: unknown): boolean {
+	// zread-pi: 并发会话创建的瞬态 .tmp 文件可能在 readdir 与 lstat 之间被 rename
+	return isNodeError(error) && error.code === "ENOENT";
+}
+
 function abortResult<TValue>(signal: AbortSignal | undefined, path?: string): Result<TValue, FileError> | undefined {
 	return signal?.aborted ? err(new FileError("aborted", "aborted", path)) : undefined;
 }
@@ -832,6 +837,11 @@ export class NodeExecutionEnv implements ExecutionEnv {
 					const info = fileInfoFromStats(entryPath, await lstat(entryPath));
 					if (info.ok) infos.push(info.value);
 				} catch (error) {
+					// zread-pi: 并发会话创建会写瞬态 `<file>.tmp` 再 rename（见 session/jsonl/io.ts）。
+					// 该文件可能在 readdir 与 lstat 之间被 rename 掉，此时 lstat 抛 ENOENT。
+					// 单条目消失不应让整个目录列举失败（上游 pi 的 create/fork 因此在并发下偶发
+					// "Failed to list sessions directory"），跳过该条目即可。
+					if (isENOENT(error)) continue;
 					return err(toFileError(error, entryPath));
 				}
 			}

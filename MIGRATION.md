@@ -3203,6 +3203,8 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
 
 #### 36.6 阶段 5（fork / resume）未做——接线清单
 
+
+
 会话已经 durable（`JsonlSessionRepo`，完整内容、可 fork），但**编排层仍然
 每次 `query()` 新建会话**：`driver.ts` 只 `repo.create({ id, cwd })`，从不
 `repo.open(既有 id)`。要启用「中断续跑」需要三步：
@@ -3227,6 +3229,35 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
 - **logger 退回纯诊断**：`create-agent.ts` 不再 printf 助手正文 / 工具入参。
   需要看内容时读会话文件（`<runDir>/sessions/--<cwd>--/<ts>_<sessionId>.jsonl`）
   或用浏览站轨迹页。
+
+#### 36.7 vendor 补丁：并发会话创建的 ENOENT 竞态
+
+阶段 2/3 让所有 Agent 在**同一会话目录**（`<runDir>/sessions/--<cwd>--/`）创建会话，
+从而暴露了 pi 的一个真实缺陷：
+
+- `JsonlSessionRepo.create()` 写会话头时先写 `<file>.tmp` 再 rename
+  （`vendor/pi/.../session/jsonl/io.ts`）；
+- `create()` 内部的 `assertSessionIdAvailable()` 会 `listDir` 该目录；
+- `NodeExecutionEnv.listDir` 先 `readdir(withFileTypes)` 再对每个条目 `lstat`。
+  若另一路并发 `create` 的 `.tmp` 恰好在这两步之间被 rename 掉，`lstat` 抛
+  ENOENT，**整个 `listDir` 失败 → `create` 失败 → 该分类 Agent 失败**
+  （`result.failedSections` 出现 `stage: 'titles'`）。
+
+复现率：`test:blueprint` 的 C1 场景在本机约 2/7；master 源码（MemorySessionRepo，
+无落盘）20 次全过，分支 20 次内失败 2 次。
+
+**修复**（vendor `agent` 包，`harness/env/nodejs.ts`，带 `// zread-pi:` 注释）：
+单条目 `lstat` 抛 ENOENT 时跳过该条目，只让真正的目录级错误失败；新增
+`isENOENT` 辅助函数。这是上游缺陷的健壮性修正，语义上「目录列举不应因
+瞬态文件消失而失败」，对其他消费者（fork / open / list）同样有益。
+
+守卫（`test:agent` → `session-persist.ts`）：①24 路并发 `repo.create()`
+同一 sessionsRoot 全部成功且 `list` 可见全部；②**确定性复现**——在目录里放
+200 个 `.tmp` 文件，启动 `env.listDir` 的同时逐个删除，30 轮不得出现失败
+（禁用修复时 30/30 轮失败，启用后全绿）。修复后 `blueprint-detail` 14 次连跑 0 失败。
+
+> 改 vendor src 后必须 `bun run vendor:build` 重建 dist；dist 的同一处已验证含
+> `if (isENOENT(error)) continue;`。
 
 ### 验证（实际执行结果）
 

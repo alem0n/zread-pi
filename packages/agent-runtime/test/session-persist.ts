@@ -9,7 +9,7 @@
  * 运行：bun run packages/agent-runtime/test/session-persist.ts
  */
 
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai";
@@ -137,6 +137,61 @@ const stats = await reopened.getStats(BACKGROUND_CONTEXT);
 check("重开会话的 stats 含用量合计", stats.usage !== undefined && stats.usage.totalTokens > 0, JSON.stringify(stats.usage ?? {}));
 await reopened.close(BACKGROUND_CONTEXT);
 await repo.close(BACKGROUND_CONTEXT);
+
+// ---------- 并发创建回归：同一目录并发 create 不得因瞬态 .tmp 失败 ----------
+// zread-pi 修复（vendor/pi agent nodejs.listDir）：并发会话创建写 <file>.tmp
+// 再 rename，该文件可能在另一路 create 的 readdir 与 lstat 之间消失，
+// 原实现让整个目录列举失败 → Agent 建会话失败 → 分类失败。
+console.log("\n▶ 并发会话创建（同一 sessionsRoot）");
+const concurrencyRoot = join(workdir, "runs", "concurrent", "sessions");
+const env2 = new NodeExecutionEnv({ cwd: workdir });
+const repo2 = new JsonlSessionRepo({ fileSystem: env2, sessionsRoot: concurrencyRoot });
+const ids = Array.from({ length: 24 }, (_, index) => `zread-pi-concurrent-${String(index).padStart(2, "0")}`);
+const created = await Promise.allSettled(
+  ids.map((id) => repo2.create({ id, cwd: workdir }, BACKGROUND_CONTEXT)),
+);
+const rejected = created.filter((settled) => settled.status === "rejected");
+check(
+  "24 路并发 create 全部成功（无 ENOENT 竞态）",
+  rejected.length === 0,
+  rejected.length > 0 ? String((rejected[0] as PromiseRejectedResult).reason) : undefined,
+);
+const listed = await repo2.list({ cwd: workdir }, BACKGROUND_CONTEXT);
+check("并发创建后 list 可见全部会话", listed.length === ids.length, `${listed.length}`);
+await repo2.close(BACKGROUND_CONTEXT);
+
+// ---------- 确定性复现：列举途中条目消失 ----------
+// listDir 对每个条目单独 lstat；若某条目在 readdir 与 lstat 之间被移走
+// （并发 create 的 .tmp 正是这种行为），lstat 抛 ENOENT。修复前整个列举
+// 失败，修复后跳过该条目。这里在启动 listDir 的同时逐个删除 .tmp 文件，
+// 强制制造该窗口。
+console.log("\n▶ listDir 在条目消失时不得失败");
+const raceRoot = join(workdir, "race");
+let raceFailures = 0;
+let raceAttempts = 0;
+for (let attempt = 0; attempt < 30; attempt++) {
+  const dir = join(raceRoot, `attempt-${attempt}`);
+  await mkdir(dir, { recursive: true });
+  const tmpFiles: string[] = [];
+  for (let index = 0; index < 200; index++) {
+    const path = join(dir, `race-${index}.jsonl.tmp`);
+    await writeFile(path, "x");
+    tmpFiles.push(path);
+  }
+  raceAttempts += 1;
+  const listing = env2.listDir(dir, BACKGROUND_CONTEXT);
+  // 与 listDir 并发地逐个删除（每次 await 都让出事件循环，与 lstat 交错）
+  for (const path of tmpFiles) {
+    await rm(path, { force: true }).catch(() => undefined);
+  }
+  const result = await listing;
+  if (!result.ok) raceFailures += 1;
+}
+check(
+  "30 轮 × 200 条目的列举中途删除不产生失败",
+  raceFailures === 0,
+  raceFailures > 0 ? `${raceFailures} / ${raceAttempts} 轮失败` : undefined,
+);
 
 await rm(workdir, { recursive: true, force: true });
 
