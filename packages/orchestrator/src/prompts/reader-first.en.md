@@ -2,8 +2,7 @@
 
 > Adapted from lecture-to-notes' `references/reader-first-writing.md`
 > (skill: lecture-to-notes — each item copied first, then made compatible with a
-> "code wiki" context). The original wording and numbering **must be preserved**
-> (see plan.md §3.4.2 / §5.5).
+> "code wiki" context). The original wording and numbering **must be preserved**.
 >
 > Division of labor with humanizer: humanizer = "reads like a human" (anti-AI prose,
 > 60–80 patterns); this block = "**teaches the reader**". The two are orthogonal;

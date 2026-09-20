@@ -1,7 +1,7 @@
 /**
  * 页面格式契约 + 读者优先纪律 —— 提示词资产层验证
  *
- * 覆盖 P1-2（plan.md §3.4.1 / §3.4.2）：
+ * 覆盖 P1-2：
  * - page-format.zh/.en.md 两份资产条数与编号一一对应（同步纪律）
  * - reader-first.zh/.en.md 同上（8 节 + 最终清单）
  * - 拼装点：withPageFormat / withReaderDiscipline（注入位置 / 开关 / 语言选择）

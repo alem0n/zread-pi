@@ -2,7 +2,7 @@
 
 <!-- 来源：lecture-to-notes 的 skills/lecture-to-md/lecture-to-md/assets/notes-prompt.md
      （中文源，先逐字复制「Markdown 格式要求 / 配图规则 / 图片引用语法 / 最终检查清单」
-     四段，再做「代码 wiki」语境兼容改写，见 plan.md §3.4.1 / §5.5）；
+     四段，再做「代码 wiki」语境兼容改写）；
      格式契约的事实部分同时从 zread-pi 的 prompts/page-agent.ts 抽出（该文件
      此后只保留与叙述语气相关的要求）。
      语境词替换：课堂笔记 → 代码 wiki；课程标题 → 页面标题；课件截图/视频帧

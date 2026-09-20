@@ -2,13 +2,12 @@
  * 交付闸门 verify-wiki —— 纯逻辑
  *
  * 来源：lecture-to-notes 的 `scripts/verify_notes.py`
- * （先逐字复制「检查组 + PASS/FAIL/SKIP + OVERALL」的结构，再做 TS 兼容改写，
- * 见 plan.md §3.2 / §5.5）。
+ * （先逐字复制「检查组 + PASS/FAIL/SKIP + OVERALL」的结构，再做 TS 兼容改写）。
  *
  * 复制后改写：LaTeX 编译日志 / 图清单 / pdftotext 渲染门 → Markdown 静态文本门
  * （structure / content / mermaid / traceability / frontmatter）；
  * `OVERALL FAIL 不许交付` → 只报告 + 退出码（zread-pi 的产物已落盘，
- * 闸门是「事后体检」而非交付前置，见 plan.md §5.1）。
+ * 闸门是「事后体检」而非交付前置）。
  *
  * 落点约定：本模块**只读**（读 wiki.json / 页面文件 / 缓存清单），不写任何产物。
  * 唯一的写动作（`verify.json`）由调用方（CLI / generate-wiki 集成）按需执行。
@@ -74,7 +73,7 @@ export interface VerifyWikiOptions {
   detail?: BlueprintDetailLevel | null;
   /**
    * content 组是否计 FAIL：true 时内容门未达标的页面让 OVERALL FAIL；
-   * false（缺省）时只把未达标页面列进 details（对齐 plan.md 的「否则只列出」）。
+   * false（缺省）时只把未达标页面列进 details（只列出，不判失败）。
    */
   enforce?: boolean;
 }
@@ -240,7 +239,7 @@ export async function verifyWiki(options: VerifyWikiOptions = {}): Promise<Verif
         gateFailures.map((entry) => `${entry.slug}：散文 ${entry.proseChars} / 下限 ${entry.floor}`),
       );
     } else {
-      // 非 enforce：只列出（对齐 plan.md「否则只列出」），不影响 OVERALL
+      // 非 enforce：只列出，不影响 OVERALL
       report.emit(
         'PASS',
         'content',

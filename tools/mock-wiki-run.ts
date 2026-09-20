@@ -305,7 +305,7 @@ for (const page of blueprint.pages) {
 console.log(`\n结果：completed=${result.completed} failed=${result.failed}，mock 请求数=${requestCount}`);
 
 // ---------------------------------------------------------------------------
-// 5) 交付闸门核对（plan.md §3.2 / §6）：mock 产物只断言结构类检查全绿；
+// 5) 交付闸门核对：mock 产物只断言结构类检查全绿；
 //    content 组以 warn 报告产出（mock LLM + 极小夹具过不了密度门，属预期）。
 // ---------------------------------------------------------------------------
 const verify = await verifyWiki({ root: target, detail: 'low' });

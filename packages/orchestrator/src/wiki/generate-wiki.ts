@@ -333,8 +333,7 @@ async function writeDegradedPage(options: {
 /**
  * 生成后自动校验（`quality.verifyAfterGenerate`）：跑一次交付闸门并把摘要落盘。
  *
- * 摘要文件为 `<runDir>/verify.json`——**不改动 `RunMeta`**（run.json 是固定字段结构，
- * 见 plan.md §3.2 的审查修订），trajectory replay 无感知。
+ * 摘要文件为 `<runDir>/verify.json`——**不改动 `RunMeta`**（run.json 是固定字段结构），trajectory replay 无感知。
  * 校验本身只读、失败不影响生成结果（生成永不悬挂：闸门是事后体检，不是交付前置）。
  */
 async function maybeWriteVerifyReport(

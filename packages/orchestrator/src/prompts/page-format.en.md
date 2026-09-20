@@ -2,7 +2,7 @@
 
 <!-- Source: lecture-to-notes' skills/lecture-to-md/lecture-to-md/assets/notes-prompt.md
      (Chinese source; this is the translation of prompts/page-format.zh.md with equal
-     adaptation — see plan.md §3.4.1 / §5.5). The four carried-over sections
+     adaptation). The four carried-over sections
      (Markdown format rules / figure rules / image reference syntax / final checklist)
      keep the source's rule numbering and checklist order one-to-one.
      Only edit together with the zh version and prompts/page-agent.ts. -->

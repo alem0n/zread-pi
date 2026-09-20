@@ -2,7 +2,7 @@
  * traceability.ts —— 溯源台账纯函数验证
  *
  * 对齐 lecture-to-notes 的 extract_claims.py 的两段式「提取 → 逐条 check」
- * （见 plan.md §3.3 / §5.5）：先解析页面声称的全部溯源声明，再逐条对照
+ * 先解析页面声称的全部溯源声明，再逐条对照
  * 仓库事实（manifest / 磁盘 / 符号缓存 / 文件行数）。
  *
  * 运行：bun run packages/orchestrator/test/traceability.ts
