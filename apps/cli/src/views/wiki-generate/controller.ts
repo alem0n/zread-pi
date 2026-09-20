@@ -16,6 +16,8 @@ import {
   removeDir,
   saveCachedManifest,
   saveCachedSymbols,
+  buildScanStartEvent,
+  buildScanEndEvent,
   RunLogWriter,
 } from "@zread-pi/utils";
 import {
@@ -239,7 +241,9 @@ export class WikiGenerateController {
     this._lastRunId = this.runLog.runId;
 
     try {
-      // Phase 1-2: 扫描 + 解析
+      // Phase 1-2: 扫描 + 解析（轨迹记录扫描边界；内容零携带）
+      this.runLog.append(buildScanStartEvent({}));
+      const scanStartedAt = Date.now();
       const manifest = await scanFiles();
       if (manifest.files.length === 0) {
         this.state.catalog = {
@@ -256,6 +260,12 @@ export class WikiGenerateController {
 
       const symbols = await parseFiles(manifest);
       await saveCachedSymbols(symbols);
+      this.runLog.append(
+        buildScanEndEvent({
+          fileCount: manifest.files.length,
+          durationMs: Date.now() - scanStartedAt,
+        }),
+      );
 
       // Phase 3: 调用 Agent（写入目标档位变体目录）
       await generateWikiCatalog((event) => this.handleCatalogEvent(event), {
