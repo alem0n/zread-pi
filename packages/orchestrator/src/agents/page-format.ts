@@ -6,7 +6,7 @@
  * 「Markdown 格式要求 / 配图规则 / 图片引用语法 / 最终检查清单」再做语境改写；
  * 格式事实部分同时从 zread-pi 的 `prompts/page-agent.ts` 抽出）
  *       `prompts/page-format.en.md`（同等翻译）
- * 语境改写与条目对应见 MIGRATION.md §32.1（plan.md §3.4.1 / §5.5）。
+ * 语境改写自 pi coding-agent 的原始纪律文本，条目逐条对应（zh / en 两份资产必须同步改动）。
  *
  * 与 humanizer（反 AI 腔）/ reader-first（教会读者）**正交**：
  * 这里只规定「格式必须成立」，不规定「怎么写得好读」。

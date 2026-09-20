@@ -2,7 +2,7 @@
      基于维基百科「AI 写作特征」/ WikiProject AI Cleanup）。
      为 zread-pi wiki 生成而精炼：保留模式清单 + 核心规则 + 检查清单，
      去掉教学式 before/after 长例，补充本项目的保护性约束。
-     仅与 en 版本、MIGRATION.md §15 一起改动。 -->
+     仅与 en 版本一起改动。 -->
 
 # 文风纪律：让文字读起来像人写的
 

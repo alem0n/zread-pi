@@ -291,7 +291,7 @@ export async function rescuePageFile(
 }
 
 /**
- * 内容门的 best-effort 落盘降级（§3.1 / §5.1）。
+ * 内容门的 best-effort 落盘降级（见 AGENTS.md §3 内容密度门）。
  *
  * `enforce` 模式下模型未在 token 预算内通过内容门时，页面文件不会落盘
  * （write_page 返回 is_error）。此时把**最近一次被拦截的内容**写入约定路径，
@@ -333,8 +333,7 @@ async function writeDegradedPage(options: {
 /**
  * 生成后自动校验（`quality.verifyAfterGenerate`）：跑一次交付闸门并把摘要落盘。
  *
- * 摘要文件为 `<runDir>/verify.json`——**不改动 `RunMeta`**（run.json 是固定字段结构，
- * 见 plan.md §3.2 的审查修订），trajectory replay 无感知。
+ * 摘要文件为 `<runDir>/verify.json`——**不改动 `RunMeta`**（run.json 是固定字段结构），trajectory replay 无感知。
  * 校验本身只读、失败不影响生成结果（生成永不悬挂：闸门是事后体检，不是交付前置）。
  */
 async function maybeWriteVerifyReport(
@@ -669,7 +668,7 @@ async function generatePages(
               `[${page.slug}] write_page 写入路径与 wiki.json 不一致，已兜底移动到约定位置：${rescuedFrom} -> ${outputFile}`,
             );
           } else {
-            // 内容门降级（§3.1 / §5.1）：enforce 拦截后模型未在 token 预算内通过时，
+            // 内容门降级（enforce 路径）：enforce 拦截后模型未在 token 预算内通过时，
             // 把最近一次被拦截的内容 best-effort 落盘，标 enforce-degraded，页面计成功。
             // 不满足降级条件（模型从未产出 / 非 内容门拦截）时返回 null，走原失败路径。
             const degraded = await writeDegradedPage({
@@ -704,7 +703,7 @@ async function generatePages(
         // Error isolation: single page failure doesn't stop others
         const message = err instanceof Error ? err.message : String(err);
 
-        // 内容门降级（§3.1 / §5.1）：Agent 因预算耗尽 / 中断等原因没有正常收尾，
+        // 内容门降级（预算耗尽路径）：Agent 因预算耗尽 / 中断等原因没有正常收尾，
         // 但已经有被内容门拦截的有效正文时，仍然 best-effort 落盘并计为成功
         // （生成永不悬挂：门判死也把产物交到用户手里，质量告警由 gate 携带）。
         const failedOutputFile = joinPath(wikiDir, page.section, page.file);

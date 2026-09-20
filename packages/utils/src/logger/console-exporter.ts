@@ -7,7 +7,7 @@
  *  （`showDiff`）、可选名字标签宽度对齐（`label`）；对象参数走 `util.inspect`
  *  （node 变体），名字按哈希着色。
  *
- * 与 harness 的偏差（见 MIGRATION.md）：
+ * 与 harness 的偏差：
  *  - 不依赖 `supports-color`：色彩探测手写约 20 行（`NO_COLOR` / `FORCE_COLOR` /
  *    TTY + `COLORTERM` / `TERM`），零新依赖，不影响 standalone 二进制打包；
  *  - 递归保护：名为 `tui.console`（console-guard 捕获的输出）与 `tui.stdout`

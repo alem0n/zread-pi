@@ -1,7 +1,7 @@
 /**
  * 日志类型层 —— 对齐 cordis 的 `vendor/cordis/src/logger.ts`。
  *
- * 与 harness 的偏差（无 fiber / 无 Context，见 MIGRATION.md）：
+ * 与 harness 的偏差（无 fiber / 无 Context）：
  *  - `Message` 不含 `fiber?: WeakRef<Fiber>`（zread-pi 无插件/纤程概念）；
  *  - `LoggerLevel` 用 `as const` 对象替代 cordis 的 `const enum`：
  *    本仓库的 bun/tsup 打包链不做隔离编译，const enum 的运行时值会丢失，

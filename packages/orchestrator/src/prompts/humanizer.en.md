@@ -2,7 +2,7 @@
      based on Wikipedia "Signs of AI writing" (WikiProject AI Cleanup).
      Distilled for zread-pi wiki generation: pattern list + core rules + checklist kept,
      teaching before/after examples removed, project-specific protections added.
-     Edit here only together with the zh variant and MIGRATION.md §15. -->
+     Edit here only together with the zh variant. -->
 
 # Writing discipline: make the prose read like a person wrote it
 

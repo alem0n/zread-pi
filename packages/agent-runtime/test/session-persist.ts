@@ -1,7 +1,7 @@
 /**
  * 阶段 1 —— 适配层 sessionRoot 注入：完整会话落盘并可重开
  *
- * 方案 C 的注入点（plan.md §2）：createAgent({ sessionRoot }) → driver 构造
+ * 方案 C 的注入点：createAgent({ sessionRoot }) → driver 构造
  * JsonlSessionRepo，把本次 query 的完整会话（消息 / 工具调用 / 工具结果 /
  * 用量 / 压缩摘要）写进 `<sessionRoot>/--<cwd>--/<ts>_<sessionId>.jsonl`。
  * 本测试跑一次真实 mock query，断言磁盘上能读回完整内容（投影层的前提）。

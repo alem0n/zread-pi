@@ -123,7 +123,7 @@ export interface SDKToolResultMessage {
     output: string
     /**
      * 工具结果的结构化元信息（截断信息、diff、命中上限等）。**不进入模型上下文**。
-     * 契约扩展点：见 MIGRATION.md §3「工具结果 details」。
+     * 契约扩展点：「工具结果 details」为新增可选字段（详见 AGENTS.md §4）。
      */
     details?: JsonValue
   }
@@ -278,7 +278,7 @@ export interface ToolResult {
   /**
    * 结构化元信息（截断信息、diff、命中上限等）。
    * **不会进入模型上下文**（pi 的 `details` 与 `content` 分离），仅供钩子 / UI 消费。
-   * 契约扩展点：见 MIGRATION.md §3「工具结果 details」。
+   * 契约扩展点：「工具结果 details」为新增可选字段（详见 AGENTS.md §4）。
    */
   details?: JsonValue
 }

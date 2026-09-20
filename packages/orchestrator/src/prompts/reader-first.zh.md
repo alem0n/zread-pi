@@ -2,7 +2,7 @@
 
 > 移植自 lecture-to-notes 的 `references/reader-first-writing.md`
 > （skill: lecture-to-notes，先逐条复制原条目，再做「代码 wiki」语境兼容改写）。
-> 原条目的措辞与编号**必须保留**（见 plan.md §3.4.2 / §5.5）。
+> 原条目的措辞与编号**必须保留**。
 >
 > 与 humanizer 的分工：humanizer = 「像人写的」（反 AI 腔，60~80 条模式）；
 > 本块 = 「**教会了读者**」。两者正交，本块拼在 humanizer **之后**。

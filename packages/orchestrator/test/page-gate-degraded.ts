@@ -1,7 +1,7 @@
 /**
  * page-gate-degraded.ts —— 内容门 enforce 降级落盘端到端验证
  *
- * 场景（§3.1 / §5.1）：`quality.contentGate.mode = enforce` 时，模型持续产出干瘪内容、
+ * 场景（内容密度门降级，见 AGENTS.md §3）：`quality.contentGate.mode = enforce` 时，模型持续产出干瘪内容、
  * 在 token 预算内无法通过内容门 → write_page 被 is_error 拦截、文件不落盘 →
  * 预算耗尽强制交卷后仍无产物 → generate-wiki 的 best-effort 分支把**最近一次被拦截的
  * 内容**写入约定路径并标记 `gate.mode = 'enforce-degraded'`，页面计为成功 + 告警。

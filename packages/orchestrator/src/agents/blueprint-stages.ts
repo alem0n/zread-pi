@@ -894,7 +894,7 @@ export async function runTitlesStage(
           });
           titlesLogger.warn(`分类「${section.title}」失败，保留原标题：${state.error ?? '模型未调用工具'}`);
         } else {
-          // 重写率统计（plan.md §3.5）：诊断信号触发后标题被改写的比例，用于验证诊断段是否起作用
+          // 重写率统计：诊断信号触发后标题被改写的比例，用于验证诊断段是否起作用
           const total = target.pages.length;
           const rewritten = applied?.updated ?? 0;
           const rate = total > 0 ? Math.round((rewritten / total) * 100) : 0;

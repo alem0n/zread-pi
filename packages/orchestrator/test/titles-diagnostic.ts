@@ -1,5 +1,5 @@
 /**
- * 标题诊断信号 + refine_section_titles 自检 —— plan.md §3.5 验证
+ * 标题诊断信号 + refine_section_titles 自检
  *
  * 对齐 lecture-to-notes 的 `structure-reorder.md`：诊断信号表（7 条）+
  * 两项真正机械的工具侧自检（数量一致性 + 重写率统计）。

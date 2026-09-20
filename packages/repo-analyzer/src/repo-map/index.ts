@@ -247,7 +247,7 @@ export function buildModuleDetails(
   // Format with full details
   const content = formatRepoMap(tree, moduleSymbols, refMap);
 
-  // Estimate tokens（统一用 pi 的上下文估算器，见 MIGRATION.md §13）
+  // Estimate tokens（统一用 pi 的上下文估算器）
   const tokenCount = estimateTextTokens(content);
 
   return {

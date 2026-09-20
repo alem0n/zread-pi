@@ -2,7 +2,7 @@
  * TrajectoryTimeline 组件级测试：sub-pixel span 合并 / 滚轮缩放 / 模式切换。
  *
  * 核心回归是「span 数可达数万时不能逐条画 div」：宽度不足 2 CSS px 的 span
- * 必须合并，每泳道条数被视口宽度封顶（见 MIGRATION §26.10）。
+ * 必须合并，每泳道条数被视口宽度封顶。
  */
 
 import { describe, it, expect } from 'bun:test';

@@ -3,13 +3,13 @@
  *
  * 来源：lecture-to-notes 的 `scripts/extract_claims.py`
  * （先逐字复制「脚本决定源里有什么，不由模型决定」的两段式结构——
- * 提取 → 逐条 check，见 plan.md §3.3 / §5.5）。
+ * 提取 → 逐条 check）。
  *
  * 复制后改写：正则抽数字台账 → AST 符号缓存（`last_symbols.json`，已由
  * repo-analyzer 产出到 `.zread-pi/cache/`，零额外解析成本）；LaTeX 宏剥离
  * （`flatten_tex`）→ Markdown 围栏剥离（只看散文里的行内代码，不看代码块）。
  *
- * 校验项（失败语义见 plan.md §3.3 的表）：
+ * 校验项（失败语义见下表）：
  * - 路径真实（FAIL）：`Sources:` 里的 `](path)` / `](path#Lx-Ly)` 落在
  *   manifest 内或磁盘上存在；
  * - 行号有效（FAIL）：`#Lx-Ly` 的 x ≤ y ≤ 文件行数（流式按行计数，不全量缓冲）；

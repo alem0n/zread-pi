@@ -3,7 +3,7 @@
  *
  * sticky 表头的回归点是「不能出现双表头」与「不能影响窗口几何」：
  * sticky 条必须是滚动容器的绝对定位兄弟（不在文档流里），且只有在真实
- * 表头完全滚出视口顶时才出现（见 MIGRATION §26.10）。
+ * 表头完全滚出视口顶时才出现。
  */
 
 import { describe, it, expect } from 'bun:test';

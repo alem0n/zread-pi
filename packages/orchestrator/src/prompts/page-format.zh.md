@@ -2,13 +2,13 @@
 
 <!-- 来源：lecture-to-notes 的 skills/lecture-to-md/lecture-to-md/assets/notes-prompt.md
      （中文源，先逐字复制「Markdown 格式要求 / 配图规则 / 图片引用语法 / 最终检查清单」
-     四段，再做「代码 wiki」语境兼容改写，见 plan.md §3.4.1 / §5.5）；
+     四段，再做「代码 wiki」语境兼容改写）；
      格式契约的事实部分同时从 zread-pi 的 prompts/page-agent.ts 抽出（该文件
      此后只保留与叙述语气相关的要求）。
      语境词替换：课堂笔记 → 代码 wiki；课程标题 → 页面标题；课件截图/视频帧
      → Mermaid 架构图；图片相对路径 → `Sources:` 溯源行；LaTeX 公式 → 代码块。
      原文的规则编号与清单顺序**必须保留**（清单条数与编号与源一一对应）。
-     仅与 en 版本（同等翻译）、prompts/page-agent.ts、MIGRATION.md §32.1 一起改动。 -->
+     仅与 en 版本（同等翻译）、prompts/page-agent.ts 一起改动。 -->
 
 > 本资产是页面的**硬性格式契约**。
 > 与文风纪律（`humanizer.*.md`，反 AI 腔）和读者优先纪律

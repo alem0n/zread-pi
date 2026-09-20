@@ -1,7 +1,7 @@
 /**
  * content-gate.ts —— 内容密度门（quality.contentGate）验证
  *
- * 移植自 lecture-to-notes 的 verify_notes.py::density_gate（§5.5 先复制后兼容）。
+ * 移植自 lecture-to-notes 的 verify_notes.py::density_gate（先复制后兼容）。
  *
  * A) 纯函数指标：剥离 frontmatter / 代码块 / Mermaid / Sources 行 / 表格后的散文计数、
  *    标题层级与跳级、Mermaid / 代码块计数、句首重复。

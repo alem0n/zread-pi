@@ -2,7 +2,7 @@
  * JSONL exporter —— 结构化 sink，与文本 FileExporter 并存。
  *
  * harness 没有文件 sink（logger-console 只管终端）；本 exporter 是 zread-pi 侧
- * 为「机器可读日志分析」新增的能力（与 file-exporter 同一偏差族，见 MIGRATION.md）：
+ * 为「机器可读日志分析」新增的能力（与 file-exporter 同一偏差族）：
  * 每行一条 JSON，字段直接取自结构化 Message，可被 jq / 脚本按 name/level/ts 过滤。
  *
  * - 落 `~/.zread-pi/logs/zread-pi-<yyyy-MM-dd>.jsonl`（与文本文件同目录同日期口径）；

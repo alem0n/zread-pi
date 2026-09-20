@@ -2,14 +2,14 @@
  * 内容密度门（content gate）—— 纯函数 + 常量表
  *
  * 来源：lecture-to-notes 的 `scripts/verify_notes.py::density_gate`
- * （先逐字复制判定结构，再做 TS 兼容改写，见 MIGRATION §29 / §5.5）。
+ * （先逐字复制判定结构，再做 TS 兼容改写）。
  * 复制后改写：CJK 正则 → 通用可见文本计数（剥离 frontmatter / 代码块 / Mermaid /
  * `Sources:` 行 / 表格）；视频时长基准 → level + 关联文件规模；强阻断 → warn/enforce
- * 可降级（§5.1）。判定语义保持一致，有意偏差见 MIGRATION §29。
- * 仅与 tools/page-tools.ts（拦截点）、wiki/verify-wiki.ts、MIGRATION §29 一起改动。
+ * 可降级。判定语义保持一致，有意偏差须在 AGENTS.md §3 声明。
+ * 仅与 tools/page-tools.ts（拦截点）、wiki/verify-wiki.ts 一起改动。
  *
- * 移植纪律（§5.5）：阈值不得随手「优化」。下限表数值是按 fixtures/hello-python
- * 与真实仓库规模标定的，任何变动须在 MIGRATION §29 声明为有意偏差。
+ * 移植纪律：阈值不得随手「优化」。下限表数值是按 fixtures/hello-python
+ * 与真实仓库规模标定的，任何变动须在 AGENTS.md §3 声明为有意偏差。
  *
  * 反注水（§4，与密度门同一 PR 落地）：门限是**下限不是目标**——
  * 「源没有就应该是 0」：关联文件没有可写代码时代码块正确答案是 0；
@@ -285,7 +285,7 @@ export function proseFloor(page: WikiPage): number {
 
 /**
  * 是否强制要求 Mermaid 图：由 section 角色（基础分类）与档位 panorama 派生，
- * **不挂在 level 表上**（难度与「是否需要架构图」正交，见 §5.5 审查修订 #8）。
+ * **不挂在 level 表上**（难度与「是否需要架构图」正交）。
  */
 export function mermaidRequiredFor(page: WikiPage, spec: BlueprintDetailSpec): boolean {
   if (spec.panorama) return true;
@@ -426,7 +426,7 @@ export function resolveGateMode(config: {
   return gate.mode ?? 'warn';
 }
 
-// ==================== 与 Python 参考实现的黄金值对照（§5.5） ====================
+// ==================== 与 Python 参考实现的黄金值对照（黄金值对照） ====================
 
 /**
  * CJK 统一表意文字计数。

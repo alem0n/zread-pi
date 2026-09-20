@@ -1,7 +1,7 @@
 /**
  * 工具输出截断设施（共享基线）
  *
- * 决策（见 AGENTS.md §1.1）：**不重新实现**，直接复用 vendor 里
+ * 决策：**不重新实现**，直接复用 vendor 里
  * `@earendil-works/pi-agent-core` 已导出的纯函数实现（`harness/utils/truncate.ts`）。
  * 该实现与上游 `pi/packages/coding-agent/src/core/tools/truncate.ts` 同源，
  * 额外做了「无 Buffer 运行时」的兜底（`utf8ByteLength`），比上游版本更健壮。

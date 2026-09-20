@@ -12,7 +12,7 @@ zread-pi 是 AI 驱动的 Wiki 文档生成工具：一行命令把整个项目�
 `@earendil-works/pi-agent-core`，vendor 源码见 `vendor/pi/`）之上；代码分析基于 Tree-sitter 多语言 AST。
 
 一句话架构：**只换运行时内核，业务逻辑零改动**——`agent-sdk` 被 `agent-runtime` 适配层取代，
-对外契约（`createAgent` / `createProvider` / 工具名 / 类型）冻结，冻结点清单见 `MIGRATION.md` §3。
+对外契约（`createAgent` / `createProvider` / 工具名 / 类型）冻结，冻结点清单见 `AGENTS.md` §4。
 
 ## 开发环境
 
@@ -69,7 +69,7 @@ vendor/pi/packages/*（pi 内核源码快照，上游零改动）
 
 - 家目录路径**只**在 `project-home.ts` 改，禁止在别处 `homedir()` 拼接；
 - `tools/registry.ts` 是扩展点：新增外部工具只需加一条 `ToolSpec`，界面 / 安装器 / 探测自动跟上；
-  可用性判定只看「进程能否启动」，版本识别失败不等于未安装（详见 `AGENTS.md` §1.4）；
+  可用性判定只看「进程能否启动」，版本识别失败不等于未安装（详见 `AGENTS.md` §3 外部工具）；
 - history 二进制布局变更必须升 `HISTORY_VERSION` 并保留旧版本读取兼容。
 
 ### 3. `@zread-pi/repo-analyzer`（packages/repo-analyzer）
@@ -79,7 +79,7 @@ vendor/pi/packages/*（pi 内核源码快照，上游零改动）
 
 **修改要点**：
 
-- `parseFiles()` 以 `process.cwd()` 为根——任何调用方必须先切到目标仓库目录（见 §6.4 `AGENTS.md`）；
+- `parseFiles()` 以 `process.cwd()` 为根——任何调用方必须先切到目标仓库目录（见 `AGENTS.md` §7 已知约束）；
 - 新增语言 = 在 `parser/constants.ts` 的 `WASM_FILE_MAP` 登记 grammar；
 - 首次解析会从 CDN 下载 WASM 到 `<家目录>/parsers`，不要在测试里假设它已存在。
 
@@ -92,8 +92,8 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 
 **修改要点**：
 
-- 对外契约冻结（`MIGRATION.md` §3）：改 `createAgent` / `createProvider` 签名或 `SDKMessage` 结构，
-  必须同步业务层与 `MIGRATION.md`；
+- 对外契约冻结（`AGENTS.md` §4）：改 `createAgent` / `createProvider` 签名或 `SDKMessage` 结构，
+  必须同步业务层与 `AGENTS.md`；
 - **工具不得改名**（提示词与测试依赖 `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Ls`/`write_page`/`generate_blueprint`）；
   工具行为改动必须补 `test:tools` 断言；
 - 重试只放在 `streamFn` 层且仅在「未产出内容」时触发；不要往 pi Agent 循环里塞重试；
@@ -124,7 +124,7 @@ frontmatter / `Sources:` / Mermaid 三项 diff 断言）、
 - 内容密度门是**纯函数**（`content-gate.ts`）：判定逻辑改这里，副作用仍在
   `page-tools.ts`（拦截）与 `generate-wiki.ts`（降级落盘）；**降级落盘必须同时覆盖 `try` 与 `catch`
   两条路径**（token 预算耗尽时 harness 抛错走 `catch`）；门限是下限不是目标，
-  代码块是软建议（源里没代码时 0 是正确答案，见 `AGENTS.md` §1.1）；
+  代码块是软建议（源里没代码时 0 是正确答案，见 `AGENTS.md` §3 内容密度门）；
 - 交付闸门（`verify-wiki.ts`）**只读**：`verify.json` 只能由 CLI（`apps/cli/src/commands/verify.ts`）
   或 `generate-wiki.ts` 的 `verifyAfterGenerate` 集成落盘；**不得改 `RunMeta`**（摘要是 run 目录下的独立文件）；
   校验失败不判生成失败（闸门是事后体检，不是交付前置）；
@@ -140,8 +140,8 @@ frontmatter / `Sources:` / Mermaid 三项 diff 断言）、
   `page-format.*.md`，叙述 / 语气 / 结构要求逐字保留；改完跑 `mock:wiki` 确认链路不破；
 - 标题阶段的 `expectedSlugs` 数量自检必须**在落盘前**执行（陌生/遗漏 slug →
   is_error 且不落盘）；`expectedSlugs` / `onResult` 保持**可选**（旧调用点兼容）；
-- 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §1.1 的对应决策行。
-- §5.5 一致性校验是强制项：从 lecture-to-notes 移植的判定逻辑（CJK 计数 /
+- 提示词改动会直接改变 LLM 行为，改前先读 `AGENTS.md` §3 对应行。
+- 一致性校验（黄金值对照）是强制项：从 lecture-to-notes 移植的判定逻辑（CJK 计数 /
   数字台账口径）必须能被 `tools/golden-parity-gen.py` 在源 Python 实现上
   复现（`bun run test:golden-parity`）；样本两边同步、黄金值重新生成。
 
@@ -177,7 +177,7 @@ API 通过 `/api` 与 CLI 服务端通信，响应结构改动需同步 `test:br
 
 ## 跨平台硬约束（摘要）
 
-完整清单见 `AGENTS.md` §6.8，改任何代码 / 脚本 / 文档示例前自查：
+完整清单见 `AGENTS.md` §7，改任何代码 / 脚本 / 文档示例前自查：
 
 - 路径用 `node:path`，落盘 / 比较前归一化为正斜杠；
 - 家目录 / 临时目录走 `os.homedir()` / `os.tmpdir()`，禁止硬编码；

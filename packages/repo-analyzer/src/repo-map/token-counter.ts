@@ -3,7 +3,7 @@
  *
  * **不再自维护启发式**：迁移前是「行数 × 10 tokens」的粗估（两个副本：本文件 + formatter），
  * 现在统一用 pi 的上下文估算器 `estimateTokens`（`@earendil-works/pi-agent-core`，
- * chars/4 启发式，与 harness 判定上下文压力时用的是同一套算法，见 MIGRATION.md §13）。
+ * chars/4 启发式，与 harness 判定上下文压力时用的是同一套算法）。
  *
  * 估算对象是「该文件在 Repo Map 中会输出的符号行」——由 `formatSymbolContentLines`
  * 提供（与 formatter 渲染共用同一份内容构造，避免估算与真实输出漂移）。
