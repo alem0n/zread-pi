@@ -443,6 +443,7 @@ export function buildMessageEndEvent(input: {
   contextWindow?: number;
   model?: string;
   provider?: string;
+  requestId?: string;
 }): Omit<MessageEndEvent, 'seq' | 'ts'> {
   return {
     kind: 'message_end',
@@ -462,6 +463,7 @@ export function buildMessageEndEvent(input: {
     ...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
   };
 }
 

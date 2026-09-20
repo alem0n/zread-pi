@@ -160,6 +160,9 @@ export {
 } from "./retry.js";
 export type { HarnessStreamRetryOptions, ProviderRetryConfig, RetryConfig } from "./retry.js";
 
+// 事件桥的纯函数（request id 提取，排障用；供业务层 / 测试复用）
+export { extractRequestId } from "./harness/events.js";
+
 // ---------------------------------------------------------------------------
 // 类型
 // ---------------------------------------------------------------------------

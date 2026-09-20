@@ -270,7 +270,14 @@ const server = Bun.serve({
 			},
 		});
 
-		return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+		return new Response(stream, {
+			headers: {
+				"content-type": "text/event-stream",
+				// 模拟真实 provider 回传 request id（排障关联用）：每请求自增，
+				// 验证它经 after_response 钩子落进轨迹日志的 message_end.requestId
+				"x-request-id": `mock-req-${requestCount}`,
+			},
+		});
 	},
 });
 
@@ -682,6 +689,22 @@ const sessions = agentStarts
 check("agent_start 全部携带 sessionId", sessions.length === agentStarts.length, `missing=${agentStarts.length - sessions.length}`);
 check("各 Agent 的 sessionId 互不相同（并发会话隔离）", new Set(sessions).size === sessions.length, `${sessions.length} sessions`);
 check("agent_start 携带 role / key", agentStarts.every((event) => event.agent?.role !== undefined && event.agent?.key !== undefined));
+
+// provider 响应头的 request id 落进轨迹日志（排障关联：mock-req-<n> 每请求自增）
+const messageEnds = logEvents.filter((event) => event.kind === "message_end");
+const requestIds = messageEnds
+	.map((event) => (event.kind === "message_end" ? event.requestId : undefined))
+	.filter((value): value is string => typeof value === "string");
+check(
+	"message_end 事件携带 requestId（provider 响应头）",
+	requestIds.length === messageEnds.length && messageEnds.length > 0,
+	`with=${requestIds.length} / total=${messageEnds.length}`,
+);
+check(
+	"requestId 与请求数一致且互不相同（每响应一个）",
+	new Set(requestIds).size === requestIds.length && requestIds.every((id) => id.startsWith("mock-req-")),
+	`${new Set(requestIds).size} unique / ${requestIds.length} total`,
+);
 
 // 真实捕获的交错事件流直接即回归 replay 并发归属
 const snapshot = replayRunEvents(logEvents);
