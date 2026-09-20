@@ -271,6 +271,18 @@ API Key 与模型列表都在其详情页里维护）；也能为任意 Provider
 - `~/.zread-pi/auth.json` —— pi-ai 格式凭据（API Key），可同时保存多个 Provider；**秘密不进 config.yaml**。
 - `~/.zread-pi/models-store.json` —— 动态 Provider 的模型目录缓存。
 
+**蓝图细节档位区间**（`blueprint.detail`，默认 `high`；配置界面 `/config/detail`）：
+
+| 档位 | 分类数 | 每分类文章数 | 标题精修 |
+| --- | --- | --- | --- |
+| `minimal` | 固定 1（概览） | 固定 1 | 跳过 |
+| `low` | 2~5（基础分类已强占 2） | 1~3 | 跳过 |
+| `medium` | 3~6 | 3~5 | 保留 |
+| `high`（默认） | 3~8 | 3~10 | 保留 |
+| `max` | 3~8 | 5~12 | 保留 |
+
+> 非 minimal 档位固定含「概览 / 核心架构」两个基础分类；`minimal` 的唯一页面附加「全景导览」要求（必须用 Mermaid 架构图梳理模块关系与数据流）。越界数量由「AI 归并 → 缩编 subagent → 代码兜底」三层处理，不会静默截断。
+
 > [!IMPORTANT]
 > API Key 存放在 `~/.zread-pi/auth.json`，除调用你配置的 Provider 外不会离开本机。共享机器请自行收紧文件权限。
 
@@ -477,8 +489,7 @@ your-project/
 > 好的入手点：加一种 tree-sitter 语言（`packages/repo-analyzer/src/parser/constants.ts`）、
 > 改进 TUI（遵循 `DESIGN.md` 设计系统）、或完善中英文案。
 
-开发约定（分支 / 验证 / 版本号 / 合并流程）见 `AGENTS.md`；
-设计决策与契约冻结点见 `AGENTS.md`（§1.1 / §1.2）；
-UI 设计系统见 `DESIGN.md`；包结构与修改指南见 `RULES.md`。
+开发约定（分支 / 验证 / 版本号 / 合并流程）与契约冻结点见 `AGENTS.md`；
+包结构与逐包修改要点见 `RULES.md`；UI 设计系统见 `DESIGN.md`。
 
 如果这个项目帮你省了时间，去 GitHub 点个 ⭐ 就是最好的感谢。
