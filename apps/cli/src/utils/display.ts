@@ -12,7 +12,7 @@ declare global {
   var CLI_VERSION: string | undefined;
 }
 
-/** 仓库根 package.json 的 name（AGENTS.md §4.4：根 package.json 是唯一版本来源） */
+/** 仓库根 package.json 的 name（AGENTS.md §5：根 package.json 是唯一版本来源） */
 const ROOT_PACKAGE_NAME = 'zread-pi';
 /** 既没注入、也找不到 package.json 时的兜底版本 */
 const FALLBACK_VERSION = '0.0.0-dev';

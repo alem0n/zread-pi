@@ -214,7 +214,7 @@ export async function verifyWiki(options: VerifyWikiOptions = {}): Promise<Verif
     contents.set(page.slug, await readFileText(filePath));
   }
 
-  // ==================== content（§3.1 内容密度门） ====================
+  // ==================== content（内容密度门） ====================
   const gateFailures: Array<{ slug: string; proseChars: number; floor: number }> = [];
   for (const page of pages) {
     const content = contents.get(page.slug) ?? '';
@@ -291,7 +291,7 @@ export async function verifyWiki(options: VerifyWikiOptions = {}): Promise<Verif
     frontmatterIssues.length === 0 ? undefined : frontmatterIssues.slice(0, 12),
   );
 
-  // ==================== traceability（溯源台账，对齐 §3.3 的页面维度） ====================
+  // ==================== traceability（溯源台账，对齐 AGENTS.md §3 的页面维度） ====================
   const [manifest, symbols] = await Promise.all([
     loadCachedManifest(),
     loadCachedSymbols(),

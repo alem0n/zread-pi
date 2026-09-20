@@ -133,7 +133,7 @@ export function normalizePolishConfig(value: unknown): PolishConfig {
  * 内容质量门（内容密度门 + 生成后自动校验）
  *
  * 移植自 lecture-to-notes 的 `verify_notes.py::density_gate`，但把强阻断改成
- * 可降级（warn / enforce；enforce 在预算用尽时 best-effort 落盘，见 AGENTS.md §1.1）。
+ * 可降级（warn / enforce；enforce 在预算用尽时 best-effort 落盘，见 AGENTS.md §3 内容密度门）。
  * 默认 warn：记录与上屏，不拦截 write_page，老用户升级行为零变化。
  */
 export const DEFAULT_QUALITY_ENABLED = true;

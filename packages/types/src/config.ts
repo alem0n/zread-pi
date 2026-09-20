@@ -230,7 +230,7 @@ export interface BlueprintConfig {
  * - warn（默认）：计算并记录进 `PageResult.gate`，**不拦截** write_page；
  * - enforce：在 write_page 内拦截（与 Mermaid 引号校验同一位置），
  *   返回 is_error + 「当前 N / 下限 M」的常驻反馈让模型重写；
- *   预算用尽仍未通过时走 best-effort 落盘降级（见 AGENTS.md §1.1），不判页失败。
+ *   预算用尽仍未通过时走 best-effort 落盘降级（见 AGENTS.md §3 内容密度门），不判页失败。
  */
 export type ContentGateMode = 'off' | 'warn' | 'enforce';
 

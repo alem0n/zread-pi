@@ -90,7 +90,7 @@ const { ProcessTerminal } = await import("@earendil-works/pi-tui");
 const { getVersion } = await import("../src/utils/display");
 const { setZreadCatalogConfig } = await import("@zread-pi/agent-runtime");
 
-// 项目版本（仓库根 package.json，AGENTS.md §4.4 唯一来源）
+// 项目版本（仓库根 package.json，AGENTS.md §5 唯一来源）
 const projectVersion = (
   JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf-8")) as { version: string }
 ).version;

@@ -9,11 +9,11 @@
  *   python3 tools/golden-parity-gen.py
  * 样本 SAMPLES 与该脚本逐字一致；改动样本必须两边同步并重新生成黄金值。
  *
- * 有意偏差（不在本测试对照范围，已在 AGENTS.md §1.1 / §1.2 声明）：
- * - Python 的 CJK 门基于视频时长；zread-pi 基于 level + 关联文件规模（§0.2 不照搬公式）；
- * - Python 在 LaTeX 上计数；zread-pi 在 Markdown 上剥离围栏后计数（§3.1）。
+ * 有意偏差（不在本测试对照范围，已在 AGENTS.md §3 / §4 声明）：
+ * - Python 的 CJK 门基于视频时长；zread-pi 基于 level + 关联文件规模（不照搬公式）；
+ * - Python 在 LaTeX 上计数；zread-pi 在 Markdown 上剥离围栏后计数。
  *   本测试只对照**字符级正则语义**（哪些字符算 CJK / 哪些串算数字），
- *   这正是「判定逻辑」本身，是 §5.5 要求不得漂移的部分。
+ *   这正是「判定逻辑」本身，是要求不得漂移的部分。
  *
  * 运行：bun run packages/orchestrator/test/golden-parity.ts
  */
@@ -95,7 +95,7 @@ console.log('\n▶ C. 边界语义（与源实现同一行为）');
 console.log('');
 const failed = checks.filter((c) => !c.ok);
 if (failed.length > 0) {
-	console.log(`❌ ${failed.length} 项失败（判定语义与 Python 参考实现漂移，见 §5.5）：`);
+	console.log(`❌ ${failed.length} 项失败（判定语义与 Python 参考实现漂移）：`);
 	for (const c of failed) console.log(`  - ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
 	process.exitCode = 1;
 }

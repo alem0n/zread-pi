@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const distDir = resolve(__dirname, '../dist')
 const pkgPath = resolve(__dirname, '../../../package.json')
 
-// 读取仓库根 package.json 获取项目版本号（AGENTS.md §4.4：根 package.json 是唯一版本来源）
+// 读取仓库根 package.json 获取项目版本号（AGENTS.md §5：根 package.json 是唯一版本来源）
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
 const version = pkg.version
 

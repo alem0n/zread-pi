@@ -5,7 +5,7 @@
  * `harness/utils/usage.ts` 里确实有等价的 `emptyUsage` / `addUsage`，但它作用于
  * pi 内部的 `Usage`（input/output/cacheRead/cacheWrite/totalTokens/cost），
  * 且未从包根导出（只有 compaction 用）。业务契约是字段名已冻结的 `TokenUsage`
- * （见 AGENTS.md §1.2），这里按同一加法语义实现，让「页面 Agent 的累计展示」与
+ * （见 AGENTS.md §4），这里按同一加法语义实现，让「页面 Agent 的累计展示」与
  * 「CLI 的跨 Agent 合计」不再各写一遍。
  *
  * 口径说明（与 pi 的 usage ledger 一致）：
