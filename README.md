@@ -290,8 +290,9 @@ your-project/
     │   └── max/
     ├── runs/                            # 运行轨迹（每次生成 / 同步一个目录）
     │   └── 2026-09-15T23-46-21-ffd1/
-    │       ├── events.jsonl             # 原始事件流（seq 单调，一行一条）
-    │       └── run.json                 # 元数据：状态 / agent 计数 / 页面进度 / 用量合计
+    │       ├── events.jsonl         # 瘦业务事件（run/page/stage 边界 + agent_config + provider_request）
+    │       ├── sessions/           # pi 会话（唯一完整事实源：消息 / 工具 / 用量 / 压缩）
+    │       └── run.json            # 元数据：状态 / agent 计数 / 页面进度 / 用量合计
     └── cache/
         ├── last_manifest.json           # 文件扫描结果
         └── last_symbols.json            # AST-hash 符号缓存
