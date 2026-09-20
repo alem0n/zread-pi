@@ -3176,6 +3176,48 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
   不受影响——那条链路走 `onEvent`，不依赖轨迹事件。若后续真机使用证明
   需要实时预览，可在会话文件尾追加解析（会话是 append-only JSONL），
   不用回到双写。
+
+#### 36.5 阶段 4：logger 守卫 + 完整性不变量
+
+- **logger 源码守卫**（`test:logger` 新增一组，115/115）：扫
+  `packages/orchestrator/src` / `packages/agent-runtime/src` /
+  `packages/utils/src` 的全部 `.ts`，禁止 `info` / `success` / `progress`
+  级日志传入**内容引用**——`block.text` / `.text` / `.output` /
+  `.toolInput` / `.content` / `.summary` / `.message` 成员访问，以及
+  `prompt` / `toolInput` / 未接成员访问的 `output` / `content` / `summary`
+  裸标识符。`warn` / `error` 不受此限（失败诊断需要原文）。
+  - 守卫**已验证真能抓到**：临时注入 `probe.info('%s', block.text)` 后
+    测试即失败并指出文件行，删除后恢复 115/115。
+  - 目前业务层剩下的 `info` 全是计数 / 耗时 / 路径 / 分类标题这类元数据
+    （如 `分类完成：N 个分类`、`[OK] [slug] 完成 (Nms)`），不含模型内容。
+- **完整性不变量**（`packages/utils/test/session-completeness.ts`，31/31，
+  随 `test:trajectory` 跑）：从**一个 run 目录**（会话文件 + 瘦业务事件，
+  logger 一行内容都没有）重建完整视图，断言自足地含：
+  模型正文 / thinking 原文 / 工具入参（`toolCall.arguments`）与结果
+  （`toolResult` 消息）/ 逐响应与累计用量 / 压缩摘要（且压缩点之前的条目
+  仍在磁盘）/ 扫描边界（文件数）/ provider request id（多条全保留，不只
+  最后一个）/ 系统提示与用户提示（`agent_config` 承载）/ 上下文窗口。
+- **保留期**：会话目录在 run 目录内（`<runDir>/sessions/`），
+  `RunLogWriter.enforceRetention` 删整个 run 目录时会话一并删除，
+  无需单独的会话保留期逻辑（默认仍保留最近 20 个 run）。
+
+#### 36.6 阶段 5（fork / resume）未做——接线清单
+
+会话已经 durable（`JsonlSessionRepo`，完整内容、可 fork），但**编排层仍然
+每次 `query()` 新建会话**：`driver.ts` 只 `repo.create({ id, cwd })`，从不
+`repo.open(既有 id)`。要启用「中断续跑」需要三步：
+
+1. 适配层 `createAgent` 重新接受显式 `sessionId`（阶段 2 删掉了透传，
+   现在改由 `system/init` 回读；续跑场景需重新开放为「传入即 open」）；
+2. `driver.ts` 按 id 判定 `open` 还是 `create`（pi 的 `JsonlSessionRepo`
+   两者都支持，`open` 读回全部条目并继续追加）；
+3. 编排层在 run 重开时，从同一 run 的 `events.jsonl` 里按 agent key 查回
+   上次的 `agent_config.agent.sessionId`，传给该 Agent。
+
+闸门：中断后续跑能接上既有会话上下文（新消息追加在同一会话文件里）。
+**当前 CLI 没有续跑入口**（重新生成 / 失败重试都是起新 Agent），所以这一步
+是新增产品能力，不是回归修复，单列一次改动更稳妥。
+
 - **`agent_end` / `page_end` 的归属靠 key 回退**：sink 绑定的身份没有
   sessionId，投影层用 `keyToIdentity` 回查。并发 Agent 的 key 互异，所以
   不会误归；唯一会失准的是「同一 key 的两次运行交错」，而一个 run 内
@@ -3189,7 +3231,6 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
 ### 验证（实际执行结果）
 
 - `bun run typecheck` 0 错误（含 `apps/browse` 组件测试 tsconfig）。
-- `test:trajectory`：
   - `trajectory-model` **106/106**（旧事件路径回归不变）；
   - **新增 `session-replay` 78/78**：`parseSessionLines`（header / value /
     entry+usage 数组行 / toolResult 独立消息 / 压缩条目 / 损坏行 / 字符串
@@ -3198,6 +3239,8 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
     agent_config、工具结算与 schema、用量合计取会话、请求编号与累计用量、
     失败 Agent 最后一条请求标 error、无会话回退、多 Agent 并发精确归属、
     `summarizeRunEvents` digest）；
+  - `session-completeness` **31/31**（阶段 4 完整性不变量，见 §36.5）；
+  - `run-dir-order` **7/7**；
   - `trajectory-store` **53/53**（+6）：`readSessionFacts`（无目录空数组、
     header / 文件名两种 id 来源、损坏文件空条目、忽略非 jsonl）。
 - `test:blueprint` 的 `e2e-blueprint` **59/59**（+5）：`agent_config` 数 =
@@ -3219,6 +3262,7 @@ request id**。此前的链路里这个值**完全被丢弃**：pi 内核的 `on
   `agent_end` / `page_*` / `stage` / `section`）。
 - `test:components` **51/51**（JsonTree 95% / TrajectoryTable 93% /
   TrajectoryTimeline 97% 行覆盖）。
+- `test:logger` **115/115**（+1 源码守卫，见 §36.5）。
 - `cli-target-dir` 在本机偶发超时（约 1/8 概率出现 ~180s 毛刺）：已在
   **未改动的基线上复现同样的失败与同样的 6 项**，判定为环境抖动
   （非本次改动引入），重跑即恢复 33/33。
