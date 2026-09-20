@@ -28,7 +28,7 @@ export type { AppConfig, AgentConfig, LLMConfig, LlmProviderConfig, CustomModelC
 export type { CacheManifest } from './cache.js'
 
 // Run（轨迹）类型：可回放事件流 + 运行元数据
-export type { RunEvent, RunEventBase, RunEventKind, RunEventAgentMeta, RunEventAgentRole, RunContentBlock, RunJsonValue, RunTokenUsage, RunStage, RunStartEvent, RunEndEvent, AgentStartEvent, AgentEndEvent, MessageStartEvent, MessageDeltaEvent, MessageEndEvent, ToolStartEvent, ToolEndEvent, RetryEvent, CompactEvent, StatusEvent, StageEvent, SectionEvent, PageStartEvent, PageEndEvent, FailedSectionsEvent } from './run-event.js'
+export type { RunEvent, RunEventBase, RunEventKind, ActiveRunEventKind, RunEventAgentMeta, RunEventAgentRole, RunContentBlock, RunJsonValue, RunTokenUsage, RunStage, RunStartEvent, RunEndEvent, AgentConfigEvent, AgentStartEvent, AgentEndEvent, ProviderRequestEvent, ScanStartEvent, ScanEndEvent, MessageStartEvent, MessageDeltaEvent, MessageEndEvent, ToolStartEvent, ToolEndEvent, RetryEvent, CompactEvent, StatusEvent, StageEvent, SectionEvent, PageStartEvent, PageEndEvent, FailedSectionsEvent } from './run-event.js'
 export { RUN_LEVEL_AGENT } from './run-event.js'
 export type { RunMeta, RunSummary, RunStatus, RunKind, RunAgentsMeta, RunPagesMeta } from './run-meta.js'
 

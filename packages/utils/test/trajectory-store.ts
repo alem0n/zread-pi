@@ -21,6 +21,7 @@ import {
   withRunLog,
   readRunMeta,
   readEvents,
+  readSessionFacts,
   listRuns,
   latestRun,
   resolveRunId,
@@ -286,6 +287,54 @@ checkEqual('listRuns 按最新在前', (await listRuns(repo6))[0]?.id, shared.ru
 await RunLogWriter.create(await tempProject(), { kind: 'generate', runId: 'bad-id' })
   .then(() => check('非法 runId 应抛错', false))
   .catch(() => check('非法 runId 创建被拒', true));
+
+// ---------------------------------------------------------------------------
+// 会话事实读取（方案 C：readSessionFacts）
+// ---------------------------------------------------------------------------
+
+console.log('▶ readSessionFacts');
+{
+  const project = await tempProject();
+  const runId = '2026-03-07T08-09-10-0a1b';
+  const sessionRoot = join(project, '.zread-pi', 'runs', runId, 'sessions', '--cwd--');
+
+  // 无会话目录 → 空数组（旧 run / 未传 sessionRoot 的运行）
+  checkEqual('无会话目录返回空数组', (await readSessionFacts(runId, project)).length, 0);
+
+  // 两个 Agent → 两个会话文件（一个有 header，一个只有文件名）
+  await mkdir(sessionRoot, { recursive: true });
+  await writeFile(
+    join(sessionRoot, `2026-03-07T08-09-10-000Z_${encodeURIComponent('session-a')}.jsonl`),
+    [
+      JSON.stringify({ v: 4, kind: 'header', id: 'session-a' }),
+      JSON.stringify([{ kind: 'entry', type: 'message', seq: 1, timestamp: 1, message: { role: 'assistant', content: 'A' } }]),
+    ].join('\n') + '\n',
+    'utf-8',
+  );
+  await writeFile(
+    join(sessionRoot, `2026-03-07T08-09-10-001Z_${encodeURIComponent('session-b')}.jsonl`),
+    [
+      // 无 header 行：sessionId 由文件名补
+      JSON.stringify([{ kind: 'entry', type: 'message', seq: 1, timestamp: 2, message: { role: 'assistant', content: 'B' } }]),
+    ].join('\n') + '\n',
+    'utf-8',
+  );
+  // 非 .jsonl 文件被忽略；损坏的 jsonl 条目被跳过
+  await writeFile(join(sessionRoot, 'note.txt'), 'nope', 'utf-8');
+  await writeFile(
+    join(sessionRoot, `2026-03-07T08-09-10-002Z_${encodeURIComponent('session-c')}.jsonl`),
+    '{not json\n',
+    'utf-8',
+  );
+
+  const facts = await readSessionFacts(runId, project);
+  checkEqual('会话文件数 = 3（含损坏文件，忽略非 jsonl）', facts.length, 3);
+  const byId = new Map(facts.map((fact) => [fact.sessionId, fact]));
+  checkEqual('会话 A 的 id 来自 header', byId.get('session-a') !== undefined, true);
+  checkEqual('会话 B 的 id 由文件名补', byId.get('session-b') !== undefined, true);
+  checkEqual('会话 A 解析到消息条目', byId.get('session-a')?.entries.length, 1);
+  checkEqual('损坏会话返回空条目', byId.get('session-c')?.entries.length, 0);
+}
 
 // ---------------------------------------------------------------------------
 // 结果
