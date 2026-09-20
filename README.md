@@ -478,7 +478,7 @@ your-project/
 > 改进 TUI（遵循 `DESIGN.md` 设计系统）、或完善中英文案。
 
 开发约定（分支 / 验证 / 版本号 / 合并流程）见 `AGENTS.md`；
-迁移决策与行为差异见 `MIGRATION.md`；
+设计决策与契约冻结点见 `AGENTS.md`（§1.1 / §1.2）；
 UI 设计系统见 `DESIGN.md`；包结构与修改指南见 `RULES.md`。
 
 如果这个项目帮你省了时间，去 GitHub 点个 ⭐ 就是最好的感谢。

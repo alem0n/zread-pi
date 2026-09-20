@@ -12,7 +12,7 @@ zread-pi 是 AI 驱动的 Wiki 文档生成工具：一行命令把整个项目�
 `@earendil-works/pi-agent-core`，vendor 源码见 `vendor/pi/`）之上；代码分析基于 Tree-sitter 多语言 AST。
 
 一句话架构：**只换运行时内核，业务逻辑零改动**——`agent-sdk` 被 `agent-runtime` 适配层取代，
-对外契约（`createAgent` / `createProvider` / 工具名 / 类型）冻结，冻结点清单见 `MIGRATION.md` §3。
+对外契约（`createAgent` / `createProvider` / 工具名 / 类型）冻结，冻结点清单见 `AGENTS.md` §1.2。
 
 ## 开发环境
 
@@ -92,8 +92,8 @@ compaction + 轮次收尾）、`src/pi/`（runtime-model / provider-catalog / au
 
 **修改要点**：
 
-- 对外契约冻结（`MIGRATION.md` §3）：改 `createAgent` / `createProvider` 签名或 `SDKMessage` 结构，
-  必须同步业务层与 `MIGRATION.md`；
+- 对外契约冻结（`AGENTS.md` §1.2）：改 `createAgent` / `createProvider` 签名或 `SDKMessage` 结构，
+  必须同步业务层与 `AGENTS.md`；
 - **工具不得改名**（提示词与测试依赖 `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Ls`/`write_page`/`generate_blueprint`）；
   工具行为改动必须补 `test:tools` 断言；
 - 重试只放在 `streamFn` 层且仅在「未产出内容」时触发；不要往 pi Agent 循环里塞重试；
