@@ -49,6 +49,7 @@ import {
   getMetaPath,
   getRunDir,
   getRunsDir,
+  getSessionsRoot,
   isValidRunId,
   listRuns,
   META_FILE_NAME,
@@ -123,6 +124,8 @@ export type AppendRunEvent = {
 
 export class RunLogWriter {
   readonly runId: string;
+  /** pi 会话落盘根目录（`<runDir>/sessions/`）；适配层按它把每个 Agent 的完整会话写进该目录 */
+  readonly sessionsRoot: string;
   private readonly projectRoot: string;
   private seq = 0;
   private chain: Promise<void> = Promise.resolve();
@@ -136,6 +139,7 @@ export class RunLogWriter {
   private constructor(projectRoot: string, runId: string, meta: RunMeta) {
     this.projectRoot = projectRoot;
     this.runId = runId;
+    this.sessionsRoot = getSessionsRoot(runId, projectRoot);
     this.meta = meta;
   }
 

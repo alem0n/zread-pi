@@ -76,6 +76,8 @@ export interface CreateBlueprintAgentOptions {
 export interface RunLogSink {
   /** 本次 Agent 会话的全局唯一标识（同时是 pi 会话的 sessionId） */
   readonly sessionId: string;
+  /** pi 会话落盘根目录（`<runDir>/sessions/`）；适配层据此把完整会话写盘 */
+  readonly sessionRoot: string;
   append(event: AppendRunEvent): void;
 }
 
@@ -345,6 +347,9 @@ export async function createAgent(options: CreateBlueprintAgentOptions): Promise
     // 轨迹回放的 session 归属键（pi 会话 id = sink 的 sessionId；
     // 缺省由适配层生成全局唯一值，仍能正常工作，只是事件里不带 sessionId）
     sessionId: options.runLog?.sessionId,
+    // 会话落盘根目录（`<runDir>/sessions/`）：适配层据此把本次 Agent 的
+    // 完整会话写进 run 目录（缺省 = 内存会话）
+    ...(options.runLog?.sessionRoot !== undefined ? { sessionRoot: options.runLog.sessionRoot } : {}),
     contextWindow: modelContextWindow,
     maxTokens: modelMaxTokens,
     budget: {

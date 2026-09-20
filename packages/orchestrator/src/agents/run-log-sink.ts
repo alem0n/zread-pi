@@ -46,6 +46,9 @@ export function createRunLogSink(
   const identity: RunEventAgentMeta = { ...agent, sessionId };
   return {
     sessionId,
+    // pi 会话落盘根目录（`<runDir>/sessions/`）：传给适配层，
+    // 让本次 Agent 的完整会话写进该目录（方案 C：会话 = 唯一完整事实源）
+    sessionRoot: runLog.sessionsRoot,
     append: (event: AppendRunEvent): void => {
       runLog.append({ ...event, agent: identity });
     },
