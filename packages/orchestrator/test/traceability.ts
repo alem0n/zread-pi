@@ -16,6 +16,7 @@ import {
 	parseSourceRefs,
 	collectKnownSymbols,
 	findUnresolvedSymbols,
+	findUnresolvedDiagramSymbols,
 	collectManifestPaths,
 	isPathReal,
 	countLines,
@@ -247,6 +248,163 @@ console.log("\n▶ G. checkTraceability 符号维度（WARN）");
 		hallucinated.unresolvedSymbols.length === 1 && hallucinated.unresolvedSymbols[0].includes("totallyMadeUp"),
 		JSON.stringify(hallucinated.unresolvedSymbols),
 	);
+}
+
+// ==================== G2. 图表符号 grounding（WARN） ====================
+
+console.log("\n▶ G2. findUnresolvedDiagramSymbols（序列图 / 状态图，WARN）");
+
+{
+	const known = new Set<string>(["AuthGateway", "validateToken", "Idle"]);
+
+	// 序列图：显示名参与比对，别名不参与
+	const seq = [
+		"正文",
+		"",
+		"```mermaid",
+		"sequenceDiagram",
+		'	participant GW as "AuthGateway"',
+		"	GW->>Auth: validateToken",
+		'	Auth-->>GW: 返回结果',
+		"```",
+	].join("\n");
+	const seqUnresolved = findUnresolvedDiagramSymbols(seq, known);
+	check("序列图：已知显示名与消息标签不报", seqUnresolved.length === 0, JSON.stringify(seqUnresolved));
+
+	const seqHallucinated = [
+		"```mermaid",
+		"sequenceDiagram",
+		'	participant GW as "MadeUpService"',
+		"	GW->>Auth: ghostCall",
+		"```",
+	].join("\n");
+	const seqBad = findUnresolvedDiagramSymbols(seqHallucinated, known);
+	check(
+		"序列图：幻觉的显示名 / 消息标签被列出（<=2）",
+		seqBad.length === 2 && seqBad.includes("MadeUpService") && seqBad.includes("ghostCall"),
+		JSON.stringify(seqBad),
+	);
+
+	// 别名不参与比对（别名是图内坐标，不是源码符号）
+	const aliasOnly = [
+		"```mermaid",
+		"sequenceDiagram",
+		'	participant GW as "AuthGateway"',
+		"	GW->>Auth: validateToken",
+		"```",
+	].join("\n");
+	check("别名（GW / Auth）不参与符号比对", !findUnresolvedDiagramSymbols(aliasOnly, known).includes("GW"));
+
+	// 状态图：状态名参与比对
+	const state = [
+		"```mermaid",
+		"stateDiagram-v2",
+		'  state "Engine Idle" as Idle',
+		"  Idle --> Running : 启动",
+		"```",
+	].join("\n");
+	const stateBad = findUnresolvedDiagramSymbols(state, known);
+	check("状态图：未知状态名（Running）被列出", stateBad.length === 1 && stateBad[0] === "Running", JSON.stringify(stateBad));
+	check("状态图：已知状态名（Idle）不报", !stateBad.includes("Idle"));
+
+	// flowchart / 中文标签不产生符号比对噪声
+	const flow = [
+		"```mermaid",
+		"flowchart TB",
+		'  A["核心模块"] --> B["MadeUpThing"]',
+		"```",
+	].join("\n");
+	check("flowchart 节点不参与符号比对（架构节点不是源码符号）", findUnresolvedDiagramSymbols(flow, known).length === 0);
+
+	const cjk = [
+		"```mermaid",
+		"sequenceDiagram",
+		'	participant GW as "网关"',
+		"	GW->>核心: 处理请求",
+		"```",
+	].join("\n");
+	check("中文显示名 / 消息标签不产生符号噪声", findUnresolvedDiagramSymbols(cjk, known).length === 0, JSON.stringify(findUnresolvedDiagramSymbols(cjk, known)));
+
+	// 已知集合为空时整体跳过
+	check("known 为空时返回空", findUnresolvedDiagramSymbols(seq, new Set()).length === 0);
+
+	// 上限保护
+	const many = [
+		"```mermaid",
+		"sequenceDiagram",
+		...Array.from({ length: 60 }, (_, i) => `\tA->>B: msg${i}`),
+		"```",
+	].join("\n");
+	check("上报数量有上限（24）", findUnresolvedDiagramSymbols(many, new Set(["msg0"]), 24).length === 24);
+}
+
+// ==================== G3. checkTraceability 图表符号维度 ====================
+
+console.log("\n▶ G3. checkTraceability 图表符号维度（WARN，并入 unresolvedSymbols）");
+
+{
+	const page: WikiPage = { slug: "diag", title: "Diag", section: "s", file: "diag.md" };
+	await writeFile(join(repo, "src", "a.ts"), "export const foo = 1;\n", "utf-8");
+	const symbols: SymbolManifest = {
+		symbols: [{ file: "src/a.ts", exports: ["foo"], functions: [], imports: [], docstrings: [] }],
+		loadedParsers: ["typescript"],
+	};
+
+	const clean = await checkTraceability({
+		root: repo,
+		pages: [page],
+		contents: new Map([
+			[
+				page.slug,
+				[
+					"正文引用 `foo`",
+					"",
+					"```mermaid",
+					"sequenceDiagram",
+					'	participant GW as "foo"',
+					"	GW->>Auth: foo",
+					"```",
+					"",
+					"Sources: [a](src/a.ts)",
+				].join("\n"),
+			],
+		]),
+		manifest: null,
+		symbols,
+	});
+	check("图表符号全部可溯 → unresolvedSymbols 为空", clean.unresolvedSymbols.length === 0, JSON.stringify(clean.unresolvedSymbols));
+
+	const hallucinated = await checkTraceability({
+		root: repo,
+		pages: [page],
+		contents: new Map([
+			[
+				page.slug,
+				[
+					"正文引用 `foo`",
+					"",
+					"```mermaid",
+					"stateDiagram-v2",
+					"  [*] --> Idle",
+					"  Idle --> Running : 启动",
+					"```",
+					"",
+					"Sources: [a](src/a.ts)",
+				].join("\n"),
+			],
+		]),
+		manifest: null,
+		symbols,
+	});
+	check(
+		"状态图幻觉符号被并入 unresolvedSymbols（带页面 slug）",
+		hallucinated.unresolvedSymbols.length === 2 &&
+			hallucinated.unresolvedSymbols.every((entry) => entry.startsWith("diag：")) &&
+			hallucinated.unresolvedSymbols.some((entry) => entry.includes("Idle")) &&
+			hallucinated.unresolvedSymbols.some((entry) => entry.includes("Running")),
+		JSON.stringify(hallucinated.unresolvedSymbols),
+	);
+	check("图表符号缺失仍是 WARN（不影响 badPaths / badLines 为空）", hallucinated.badPaths.length === 0 && hallucinated.badLines.length === 0);
 }
 
 // ==================== H. 外链 / 锚点排除 ====================

@@ -368,12 +368,12 @@ async function verifyTraceability(
   if (result.symbolsUnavailable) {
     report.emit('SKIP', 'traceability', '符号缓存缺失（未扫描源码），跳过符号溯源校验');
   } else if (result.unresolvedSymbols.length === 0) {
-    report.emit('PASS', 'traceability', '正文引用的标识符在符号缓存里全部存在');
+    report.emit('PASS', 'traceability', '正文行内代码与图表符号（参与者 / 消息标签 / 状态名）在符号缓存里全部存在');
   } else {
     report.emit(
       'PASS',
       'traceability',
-      `${result.unresolvedSymbols.length} 个行内代码标识符未在符号缓存中找到（WARN，供人工确认）`,
+      `${result.unresolvedSymbols.length} 个标识符（行内代码 / 图表符号）未在符号缓存中找到（WARN，供人工确认）`,
       result.unresolvedSymbols.slice(0, 12),
     );
   }

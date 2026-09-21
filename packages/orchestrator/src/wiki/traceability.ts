@@ -24,6 +24,7 @@ import { existsSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CacheManifest, SymbolManifest, WikiPage } from '@zread-pi/types';
+import { detectMermaidSyntax } from './mermaid-syntax.js';
 
 // ==================== Sources 解析 ====================
 
@@ -82,6 +83,8 @@ export function parseSourceRefs(markdown: string, pageSlug: string): SourceRef[]
 const FENCE_BLOCK_RE = /^```[\s\S]*?^```/gm;
 const INLINE_CODE_RE = /`([^`\n]+)`/g;
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]{2,}$/;
+/** 标识符扫描（消息标签 / 显示名是短语，取其中所有 >=3 字符的标识符片段） */
+const IDENTIFIER_SCAN_RE = /[A-Za-z_$][A-Za-z0-9_$]{2,}/g;
 
 /**
  * 从符号缓存构造「已知符号名」集合：exports / functions / imports。
@@ -133,6 +136,117 @@ export function findUnresolvedSymbols(
 		if (unresolved.length >= maxReported) break;
 	}
 	return unresolved;
+}
+
+// ==================== 图表符号 grounding（WARN） ====================
+
+/** mermaid 围栏块（取四类图的参与者 / 消息标签 / 状态名做符号比对） */
+const MERMAID_FENCE_RE = /^```[ \t]*mermaid[^\n]*\n([\s\S]*?)^```[ \t]*$/gim;
+
+/** 参与者显示名：`participant A as <显示名>`（别名是图内坐标，不参与比对） */
+const SEQ_DISPLAY_NAME_RE = /^\s*(?:participant|actor)\s+[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff-]*\s+as\s+(.+)$/i;
+/** state "标签" as ID */
+const STATE_LABELED_ID_RE = /^\s*state\s+(?:"[^"]*"|'[^']*')\s+as\s+([A-Za-z_]\w*)/i;
+/** state ID（无标签形态） */
+const STATE_BARE_ID_RE = /^\s*state\s+([A-Za-z_]\w*)\s*$/i;
+/** 迁移端点：<from> --> <to>（[*] 是起止标记，不是源码符号） */
+const STATE_TRANSITION_RE = /^\s*([A-Za-z_]\w*)\s*-->\s*([A-Za-z_]\w*)/;
+
+/** 去掉显示名两侧的引号 */
+function unquote(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * 从一个 mermaid 块里提取待比对的符号候选。
+ *
+ * 只提取**可能指名道姓引用源码符号**的部分（设计依据：脚本决定源里有什么）：
+ * - sequence：`participant A as "AuthGateway"` 的**显示名**（别名是图内坐标，
+ *   不是源码符号，不参与比对）与消息箭头后的**消息标签**；
+ * - state：状态 id（`state "标签" as Id` / `state Id` / 迁移端点）；
+ * - flowchart / 未知图种：不提取（架构 / 流程图的节点是目录 / 模块 / 步骤，
+ *   不是可对账的源码符号——它们的 grounding 由 diagram-guide 的「画前必须读过」纪律承担）。
+ *
+ * 中文标签 / 显示名不含标识符片段，自然被 IDENTIFIER_SCAN_RE 过滤，不产生噪声。
+ */
+function extractDiagramSymbols(code: string): string[] {
+  const syntax = detectMermaidSyntax(code);
+  if (syntax === 'unknown') return [];
+
+  const candidates: string[] = [];
+  for (const raw of code.split('\n')) {
+    const line = raw.trim();
+    if (line.length === 0 || line.startsWith('%%')) continue;
+
+    if (syntax === 'sequence') {
+      const asMatch = SEQ_DISPLAY_NAME_RE.exec(line);
+      if (asMatch) {
+        candidates.push(unquote(asMatch[1]));
+        continue;
+      }
+      // 消息标签：冒号之后的部分（可能含标识符，如 validateToken()）
+      const colonIndex = line.indexOf(':');
+      if (colonIndex !== -1) candidates.push(line.slice(colonIndex + 1));
+      continue;
+    }
+
+    // state
+    const labeledId = STATE_LABELED_ID_RE.exec(line);
+    if (labeledId) {
+      candidates.push(labeledId[1]);
+      continue;
+    }
+    const bareId = STATE_BARE_ID_RE.exec(line);
+    if (bareId) {
+      candidates.push(bareId[1]);
+      continue;
+    }
+    const transition = STATE_TRANSITION_RE.exec(line);
+    if (transition) {
+      candidates.push(transition[1]);
+      candidates.push(transition[2]);
+    }
+  }
+  return candidates;
+}
+
+/**
+ * 找出图表里指名道姓引用、但符号缓存里不存在的标识符（WARN）。
+ *
+ * 与正文行内代码的 `findUnresolvedSymbols` 同语义、同上限，结果由调用方
+ * 并入 `unresolvedSymbols`（**只 WARN，不升级 FAIL**：未命中可能是符号缓存
+ * 过期、或引用的是别处命名，与「调用链完整」的机械边界一致）。
+ */
+export function findUnresolvedDiagramSymbols(
+  markdown: string,
+  known: Set<string>,
+  maxReported = 24,
+): string[] {
+  if (known.size === 0) return [];
+
+  const unresolved: string[] = [];
+  const seen = new Set<string>();
+
+  MERMAID_FENCE_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = MERMAID_FENCE_RE.exec(markdown)) !== null) {
+    for (const candidate of extractDiagramSymbols(match[1])) {
+      IDENTIFIER_SCAN_RE.lastIndex = 0;
+      let tokenMatch: RegExpExecArray | null;
+      while ((tokenMatch = IDENTIFIER_SCAN_RE.exec(candidate)) !== null) {
+        const token = tokenMatch[0];
+        if (known.has(token) || seen.has(token)) continue;
+        seen.add(token);
+        unresolved.push(token);
+        if (unresolved.length >= maxReported) return unresolved;
+      }
+    }
+  }
+  return unresolved;
 }
 
 // ==================== 路径 / 行号 ====================
@@ -279,13 +393,19 @@ export async function checkTraceability(input: TraceabilityInput): Promise<Trace
 		seen.set(key, [...owners, ref.pageSlug]);
 	}
 
-	// 4. 符号可溯（WARN）：符号缓存缺失时无法执行，调用方 SKIP
+	// 4. 符号可溯（WARN）：符号缓存缺失时无法执行，调用方 SKIP。
+	//    正文行内代码与图表（序列图参与者显示名 / 消息标签 / 状态图状态名）共用同一台账，
+	//    未命中一律 WARN，不升级 FAIL。
 	const symbolsUnavailable = knownSymbols.size === 0;
 	const unresolvedSymbols: string[] = [];
 	if (!symbolsUnavailable) {
 		for (const page of pages) {
-			const bad = findUnresolvedSymbols(contents.get(page.slug) ?? '', knownSymbols);
-			for (const name of bad) unresolvedSymbols.push(`${page.slug}：\`${name}\``);
+			const content = contents.get(page.slug) ?? '';
+			const badInline = findUnresolvedSymbols(content, knownSymbols);
+			const badDiagram = findUnresolvedDiagramSymbols(content, knownSymbols);
+			for (const name of [...badInline, ...badDiagram]) {
+				unresolvedSymbols.push(`${page.slug}：\`${name}\``);
+			}
 		}
 	}
 
