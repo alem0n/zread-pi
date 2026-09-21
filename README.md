@@ -41,7 +41,7 @@
 - **五档蓝图细节（`blueprint.detail`）** —— 从 `minimal`（1 个分类 · 1 篇全景导览，必须 Mermaid 架构图，适合快速了解）到 `max`（每分类 5~12 篇、深挖关联文件），默认 `high` 与旧行为一致；数量越界先由模型按归并 / 补充策略重提，仍不收敛则由缩编 Agent 或代码确定性兜底，生成永不悬挂。
 - **多档共存 + 浏览切换** —— 每个档位的完整产物独立存放（`wiki/<档位>/`，互不覆盖）；浏览站侧边栏底部提供上拉档位选择器（显示各档位篇数，当前高亮），切换时同 slug 页面保留、否则落到新档位首页。旧的无档位产物以「默认」条目只读兼容。
 - **仓库自述注入** —— 目标仓库若有 `AGENTS.md` / `CLAUDE.md`（含大小写变体与全局 `~/.zread-pi`），会把里面的架构说明与约定注入页面 Agent 的系统提示，让生成的 Wiki 与仓库自述保持一致。
-- **文风纪律（humanizer）+ 读者优先（reader-first）** —— 按文档语言注入两套正交的写作纪律：humanizer 管「像人写的」（反 AI 腔，基于 Wikipedia "Signs of AI Writing"），reader-first 管「教会了读者」（教学型结构化自检）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，frontmatter / `Sources:` 溯源行 / Mermaid 代码块全程受「只许改散文」的 diff 断言保护，润色失败不会让页面失败。
+- **文风纪律（humanizer）+ 读者优先（reader-first）+ 图表纪律（diagram-guide）** —— 按文档语言注入三套正交的写作纪律：humanizer 管「像人写的」（反 AI 腔，基于 Wikipedia "Signs of AI Writing"），reader-first 管「教会了读者」（教学型结构化自检），diagram-guide 管「该画哪类图」（架构 / 流程 / 序列 / 状态四类的选型决策表 + grounding 要求 + 题注格式）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，frontmatter / `Sources:` 溯源行 / Mermaid 代码块全程受「只许改散文」的 diff 断言保护，润色失败不会让页面失败。
 - **符号级增量缓存** —— 基于 AST hash；未变更的符号跨运行直接跳过，Wiki 同步只重新生成源码确实变过的页面。
 - **并行页面 Agent** —— `p-limit` 调度扇出，并发可配置；每个 Agent 只拥有一个 Wiki 页面，只读它需要的真实代码。
 - **图片读取管线** —— `Read` 读图片时自动缩放到 2000×2000 / 4.5MB 以内（省 token、避免被 provider 拒收），BMP 等非内联格式自动转 PNG，并给出坐标换算提示。
@@ -53,7 +53,7 @@
 - **Provider 无关** —— 统一抽象 Anthropic Messages 与 OpenAI Chat Completions 协议；在 TUI 里选 Provider、贴 API Key、
   挑模型，三步完成，可同时配置多个 Provider。
 - **两层重试，尊重服务端语义** —— Agent 层指数退避（60s 封顶）只在「未产出内容」时重试，失败尝试不污染会话记录；Provider 层读取服务端 `Retry-After` 并按上限封顶，429 高峰期不会重试过早。
-- **本地 Web 阅读器** —— `zread-pi browse` 启动 React 19 + Vite 预览站：侧边导航、Mermaid 图表渲染（支持放大查看）。
+- **本地 Web 阅读器** —— `zread-pi browse` 启动 React 19 + Vite 预览站：侧边导航、Mermaid 图表渲染（支持放大查看）；每张图上方的题注按图类型（架构 / 流程 / 序列 / 状态）显示彩色类型徽标。
 - **Wiki 同步，而不是 Wiki 覆盖** —— diff 感知的再生成：页面被标记为 `new` / `updated` / `unchanged` / `archived`，
   像审代码 diff 一样审文档变更。
 - **全局记忆** —— 生成过的项目自动记录（`zread-pi history` 一键清理失效项），老项目打开即自动补录；配置 / 凭据 / 记忆的跨进程写入都有文件锁保护。
@@ -104,7 +104,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
 | `zread-pi logview [runId]`| 启动轨迹（Trajectory）检查视图 —— 在浏览器回放本次 / 历次运行的完整事件流；runId 缺省 = 最近一次运行 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
-| `zread-pi verify [--detail <档位>] [--enforce]` | 交付闸门：逐条输出 `PASS`/`FAIL`/`SKIP`（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），末尾 `OVERALL PASS`/`FAIL`，退出码随之；溯源含路径真实、行号有效、行内代码符号可溯（WARN）与蓝图 `associatedFiles` 存在性；`--enforce` 才把内容密度门未达标计为失败，否则只列出 |
+| `zread-pi verify [--detail <档位>] [--enforce]` | 交付闸门：逐条输出 `PASS`/`FAIL`/`SKIP`（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），末尾 `OVERALL PASS`/`FAIL`，退出码随之；溯源含路径真实、行号有效、行内代码与图表符号（序列图参与者 / 消息标签 / 状态图状态名）可溯（WARN）与蓝图 `associatedFiles` 存在性；`--enforce` 才把内容密度门未达标计为失败，否则只列出 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
 
 所有子命令均支持 `-d / --dir <path>` 指定目标仓库（不用切 shell 目录）。

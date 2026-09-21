@@ -99,6 +99,38 @@ export function stubElementLayout(dimensions: { width?: number; height?: number 
 
 stubElementLayout({ width: 800, height: 600 });
 
+/**
+ * happy-dom 的 SVGElement.getBBox 同样恒返回 0x0（不做任何文本布局），而
+ * mermaid 的 sequence / state 在排版前要用它量文本宽度，0x0 会抛
+ * "svg element not in render tree"。按字符数给一个合理尺寸，让这两类图在
+ * 测试环境也能真正渲染（真实浏览器无需此补丁）。
+ *
+ * **已知边界**：dagre 的**边标签**几何求解（`-->|标签|` / `A --> B : 标签`）
+ * 需要精确的文本包围盒，粗略桩过不了「Could not find a suitable point for the
+ * given distance」；flowchart 与 state 的边标签在 happy-dom 下都渲染不出来，
+ * 与 dagre 布局锁定无关。带边标签的图只做结构性路由断言，不做渲染断言。
+ */
+const SVG_TEXT_PROTO = Object.getPrototypeOf(
+  document.createElementNS('http://www.w3.org/2000/svg', 'text'),
+) as SVGTextElement;
+SVG_TEXT_PROTO.getBBox = function getBBox(): DOMRect {
+  const chars = (this.textContent ?? '').length;
+  const width = Math.max(chars * 8, 4);
+  return {
+    x: 0,
+    y: -16,
+    width,
+    height: 16,
+    top: -16,
+    right: width,
+    bottom: 0,
+    left: 0,
+    toJSON(): unknown {
+      return this;
+    },
+  };
+};
+
 // 全局 DOM 就位之后才能导入会缓存 document 的模块
 const { expect, afterEach } = await import('bun:test');
 const matchers = await import('@testing-library/jest-dom/matchers');

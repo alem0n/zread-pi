@@ -32,6 +32,12 @@
 ## Mermaid diagrams
 
 - You **must** use Mermaid (\`\`\`mermaid) for the architecture or module-dependency diagram.
+- **Which** kind of diagram to draw (architecture / flow / sequence / state), what to read
+  before drawing, and how to caption it are defined by the diagram discipline block
+  (diagram_guide) and its decision table — this file only holds the format contract.
+- Every mermaid block needs a caption on the line above its fence
+  (`**Figure｜<type word>｜<title>**`); the exact format and the allowed type words are
+  defined in the diagram discipline block (diagram_guide).
 - Mermaid flowchart node labels must use quoted labels: `A["Node text"]`. Whenever a label
   contains parentheses, HTML line breaks (`<br/>`), pipes, braces, paths, symbols, or mixed
   CJK/Latin text, never write the bare form `A[Node text]` — always `A["Node text"]`.

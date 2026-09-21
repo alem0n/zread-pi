@@ -52,7 +52,7 @@ const pageContent = (slug: string): string => {
 		case "1-good":
 			return `# 润色页\n\n${originalProse}`;
 		case "2-mermaid":
-			return `# 图表页\n\n${mermaidFence}\n\n正文。`;
+			return `# 图表页\n\n**图｜架构图｜图表页的模块关系**：核心模块与依赖\n\n${mermaidFence}\n\n正文。`;
 		case "3-nochange":
 			return "# 无改动页\n\n正文。";
 		case "4-fail":

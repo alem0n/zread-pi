@@ -258,6 +258,38 @@ body {
   height: auto;
 }
 
+/* 图题注（L2）：正文里 **图｜<类型词>｜<标题>** 那一行。左侧色条按图类型着色，
+   不新增 DOM 状态——徽标纯由该段文本的类型词派生（与生成期题注校验同口径）。 */
+.diagram-caption {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #5f5f5a;
+}
+
+.diagram-caption::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 0.95em;
+  margin-right: 8px;
+  border-radius: 2px;
+  vertical-align: -0.12em;
+  background: #097fe8;
+}
+
+.diagram-caption--flowchart::before {
+  background: #097fe8;
+}
+
+.diagram-caption--sequence::before {
+  background: #7c3aed;
+}
+
+.diagram-caption--state::before {
+  background: #047857;
+}
+
 .mermaid-preview-overlay,
 .mermaid-preview-content {
   position: fixed;

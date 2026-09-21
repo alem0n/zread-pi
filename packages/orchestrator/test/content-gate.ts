@@ -135,6 +135,53 @@ console.log('\nA) 指标提取');
   check('正常层级（## → ###）不跳级', JSON.stringify(m.headingLevels) === JSON.stringify([2, 3]));
 }
 
+// 四类语法的分类型计数（L5：mermaidBlocks = flowchart + sequence + state + 其他图种）
+{
+  const content = fullPage([
+    '## 架构与流程',
+    '',
+    '**图｜架构图｜模块关系**：分层依赖',
+    '',
+    '```mermaid',
+    'flowchart TB',
+    '  A["核心"] --> B["依赖"]',
+    '```',
+    '',
+    '**图｜流程图｜处理流程**：开始到完成',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '  Start["开始"] --> Done["完成"]',
+    '```',
+    '',
+    '**图｜序列图｜调用时序**：入口 → 核心',
+    '',
+    '```mermaid',
+    'sequenceDiagram',
+    '  participant Entry as "入口"',
+    '  Entry->>Core: 请求',
+    '```',
+    '',
+    '**图｜状态图｜生命周期**：空闲 → 运行',
+    '',
+    '```mermaid',
+    'stateDiagram-v2',
+    '  [*] --> Idle',
+    '  Idle --> [*] : 完成',
+    '```',
+    '',
+    '```mermaid',
+    'erDiagram',
+    '  A ||--o{ B : has',
+    '```',
+  ].join('\n'));
+  const m = extractGateMetrics(content);
+  check('flowchartBlocks=2（架构图与流程图同语法，合并计数）', m.flowchartBlocks === 2, JSON.stringify([m.flowchartBlocks, m.sequenceBlocks, m.stateBlocks]));
+  check('sequenceBlocks=1', m.sequenceBlocks === 1, String(m.sequenceBlocks));
+  check('stateBlocks=1', m.stateBlocks === 1, String(m.stateBlocks));
+  check('mermaidBlocks 保留为全部图种之和（含 erDiagram）', m.mermaidBlocks === 5 && m.mermaidBlocks === m.flowchartBlocks + m.sequenceBlocks + m.stateBlocks + 1, String(m.mermaidBlocks));
+}
+
 // 句首重复检测
 {
   const paragraphs = ['首先我们看 A。', '其次我们看 B。', '然后我们看 C。'].join('\n\n');
@@ -272,6 +319,53 @@ console.log('\nC) 评估 / 反馈');
 }
 
 {
+  // 语义收紧：概览页有序列图但没有 flowchart → 仍判缺架构图
+  // （架构图属于 flowchart 语法，序列图 / 状态图不能替代）
+  const page = makePage({ section: '概览' });
+  const seqOnly = fullPage([
+    '## 调用链',
+    '',
+    '**图｜序列图｜调用链**：入口 → 核心',
+    '',
+    '```mermaid',
+    'sequenceDiagram',
+    '  Entry->>Core: 请求',
+    '```',
+    '',
+    prose(2500),
+    '',
+    'Sources: [a.ts](src/a.ts)',
+  ].join('\n'));
+  const report = evaluateContentGate(seqOnly, page, getDetailSpec('high'));
+  check(
+    '概览页只有序列图（无 flowchart）仍判缺架构图',
+    report.failures.some((f) => f.includes('架构图')),
+    JSON.stringify(report.failures),
+  );
+}
+
+{
+  // 概览页有 flowchart → 不缺架构图
+  const page = makePage({ section: '概览' });
+  const withFc = fullPage([
+    '## 架构',
+    '',
+    '**图｜架构图｜模块关系**：核心与依赖',
+    '',
+    '```mermaid',
+    'flowchart TB',
+    '  A["核心"] --> B["依赖"]',
+    '```',
+    '',
+    prose(2500),
+    '',
+    'Sources: [a.ts](src/a.ts)',
+  ].join('\n'));
+  const report = evaluateContentGate(withFc, page, getDetailSpec('high'));
+  check('概览页有 flowchart 不判缺架构图', !report.failures.some((f) => f.includes('架构图')), JSON.stringify(report.failures));
+}
+
+{
   // 标题跳级判失败
   const page = makePage({ section: '工具函数' });
   const skip = fullPage(['# H1', '', prose(2500), '', '### H3', '', 'Sources: [a.ts](src/a.ts)'].join('\n'));
@@ -315,6 +409,43 @@ console.log('\nE) 反注水');
   const noCode = fullPage(['## 结构', '', prose(1500), '', 'Sources: [a.ts](src/a.ts)'].join('\n'));
   const report = evaluateContentGate(noCode, page, getDetailSpec('high'));
   check('Beginner 页面无代码块不判失败', !report.failures.some((f) => f.includes('代码片段')));
+}
+
+{
+  // 跨模块调用链建议（软性）：关联文件跨两级目录但无序列图 → advisories 提示
+  const page = makePage({
+    section: '工具函数',
+    associatedFiles: ['packages/core/src/a.ts', 'packages/cli/src/b.ts'],
+  });
+  const noSeq = fullPage(['## 结构', '', prose(2500), '', 'Sources: [a.ts](src/a.ts)'].join('\n'));
+  const report = evaluateContentGate(noSeq, page, getDetailSpec('high'));
+  check('跨目录关联但无序列图 → advisories 建议补序列图', report.advisories.some((a) => a.includes('序列图')), JSON.stringify(report.advisories));
+  check('建议项不影响 passed（反注水：只是建议）', !report.failures.some((f) => f.includes('序列图')));
+}
+
+{
+  // 同一目录下的关联文件不触发序列图建议
+  const page = makePage({ section: '工具函数', associatedFiles: ['src/a.ts', 'src/b.ts'] });
+  const noSeq = fullPage(['## 结构', '', prose(2500), '', 'Sources: [a.ts](src/a.ts)'].join('\n'));
+  const report = evaluateContentGate(noSeq, page, getDetailSpec('high'));
+  check('单目录关联不触发序列图建议', !report.advisories.some((a) => a.includes('序列图')), JSON.stringify(report.advisories));
+}
+
+{
+  // 主题摘要提到调用链 → 建议补序列图（仍不判失败）
+  const page: WikiPage = {
+    slug: 'p1',
+    title: '测试页',
+    file: 'p1.md',
+    section: '工具函数',
+    level: 'Intermediate',
+    associatedFiles: ['src/a.ts'],
+    topicSummary: '讲解网关到鉴权服务的调用链与请求时序',
+  };
+  const noSeq = fullPage(['## 结构', '', prose(2500), '', 'Sources: [a.ts](src/a.ts)'].join('\n'));
+  const report = evaluateContentGate(noSeq, page, getDetailSpec('high'));
+  check('主题摘要含「调用链」→ 建议补序列图', report.advisories.some((a) => a.includes('序列图')));
+  check('主题摘要建议不升级为失败', !report.failures.some((f) => f.includes('序列图')));
 }
 
 // ===========================================================================

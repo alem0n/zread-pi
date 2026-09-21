@@ -27,6 +27,12 @@ import {
 	READER_SELF_CHECK,
 } from "../src/agents/reader-first.js";
 import {
+	getDiagramGuide,
+	formatDiagramGuide,
+	withDiagramGuide,
+	DIAGRAM_GUIDE_TAG,
+} from "../src/agents/diagram-guide.js";
+import {
 	getStyleDiscipline,
 	formatStyleDiscipline,
 	STYLE_DISCIPLINE_TAG,
@@ -91,6 +97,43 @@ console.log("\n▶ A. zh / en 资产条数与编号一一对应");
 		ren.includes("interface signature") && ren.includes("callers") && ren.includes("failure mode"));
 }
 
+// ==================== A2. diagram-guide 双语同步 ====================
+
+console.log("\n▶ A2. diagram-guide 两语言条数与编号一一对应");
+
+{
+	const zh = getDiagramGuide("zh");
+	const en = getDiagramGuide("en");
+	const zhSections = (zh.match(/^## /gm) ?? []).length;
+	const enSections = (en.match(/^## /gm) ?? []).length;
+	check("diagram-guide 两语言节数一致", zhSections === enSections, `${zhSections}/${enSections}`);
+
+	// 选型决策表行数一致（表格数据行 = 以 | 开头且不是分隔线的行）
+	const tableRows = (text: string): number =>
+		(text.match(/^\|.*\|$/gm) ?? []).filter((row) => !/^\|[\s|-]+\|$/.test(row)).length;
+	// 选型决策表区域：从「决策表」到「grounding」之间
+	const zhDecision = zh.slice(zh.indexOf("决策表"), zh.indexOf("grounding"));
+	const enDecision = en.slice(en.toLowerCase().indexOf("decision table"), en.toLowerCase().indexOf("grounding"));
+	check("选型决策表数据行数一致（含表头 6 行：四类 + 都不涉及）", tableRows(zhDecision) === tableRows(enDecision) && tableRows(zhDecision) === 6, `${tableRows(zhDecision)}/${tableRows(enDecision)}`);
+
+	// grounding 要求表区域：从「grounding」到文末
+	const zhGrounding = zh.slice(zh.indexOf("grounding"));
+	const enGrounding = en.slice(en.toLowerCase().indexOf("grounding"));
+	check("grounding 要求表行数一致（含表头 5 行：4 类图）", tableRows(zhGrounding) === tableRows(enGrounding) && tableRows(zhGrounding) === 5, `${tableRows(zhGrounding)}/${tableRows(enGrounding)}`);
+
+	// 四类图 + 类型词在两语言都出现
+	check("zh 含四类图类型词", ["架构图", "流程图", "序列图", "状态图"].every((w) => zh.includes(w)));
+	check("en 含四类图类型词", ["Architecture Diagram", "Flow Diagram", "Sequence Diagram", "State Diagram"].every((w) => en.includes(w)));
+
+	// 题注格式两语言都载明
+	check("zh 题注格式（**图｜<类型词>｜<标题>**）", zh.includes("**图｜<类型词>｜<一句话标题>**"));
+	check("en 题注格式（**Figure｜<type word>｜<title>**）", en.includes("**Figure｜<type word>｜<one-line title>**"));
+
+	// 选型纪律只出现在 diagram-guide，page-format 不重复规定选型
+	check("page-format 不再规定选型（指向 diagram_guide）", !getPageFormat("zh").includes("序列图") && getPageFormat("zh").includes("diagram_guide"));
+	check("page-format en 同样指向 diagram_guide", getPageFormat("en").includes("diagram_guide"));
+}
+
 // ==================== B. 语言选择与回退 ====================
 
 console.log("\n▶ B. 语言选择（en 之外一律中文）");
@@ -113,6 +156,9 @@ console.log("\n▶ C. 注入块标签与开关语义");
 {
 	const fmt = formatPageFormat("zh");
 	check("formatPageFormat 含 <page_format> 包裹", fmt.includes(`<${PAGE_FORMAT_TAG}>`) && fmt.includes(`</${PAGE_FORMAT_TAG}>`));
+
+	const dg = formatDiagramGuide("zh");
+	check("formatDiagramGuide 含 <diagram_guide> 包裹", dg.includes(`<${DIAGRAM_GUIDE_TAG}>`) && dg.includes(`</${DIAGRAM_GUIDE_TAG}>`));
 
 	const rd = formatReaderDiscipline("zh");
 	check("formatReaderDiscipline 含 <reader_first> 包裹", rd.includes(`<${READER_FIRST_TAG}>`) && rd.includes(`</${READER_FIRST_TAG}>`));
@@ -142,6 +188,12 @@ console.log("\n▶ E. buildPagePrompt 含格式契约且保留既有段落");
 {
 	const prompt = buildPagePrompt(page, getDetailSpec("high"), "high", "zh");
 	check("含格式契约块", prompt.includes(`<${PAGE_FORMAT_TAG}>`));
+	check("含图表纪律块", prompt.includes(`<${DIAGRAM_GUIDE_TAG}>`));
+	// 用「换行 + 开标签」定位真实注入块（page-format 里的纯文本指针不带尖括号，不会混入）
+	const guideBlockOpen = `\n<${DIAGRAM_GUIDE_TAG}>\n`;
+	check("图表纪律块在格式契约块之后", prompt.indexOf(guideBlockOpen) > prompt.indexOf(`</${PAGE_FORMAT_TAG}>`));
+	check("图表纪律块只注入一次", (prompt.match(new RegExp(guideBlockOpen.replace(/[<>]/g, "\\$&"), "g")) ?? []).length === 1);
+	check("图表纪律块在任务元数据之前", prompt.indexOf(`<${DIAGRAM_GUIDE_TAG}>`) < prompt.indexOf("当前页面任务"));
 	check("含 frontmatter 规则", prompt.includes("frontmatter"));
 	check("含交付前自检清单", prompt.includes("自检清单"));
 	check("保留「绝对纪律：精准溯源」指向段", prompt.includes("精准溯源"));
@@ -155,6 +207,7 @@ console.log("\n▶ E. buildPagePrompt 含格式契约且保留既有段落");
 
 	const enPrompt = buildPagePrompt(page, getDetailSpec("high"), "high", "en");
 	check("en 语言选英文格式契约", enPrompt.includes("Page format contract") && enPrompt.includes("Pre-delivery checklist"));
+	check("en 语言选英文图表纪律", enPrompt.includes("Diagram selection and caption discipline"));
 	check("格式契约块只注入一次（无重复）", (enPrompt.match(new RegExp(`<${PAGE_FORMAT_TAG}>`, "g")) ?? []).length === 1);
 }
 

@@ -69,6 +69,45 @@ function isCodeFileLink(href: string): boolean {
   return ext ? CODE_EXTENSIONS.includes(ext) : false;
 }
 
+// ==================== 图题注（L2 题注层的渲染端） ====================
+
+/**
+ * 题注类型词 → 语法类别（徽标配色用）。与 page-tools 的 CAPTION_TYPE_WORDS
+ * 同口径：架构 / 流程同为 flowchart，序列 / 状态各自一类。
+ */
+const CAPTION_RE = /^\s*(?:图|Figure)\s*[｜|]\s*(架构图|流程图|序列图|时序图|状态图|Architecture Diagram|Flow Diagram|Flowchart|Sequence Diagram|State Diagram)/i;
+const CAPTION_SYNTAX: Readonly<Record<string, string>> = {
+  '架构图': 'flowchart',
+  '流程图': 'flowchart',
+  '序列图': 'sequence',
+  '时序图': 'sequence',
+  '状态图': 'state',
+  'architecture diagram': 'flowchart',
+  'flow diagram': 'flowchart',
+  'flowchart': 'flowchart',
+  'sequence diagram': 'sequence',
+  'state diagram': 'state',
+};
+
+/** 提取 React 子节点的纯文本（题注判定用；不加 DOM 状态，纯渲染期计算） */
+function nodeText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return nodeText((node as React.ReactElement<{ children?: React.ReactNode }>).props.children);
+  }
+  return '';
+}
+
+/** 题注段 → 语法类别（供徽标 class）；非题注返回 null */
+function diagramCaptionSyntax(children: React.ReactNode): string | null {
+  const match = CAPTION_RE.exec(nodeText(children));
+  if (!match) return null;
+  return CAPTION_SYNTAX[match[1].toLowerCase()] ?? null;
+}
+
 // 移除 Markdown frontmatter (元数据)
 function removeFrontmatter(content: string): string {
   // 匹配 --- 开头的 YAML frontmatter
@@ -339,9 +378,21 @@ export function MarkdownRenderer({
               {children}
             </HeadingWrapper>
           ),
-          p: ({ children }) => (
-            <p className="text-gray-700 leading-relaxed mb-4">{children}</p>
-          ),
+          p: ({ children }) => {
+            // 图题注：**图｜<类型词>｜<标题>** → 类型徽标（复用题注渲染，不加新 DOM 状态）
+            const syntax = diagramCaptionSyntax(children);
+            return (
+              <p
+                className={
+                  syntax
+                    ? `diagram-caption diagram-caption--${syntax}`
+                    : 'text-gray-700 leading-relaxed mb-4'
+                }
+              >
+                {children}
+              </p>
+            );
+          },
           ul: ({ children }) => (
             <ul className="list-disc list-outside text-gray-700 mb-4 space-y-2 pl-5">
               {children}
