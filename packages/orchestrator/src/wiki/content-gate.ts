@@ -18,6 +18,7 @@
  */
 
 import type { BlueprintDetailSpec } from '../agents/blueprint-detail.js';
+import { detectMermaidSyntax } from './mermaid-syntax.js';
 import type { ContentGateMode, WikiLevel, WikiPage } from '@zread-pi/types';
 
 // ==================== 指标 ====================
@@ -30,8 +31,14 @@ export interface ContentGateMetrics {
   headings: number;
   /** 出现过的标题层级（顺序，用于跳级检测） */
   headingLevels: number[];
-  /** Mermaid 围栏块数 */
+  /** Mermaid 围栏块数（全部图种；= flowchart + sequence + state + 其他图种） */
   mermaidBlocks: number;
+  /** 架构 / 流程图块数（`flowchart` / `graph` 语法；架构与流程同语法，合并计数） */
+  flowchartBlocks: number;
+  /** 序列图块数（`sequenceDiagram` 语法） */
+  sequenceBlocks: number;
+  /** 状态图块数（`stateDiagram` / `stateDiagram-v2` 语法） */
+  stateBlocks: number;
   /** 代码块数（不含 Mermaid） */
   codeBlocks: number;
   /** `Sources:` 溯源行数 */
@@ -162,12 +169,19 @@ export function extractGateMetrics(fullContent: string): ContentGateMetrics {
     headings: 0,
     headingLevels: [],
     mermaidBlocks: 0,
+    flowchartBlocks: 0,
+    sequenceBlocks: 0,
+    stateBlocks: 0,
     codeBlocks: 0,
     sourceNotes: 0,
     repeatOpenings: 0,
   };
 
   let inFence = false;
+  // 当前围栏是否为 mermaid（代码块与 mermaid 均以 ``` 开头，需区分计数）
+  let fenceIsMermaid = false;
+  // mermaid 图类型由围栏内首个有意义的行决定，扫描到它为止
+  let mermaidHeaderPending = false;
   // 散文段落缓冲（连续的非剥离行成段），用于重复句首检测
   const paragraphs: string[] = [];
   let pending: string[] = [];
@@ -185,14 +199,44 @@ export function extractGateMetrics(fullContent: string): ContentGateMetrics {
       if (!inFence) {
         inFence = true;
         flushParagraph();
-        if (MERMAID_LANG_RE.test(line)) metrics.mermaidBlocks += 1;
-        else metrics.codeBlocks += 1;
+        fenceIsMermaid = MERMAID_LANG_RE.test(line);
+        if (fenceIsMermaid) {
+          metrics.mermaidBlocks += 1;
+          mermaidHeaderPending = true;
+        } else {
+          metrics.codeBlocks += 1;
+        }
       } else {
         inFence = false;
+        fenceIsMermaid = false;
+        mermaidHeaderPending = false;
       }
       continue;
     }
-    if (inFence) continue;
+    if (inFence) {
+      // mermaid 分类型计数：首个非空非注释行即图类型声明
+      if (fenceIsMermaid && mermaidHeaderPending) {
+        const trimmed = line.trim();
+        if (trimmed.length > 0 && !trimmed.startsWith('%%')) {
+          mermaidHeaderPending = false;
+          switch (detectMermaidSyntax(`${trimmed}\n`)) {
+            case 'flowchart':
+              metrics.flowchartBlocks += 1;
+              break;
+            case 'sequence':
+              metrics.sequenceBlocks += 1;
+              break;
+            case 'state':
+              metrics.stateBlocks += 1;
+              break;
+            default:
+              // 四类之外的图种（erDiagram / gantt / pie …）：只计入总数
+              break;
+          }
+        }
+      }
+      continue;
+    }
 
     // Sources 溯源行
     if (SOURCE_LINE_RE.test(line)) {
@@ -284,8 +328,12 @@ export function proseFloor(page: WikiPage): number {
 }
 
 /**
- * 是否强制要求 Mermaid 图：由 section 角色（基础分类）与档位 panorama 派生，
- * **不挂在 level 表上**（难度与「是否需要架构图」正交）。
+ * 是否强制要求**架构图**（flowchart）≥1：由 section 角色（基础分类）与档位 panorama
+ * 派生，**不挂在 level 表上**（难度与「是否需要架构图」正交）。
+ *
+ * 语义收紧（有意偏差，已在 AGENTS.md §3 声明）：概览 / 核心架构 / minimal panorama
+ * 要求的是**架构图**，而架构图属于 flowchart 语法——序列图 / 状态图画得再好也不能替代。
+ * 因此下限比对用 `flowchartBlocks`，不再用混类的 `mermaidBlocks`。
  */
 export function mermaidRequiredFor(page: WikiPage, spec: BlueprintDetailSpec): boolean {
   if (spec.panorama) return true;
@@ -296,6 +344,41 @@ export function mermaidRequiredFor(page: WikiPage, spec: BlueprintDetailSpec): b
 export function codeRecommendedFor(page: WikiPage): boolean {
   const spec = CONTENT_GATE_SPECS[page.level] ?? CONTENT_GATE_SPECS.Intermediate;
   return spec.codeRecommended && countSourceFiles(page) > 0;
+}
+
+/** 主题摘要里暗示「存在跨模块调用链」的关键词（中英皆含；只用于软性建议） */
+const CALL_CHAIN_TOPIC_WORDS = [
+  '调用链',
+  '时序',
+  '请求处理',
+  '工作流',
+  '调用关系',
+  'call chain',
+  'sequence',
+  'workflow',
+  'pipeline',
+  'interaction',
+];
+
+/**
+ * 是否暗示存在跨模块调用链（软性建议的触发条件，不参与失败判定）：
+ * ① 主题摘要出现调用链 / 时序 / 工作流等关键词；
+ * ② 关联文件落在**不同目录**（如 packages/core/src 与 packages/cli/src），
+ *    同一目录内的文件不触发（同一个模块内部未必有跨模块调用）。
+ */
+export function hintsCrossModuleCallChain(page: WikiPage): boolean {
+  const summary = (page.topicSummary ?? '').toLowerCase();
+  if (CALL_CHAIN_TOPIC_WORDS.some((word) => summary.includes(word.toLowerCase()))) return true;
+
+  const dirnames = new Set<string>();
+  for (const file of page.associatedFiles ?? []) {
+    const normalized = file.replace(/\\/g, '/').trim();
+    if (normalized.endsWith('/')) continue; // 目录是范围声明，不是具体模块
+    const slashIndex = normalized.lastIndexOf('/');
+    if (slashIndex === -1) continue; // 仓库根的文件没有目录归属
+    dirnames.add(normalized.slice(0, slashIndex));
+  }
+  return dirnames.size >= 2;
 }
 
 /** 是否跳级（`#` → `###` 这类跨级标题） */
@@ -341,9 +424,9 @@ export function evaluateContentGate(
     failures.push('缺少 Sources 溯源行：关键论述末尾必须有 `Sources: [文件](路径#Lx-Ly)`');
   }
 
-  if (mermaidRequiredFor(page, spec) && metrics.mermaidBlocks < 1) {
+  if (mermaidRequiredFor(page, spec) && metrics.flowchartBlocks < 1) {
     failures.push(
-      '缺少 Mermaid 架构图：本页属于概览/核心架构类（或 minimal 全景导览），必须用 Mermaid 梳理模块关系',
+      '缺少 Mermaid 架构图：本页属于概览/核心架构类（或 minimal 全景导览），必须用 flowchart 画一张架构图；架构图属于 flowchart 语法，序列图 / 状态图不能替代（选型见 diagram-guide）',
     );
   }
 
@@ -352,6 +435,15 @@ export function evaluateContentGate(
     // 因此只提示不判失败、不拦截。
     advisories.push(
       '建议补充代码片段：关联了源文件但正文没有代码块（若源里确实没有可写代码，正确答案是 0，此条不判失败）',
+    );
+  }
+
+  // 跨模块调用链建议（软性，不判失败）：主题摘要或关联文件跨包 / 跨目录时，
+  // 序列图是回答「谁在什么时候调用谁」的最优载体；但源里可能确实没有跨模块
+  // 调用（正确答案是 0），因此只建议不判失败，保持反注水口径。
+  if (metrics.sequenceBlocks < 1 && hintsCrossModuleCallChain(page)) {
+    advisories.push(
+      '建议补一张序列图：本页主题摘要或关联文件跨目录，暗示存在跨模块调用链（若源里确实没有跨模块调用，正确答案是 0，此条不判失败）',
     );
   }
 

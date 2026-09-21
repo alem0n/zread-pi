@@ -215,6 +215,8 @@ const server = Bun.serve({
                   "",
                   "> 由 mock LLM 生成（目标目录参数回归）。",
                   "",
+                  `**图｜架构图｜${title} 的模块关系**：核心模块与依赖`,
+                  "",
                   "```mermaid",
                   "flowchart TB",
                   `  A["${title}"] --> B["测试通过"]`,

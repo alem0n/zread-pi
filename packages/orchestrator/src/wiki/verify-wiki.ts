@@ -249,20 +249,26 @@ export async function verifyWiki(options: VerifyWikiOptions = {}): Promise<Verif
     }
   }
 
-  // ==================== mermaid（复用 write_page 的同一套校验） ====================
+  // ==================== mermaid（复用 write_page 的同一套语法校验） ====================
+  // 只查语法合法性（分类型分发）；题注校验只在 write_page 生成期强制，
+  // 这里不回溯查旧页面（旧页面的图没有题注，回溯会违反「不破坏既有产物」）。
   const mermaidIssues: string[] = [];
   for (const page of pages) {
     const issues = validateMermaidContent(contents.get(page.slug) ?? '');
     for (const issue of issues) {
-      mermaidIssues.push(`${page.slug}：block ${issue.block} line ${issue.line} 节点 ${issue.nodeId}`);
+      const noun =
+        issue.syntax === 'sequence' ? '参与者' : issue.syntax === 'state' ? '状态' : '节点';
+      mermaidIssues.push(
+        `${page.slug}：block ${issue.block} line ${issue.line} [${issue.syntax}/${issue.rule}] ${noun} ${issue.nodeId}`,
+      );
     }
   }
   report.emit(
     mermaidIssues.length === 0 ? 'PASS' : 'FAIL',
     'mermaid',
     mermaidIssues.length === 0
-      ? '全部 Mermaid 图表合法（节点标签引号校验）'
-      : `${mermaidIssues.length} 处 Mermaid 节点标签未加引号`,
+      ? '全部 Mermaid 图表合法（flowchart 引号 / sequence 箭头与参与者 / state 迁移与标签）'
+      : `${mermaidIssues.length} 处 Mermaid 语法问题`,
     mermaidIssues.length === 0 ? undefined : mermaidIssues.slice(0, 12),
   );
 

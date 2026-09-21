@@ -131,6 +131,59 @@ const usageChunk = JSON.stringify({
 });
 
 let requestCount = 0;
+// 已发出的页面数：用来轮换第二张图的类型，让 mock 产物覆盖四类语法
+let emittedPages = 0;
+
+/** 四类图（语义）的 mock 样例；架构图每页都有，这里轮换的是第二张 */
+function extraDiagramBlock(title: string): string {
+	const kind = emittedPages % 4;
+	const caption = (label: string, summary: string): string => `**图｜${label}｜${title}**：${summary}`;
+	switch (kind) {
+		case 1:
+			return [
+				caption("流程图", "处理流程"),
+				"",
+				"```mermaid",
+				"flowchart TD",
+				'  Start["开始"] --> Parse["解析输入"]',
+				'  Parse --> Done["完成"]',
+				"```",
+			].join("\n");
+		case 2:
+			return [
+				caption("序列图", "入口 → 核心 → 响应"),
+				"",
+				"```mermaid",
+				"sequenceDiagram",
+				'  participant Entry as "入口"',
+				'  participant Core as "核心"',
+				"  Entry->>Core: 处理请求",
+				"  Core-->>Entry: 返回结果",
+				"```",
+			].join("\n");
+		case 3:
+			return [
+				caption("状态图", "空闲 → 运行 → 结束"),
+				"",
+				"```mermaid",
+				"stateDiagram-v2",
+				"  [*] --> Idle",
+				'  Idle --> Running : 启动',
+				'  Running --> [*] : 停止',
+				"```",
+			].join("\n");
+		default:
+			// 第二张也是架构图（保持每页拓扑图数量的下限）
+			return [
+				caption("架构图", "分层依赖"),
+				"",
+				"```mermaid",
+				"flowchart TB",
+				'  C["核心"] --> D["依赖"]',
+				"```",
+			].join("\n");
+	}
+}
 const server = Bun.serve({
 	port: 0,
 	async fetch(request) {
@@ -177,6 +230,7 @@ const server = Bun.serve({
 						const file = /\*\*文件名\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? `${slug}.md`;
 						const title = /\*\*标题\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? slug;
 						const pageSection = /\*\*章节\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "";
+						emittedPages += 1;
 						// 溯源行指向夹具里真实存在的源文件（让 verify 的 traceability 组可走全链路）
 						// 路径取相对仓库根的 POSIX 写法（与 manifest / associatedFiles 同口径）；
 						// 行号区间取文件行数的前 1/2，保证落在文件内（SOURCE_LINE_CAP 预计算）
@@ -194,11 +248,14 @@ const server = Bun.serve({
 									`# ${title}`,
 									"",
 									"> 由 mock LLM 生成（离线试跑），真实内容请用 `bun run cli`。",
+									`**图｜架构图｜${title} 的模块关系**：核心模块与依赖`,
 									"",
 									"```mermaid",
 									"flowchart TB",
 									`  A["${title}"] --> B["测试通过"]`,
 									"```",
+									"",
+									extraDiagramBlock(title),
 									"",
 									...(sources ? [`Sources: ${sources}`] : []),
 								].join("\n"),
