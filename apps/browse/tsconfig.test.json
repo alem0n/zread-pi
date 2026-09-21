@@ -9,5 +9,5 @@
       "@zread-pi/types": ["../../packages/types/src/index.ts"]
     }
   },
-  "include": ["test/**/*.ts", "src/**/*.test.ts", "src/**/*.test.tsx"]
+  "include": ["test/**/*.ts", "src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.d.ts"]
 }

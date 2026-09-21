@@ -255,6 +255,9 @@ export function MarkdownRenderer({
       startOnLoad: false,
       theme: "default",
       securityLevel: "loose",
+      // mermaid v12 起 ELK 成为默认布局算法（会改变既有图的排版），
+      // 显式锁回 dagre 保持已生成 wiki 页面的原样观感。
+      layout: "dagre",
     });
   }, []);
 

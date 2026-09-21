@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useWiki } from "@/hooks/useWiki";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { TableOfContents } from "./TableOfContents";
-import { TocProvider } from "@/context/TocContext.tsx";
+import { TocProvider } from "@/context/TocProvider.tsx";
 import { Clock, Signal } from "lucide-react";
 import type { TocItem } from "@/hooks/useTableOfContents";
 import { SourceCodeModal } from "@/components/SourceCodeModal";

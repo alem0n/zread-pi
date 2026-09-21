@@ -101,6 +101,13 @@ describe('MyComponent', () => {
     「渲染出 `<svg>`」的用例会一直卡到 `waitFor` 超时。用与
     `MarkdownRenderer` 相同的参数初始化即可。
 
+11. **mermaid v12 起默认布局是 ELK，ELK 在 happy-dom 里必崩**：`elkjs` 是 GWT
+    产物，初始化时读 `$wnd.Error.stackTraceLimit`，happy-dom 没有 `$wnd`，
+    直接抛 `TypeError: undefined is not an object`，`mermaid.render` 失败、
+    无 SVG。真实浏览器里 ELK 没问题，纯测试环境限制。生产与测试的
+    `mermaid.initialize` 都显式锁 `layout: 'dagre'`（既保持已生成页面的原样
+    排版，又让测试在 happy-dom 下可跑）。
+
 ## 测试先行（TDD）
 
 改 `apps/browse` 的组件行为时，顺序是：

@@ -23,11 +23,15 @@ const FLOWCHART = [
 // 弹窗本身不调 mermaid.initialize——生产环境里它只在 MarkdownRenderer 挂载后
 // 才可能被打开，那时全局已初始化。测试忠实复现这个前置条件，否则 happy-dom
 // 下未初始化的首帧 render 会静默返回空 svg。
+// 参数与 MarkdownRenderer 保持一致：mermaid v12 起 ELK 成为默认布局，但
+// ELK（elkjs，GWT 产物）在 happy-dom 里取不到 $wnd 会直接崩，生产与测试都
+// 显式锁 dagre。
 beforeAll(() => {
   mermaid.initialize({
     startOnLoad: false,
     theme: 'default',
     securityLevel: 'loose',
+    layout: 'dagre',
   });
 });
 
