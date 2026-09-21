@@ -203,7 +203,14 @@ function validateSequenceBlock(code: string, startLine: number): MermaidValidati
     const decl = SEQ_PARTICIPANT_RE.exec(line);
     if (decl) {
       participants.add(decl[1]);
-      // 2. 显示名（as 后）含结构字符 → 必须加引号（与 flowchart 同一引号纪律）
+      // 2. 显示名（as 后）含结构字符 → 必须加引号。
+      //    判据（实测 mermaid 12，见下方注释）：本仓库锁定的 mermaid 12 其实能
+      //    渲染未加引号的 `网关(入口)` / `Foo:Bar`；保留这条拦截是因为**生成产物
+      //    是纯 Markdown，会被 GitHub / GitLab / Notion 等第三方渲染器复用**，
+      //    它们内置的 mermaid 版本可能落后，旧版词法对显示名里的 `(){}|<>`
+      //    更严格。加引号在所有版本都安全，因此作为生成期的可移植性守卫拦截。
+      //    唯一真正无法渲染的是显示名含 `;`（且加引号也救不回——那是参与者的
+      //    硬限制，不是引号问题），故不设规则，只在注释里记录。
       const asMatch = SEQ_PARTICIPANT_AS_RE.exec(line);
       if (asMatch) {
         const display = asMatch[1].trim();
@@ -211,7 +218,7 @@ function validateSequenceBlock(code: string, startLine: number): MermaidValidati
           issues.push(
             makeIssue(
               0, lineNo, 'sequence', 'SEQ_LABEL_QUOTES', decl[1], display,
-              `参与者 \`${decl[1]}\` 的显示名含 Mermaid 结构字符，必须加引号：participant ${decl[1]} as "${display}"`,
+              `参与者 \`${decl[1]}\` 的显示名含结构字符，请加引号以保证第三方渲染器（GitHub / GitLab / Notion 内置的 mermaid 版本可能落后）一致渲染：participant ${decl[1]} as "${display}"`,
             ),
           );
         }
@@ -274,6 +281,11 @@ const STATE_VALID_ARROWS = new Set(['-->']);
 const STATE_INVALID_ARROWS = new Set([
   '->', '<-', '<->', '<--', '--->', '==>', '=>', '→', '⟶', '⟵', '⇒', '⇐', '➜',
 ]);
+
+// `[*]` 是状态图的起止伪状态：mermaid 允许它作迁移的源**和**汇（`[*] --> Idle`
+// 与 `Idle --> [*]` 都合法），因此它只是一个被 STATE_TOKEN_RE 接受的端点形态，
+// 没有可判失败的独立规则（L4 的「[*] 起止」要求等价于「识别它且不误伤」——
+// 见 mermaid-validation 的 state-star 回归项）。
 
 /** 多行 note 的收尾标记（`note ... of X` 后若无 `:`，必须以 `end note` 收尾） */
 const END_NOTE_RE = /^\s*end\s+note\s*$/i;

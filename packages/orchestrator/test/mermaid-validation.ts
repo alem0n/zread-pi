@@ -93,10 +93,15 @@ console.log('\n▶ C. sequence 校验');
   check('-->> / -x / -) 合法箭头不误杀', validateMermaidContent(validArrow).length === 0, JSON.stringify(validateMermaidContent(validArrow)));
 
   const displayParen = ['```mermaid', 'sequenceDiagram', '  participant A as 网关(入口)', '  A->>B: x', '```'].join('\n');
-  check('显示名含括号未加引号 → SEQ_LABEL_QUOTES', rules(validateMermaidContent(displayParen)).includes('SEQ_LABEL_QUOTES'));
+  check('显示名含括号未加引号 → SEQ_LABEL_QUOTES（可移植性守卫：第三方渲染器版本可能落后）', rules(validateMermaidContent(displayParen)).includes('SEQ_LABEL_QUOTES'));
 
   const displayQuoted = ['```mermaid', 'sequenceDiagram', '  participant A as "网关(入口)"', '  A->>B: x', '```'].join('\n');
   check('显示名加引号 → 无问题', validateMermaidContent(displayQuoted).length === 0, JSON.stringify(validateMermaidContent(displayQuoted)));
+
+  // 不含结构字符的合法形态不误杀（mermaid 12 其实能渲染未加引号的括号 / 冒号，
+  // 这条规则只是面向第三方渲染器的可移植性守卫，见 page-tools 的注释）
+  const displayPlain = ['```mermaid', 'sequenceDiagram', '  participant Gateway as 网关', '  Gateway->>Auth: 鉴权请求', '```'].join('\n');
+  check('不含结构字符的显示名 → 无问题', validateMermaidContent(displayPlain).length === 0, JSON.stringify(validateMermaidContent(displayPlain)));
 
   const noteUnknown = ['```mermaid', 'sequenceDiagram', '  Alice->>Bob: Hi', '  Note over Alice,Ghost: 说明', '```'].join('\n');
   check('Note 引用未出现的参与者 → SEQ_NOTE_UNKNOWN_PARTICIPANT', rules(validateMermaidContent(noteUnknown)).includes('SEQ_NOTE_UNKNOWN_PARTICIPANT'));
@@ -158,6 +163,13 @@ console.log('\n▶ D. state 校验');
 
   const direction = ['```mermaid', 'stateDiagram-v2', '  direction TB', '  [*] --> Idle', '```'].join('\n');
   check('direction 声明行不误杀', validateMermaidContent(direction).length === 0, JSON.stringify(validateMermaidContent(direction)));
+
+  // `[*]` 是起止伪状态：作源与作汇都合法（L4「[*] 起止」= 识别且不误伤，无独立失败规则）
+  const starBoth = ['```mermaid', 'stateDiagram-v2', '  [*] --> Idle', '  Idle --> [*]', '```'].join('\n');
+  check('[*] 作源与作汇都不报（L4：识别起止伪状态）', validateMermaidContent(starBoth).length === 0, JSON.stringify(validateMermaidContent(starBoth)));
+
+  const starOnlyTarget = ['```mermaid', 'stateDiagram-v2', '  Idle --> [*]', '```'].join('\n');
+  check('[*] 只作汇也合法', validateMermaidContent(starOnlyTarget).length === 0, JSON.stringify(validateMermaidContent(starOnlyTarget)));
 }
 
 // ==================== E. 其他图种不校验 ====================
