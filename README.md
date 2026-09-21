@@ -53,7 +53,7 @@
 - **Provider 无关** —— 统一抽象 Anthropic Messages 与 OpenAI Chat Completions 协议；在 TUI 里选 Provider、贴 API Key、
   挑模型，三步完成，可同时配置多个 Provider。
 - **两层重试，尊重服务端语义** —— Agent 层指数退避（60s 封顶）只在「未产出内容」时重试，失败尝试不污染会话记录；Provider 层读取服务端 `Retry-After` 并按上限封顶，429 高峰期不会重试过早。
-- **本地 Web 阅读器** —— `zread-pi browse` 启动 React 19 + Vite 预览站：侧边导航、Mermaid 图表渲染（支持放大查看）。
+- **本地 Web 阅读器** —— `zread-pi browse` 启动 React 19 + Vite 预览站：侧边导航、Mermaid 图表渲染（支持放大查看）；每张图上方的题注按图类型（架构 / 流程 / 序列 / 状态）显示彩色类型徽标。
 - **Wiki 同步，而不是 Wiki 覆盖** —— diff 感知的再生成：页面被标记为 `new` / `updated` / `unchanged` / `archived`，
   像审代码 diff 一样审文档变更。
 - **全局记忆** —— 生成过的项目自动记录（`zread-pi history` 一键清理失效项），老项目打开即自动补录；配置 / 凭据 / 记忆的跨进程写入都有文件锁保护。
@@ -104,7 +104,7 @@ bun run cli browse     # 或 zread-pi browse（二进制安装后）
 | `zread-pi browse`        | 启动本地 Web 阅读器（地址由服务端返回，保证真实可访问）；侧边栏可切换已生成的各档位文档 |
 | `zread-pi logview [runId]`| 启动轨迹（Trajectory）检查视图 —— 在浏览器回放本次 / 历次运行的完整事件流；runId 缺省 = 最近一次运行 |
 | `zread-pi history [-c n]`| 清理全局记忆中已失效的项目记录并列出剩余项                                 |
-| `zread-pi verify [--detail <档位>] [--enforce]` | 交付闸门：逐条输出 `PASS`/`FAIL`/`SKIP`（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），末尾 `OVERALL PASS`/`FAIL`，退出码随之；溯源含路径真实、行号有效、行内代码符号可溯（WARN）与蓝图 `associatedFiles` 存在性；`--enforce` 才把内容密度门未达标计为失败，否则只列出 |
+| `zread-pi verify [--detail <档位>] [--enforce]` | 交付闸门：逐条输出 `PASS`/`FAIL`/`SKIP`（结构 / 内容密度 / Mermaid / 溯源 / frontmatter），末尾 `OVERALL PASS`/`FAIL`，退出码随之；溯源含路径真实、行号有效、行内代码与图表符号（序列图参与者 / 消息标签 / 状态图状态名）可溯（WARN）与蓝图 `associatedFiles` 存在性；`--enforce` 才把内容密度门未达标计为失败，否则只列出 |
 | `bun run tools:install`  | 无头安装外部搜索工具（rg / fd），可指定版本；配置界面 `/config/tools` 同效 |
 
 所有子命令均支持 `-d / --dir <path>` 指定目标仓库（不用切 shell 目录）。

@@ -7,11 +7,16 @@
  *    rehype-slug 锚点 + useInView 挂载）；
  * 2. ```mermaid 围栏路由到 MermaidDiagram（.mermaid-diagram），而不是当普通代码块；
  * 3. 普通代码块走语法高亮（react-syntax-highlighter 的 Prism + 语言标签）；
- * 4. GFM 表格渲染（remark-gfm 插件链）。
+ * 4. GFM 表格渲染（remark-gfm 插件链）；
+ * 5. 四类语法图（flowchart / sequence / state）在显式锁定 dagre 布局下都能
+ *    真正渲染成 SVG——sequence 有独立布局引擎、state 走 dagre，必须实测确认
+ *    layout 锁定不影响这两类（dagre 锁定是为了 mermaid v12 起 ELK 成为默认
+ *    布局会改变既有页面观感）；
+ * 6. 图题注（**图｜<类型词>｜<标题>**）渲染为带类型徽标的段落。
  */
 
 import { describe, it, expect } from 'bun:test';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { TocProvider } from '@/context/TocProvider';
 
@@ -100,5 +105,129 @@ describe('MarkdownRenderer', () => {
     const th = screen.getByRole('columnheader', { name: '列 A' });
     expect(th).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '2' })).toBeInTheDocument();
+  });
+
+  // ---- 四类语法图在 dagre 锁定下的真实渲染（实测 layout 锁定不误伤 sequence / state） ----
+//
+// 实测结论（happy-dom + getBBox 桩，见 test/setup.ts）：
+//   - sequence 有独立布局引擎，dagre 锁定**不影响**它，参与者 / 消息正常渲染；
+//   - state 走 dagre，无边标签 / note 的形态正常渲染；
+//   - dagre 的**边标签**几何求解（`-->|标签|` / `A --> B : 标签`）需要精确文本
+//     包围盒，happy-dom 提供不了，flowchart 与 state 的边标签都渲染不出来——
+//     这是**环境限制，不是 dagre 锁定的问题**；带边标签的图只做路由断言。
+
+  const SEQUENCE_CONTENT = [
+    '**图｜序列图｜登录鉴权调用链**：网关 → 鉴权服务 → 用户存储',
+    '',
+    '```mermaid',
+    'sequenceDiagram',
+    '  participant Gateway as "网关"',
+    '  participant Auth as "鉴权服务"',
+    '  Gateway->>Auth: 鉴权请求',
+    '  Auth-->>Gateway: 鉴权结果',
+    '```',
+  ].join('\n');
+
+  const STATE_CONTENT = [
+    '**图｜状态图｜连接生命周期**：空闲 → 运行 → 关闭',
+    '',
+    '```mermaid',
+    'stateDiagram-v2',
+    '  [*] --> Idle',
+    '  Idle --> Running',
+    '  Running --> [*]',
+    '```',
+  ].join('\n');
+
+  // 带边标签的状态图（dagre 边标签几何在 happy-dom 下不可渲染，只做路由断言）
+  const STATE_LABELED_CONTENT = [
+    '```mermaid',
+    'stateDiagram-v2',
+    '  [*] --> Idle',
+    '  Idle --> Running : 启动',
+    '  Running --> [*] : 关闭',
+    '```',
+  ].join('\n');
+
+  const FLOWCHART_TD_CONTENT = [
+    '**图｜流程图｜请求处理管线**：解析 → 执行 → 返回',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '  Start["解析请求"] --> Exec["执行业务"]',
+    '  Exec --> Done["返回响应"]',
+    '```',
+  ].join('\n');
+
+  it('把 sequenceDiagram 渲染成 SVG（dagre 锁定不影响序列图布局引擎）', async () => {
+    renderMarkdown(SEQUENCE_CONTENT);
+
+    await waitFor(
+      () => {
+        const svg = document.querySelector('.mermaid-diagram svg');
+        expect(svg, 'sequenceDiagram 应在 dagre 锁定下仍渲染成 SVG').not.toBeNull();
+        // 参与者显示名真的画进去了（grounding 可见性）
+        expect(svg!.textContent).toContain('网关');
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  it('把 stateDiagram-v2 渲染成 SVG（状态图走 dagre 布局）', async () => {
+    renderMarkdown(STATE_CONTENT);
+
+    await waitFor(
+      () => {
+        const svg = document.querySelector('.mermaid-diagram svg');
+        expect(svg, 'stateDiagram-v2 应渲染成 SVG').not.toBeNull();
+        expect(svg!.textContent).toContain('Idle');
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  it('把 flowchart TD（流程图）渲染成 SVG', async () => {
+    renderMarkdown(FLOWCHART_TD_CONTENT);
+
+    await waitFor(
+      () => {
+        const svg = document.querySelector('.mermaid-diagram svg');
+        expect(svg, 'flowchart TD 应渲染成 SVG').not.toBeNull();
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  it('带边标签的 stateDiagram-v2 仍路由到 MermaidDiagram（dagre 边标签几何在 happy-dom 不可渲染，只断言路由）', () => {
+    renderMarkdown(STATE_LABELED_CONTENT);
+
+    const diagram = document.querySelector('.mermaid-diagram');
+    expect(diagram, '带边标签的状态图同样路由到 MermaidDiagram，而非普通代码块').not.toBeNull();
+  });
+
+  it('图题注渲染为带类型徽标的段落（序列图 → sequence 徽标）', () => {
+    renderMarkdown(SEQUENCE_CONTENT);
+
+    const caption = screen.getByText(/登录鉴权调用链/).closest('p');
+    expect(caption, '题注应渲染为 <p> 段落').not.toBeNull();
+    expect(caption!.className).toContain('diagram-caption');
+    expect(caption!.className).toContain('diagram-caption--sequence');
+  });
+
+  it('图题注按类型词着色（架构图 / 状态图徽标）', () => {
+    renderMarkdown(['# 架构', '', '**图｜架构图｜模块关系**：核心与依赖', '', '正文段。'].join('\n'));
+    const fcCaption = screen.getByText(/模块关系/).closest('p');
+    expect(fcCaption!.className).toContain('diagram-caption--flowchart');
+
+    renderMarkdown(STATE_CONTENT);
+    const stCaption = screen.getByText(/连接生命周期/).closest('p');
+    expect(stCaption!.className).toContain('diagram-caption--state');
+  });
+
+  it('普通段落不带题注徽标 class', () => {
+    renderMarkdown('# 标题\n\n这是普通散文段落，不是题注。');
+
+    const p = screen.getByText('这是普通散文段落，不是题注。').closest('p');
+    expect(p!.className).not.toContain('diagram-caption');
   });
 });
