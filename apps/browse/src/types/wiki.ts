@@ -22,6 +22,14 @@ export interface WikiOutput {
   pages: WikiPage[];
   /** 生成时使用的档位 */
   detail: BlueprintDetailLevel;
+  /**
+   * 分类阶段产出的一级结构清单（权威阅读顺序）。
+   *
+   * 主题阶段按 section 并发执行，`pages` 数组的顺序是并发完成顺序，
+   * 不是蓝图顺序；侧边目录树以本清单为准（旧 wiki.json 无该字段时回退
+   * 到 pages 首现顺序）。
+   */
+  sections?: Array<{ title: string }>;
 }
 
 /** 一个可浏览的 wiki 变体（档位子目录） */
@@ -42,7 +50,8 @@ export interface WikiVariantsResponse {
 }
 
 export interface TreeNode {
-  type: 'section' | 'group' | 'page';
+  /** 目录树只两级：类型（section）→ 文章（page） */
+  type: 'section' | 'page';
   id: string;
   title: string;
   children?: TreeNode[];
@@ -64,7 +73,6 @@ export interface WikiState {
   activeReference: CodeReference | null;
   leftPanelCollapsed: boolean;
   rightPanelCollapsed: boolean;
-  expandedNodes: Set<string>;
   sourceModalOpen: boolean;
   sourceModalRef: CodeReference | null;
   /** 全部可浏览的档位变体 */

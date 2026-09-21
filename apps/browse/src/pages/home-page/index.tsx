@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useWiki } from '@/hooks/useWiki';
+import { orderedPages } from '@/utils/buildTree';
 
 export function HomePage() {
   const { wikiData } = useWiki();
@@ -8,7 +9,9 @@ export function HomePage() {
 
   useEffect(() => {
     if (wikiData && wikiData.pages.length > 0) {
-      navigate(`/${wikiData.pages[0].slug}`, { replace: true });
+      // 落点是蓝图第一个分类的第一篇（pages 数组首项是并发完成顺序，不一定是第一篇）
+      const first = orderedPages(wikiData)[0];
+      if (first) navigate(`/${first.slug}`, { replace: true });
     }
   }, [wikiData, navigate]);
 

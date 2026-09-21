@@ -9,7 +9,7 @@ import type {
   CodeReference,
   WikiState,
 } from '@/types/wiki';
-import { buildTree } from '@/utils/buildTree';
+import { buildTree, orderedPages } from '@/utils/buildTree';
 import { parseReferences } from '@/utils/parseReferences';
 
 interface WikiContextValue extends WikiState {
@@ -18,7 +18,6 @@ interface WikiContextValue extends WikiState {
   selectPage: (page: WikiPage) => Promise<void>;
   /** 切换档位变体：重拉 catalog，同 slug 页面保留，否则落到新档位首页；返回落点页面 */
   setDetail: (detail: BlueprintDetailLevel | null) => Promise<WikiPage | null>;
-  toggleNode: (nodeId: string) => void;
   toggleLeftPanel: () => void;
   toggleRightPanel: () => void;
   selectReference: (ref: CodeReference | null) => void;
@@ -31,23 +30,6 @@ const WikiContext = createContext<WikiContextValue | null>(null);
 
 export { WikiContext };
 
-// Helper to collect all group node IDs
-function collectGroupIds(nodes: ReturnType<typeof buildTree>): Set<string> {
-  const groupIds = new Set<string>();
-  const traverse = (nodeList: typeof nodes) => {
-    for (const node of nodeList) {
-      if (node.type === 'group') {
-        groupIds.add(node.id);
-      }
-      if (node.children) {
-        traverse(node.children);
-      }
-    }
-  };
-  traverse(nodes);
-  return groupIds;
-}
-
 export function WikiProvider({ children }: { children: React.ReactNode }) {
   const [wikiData, setWikiData] = useState<WikiOutput | null>(null);
   const [currentPage, setCurrentPage] = useState<WikiPage | null>(null);
@@ -56,14 +38,13 @@ export function WikiProvider({ children }: { children: React.ReactNode }) {
   const [activeReference, setActiveReference] = useState<CodeReference | null>(null);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [sourceModalRef, setSourceModalRef] = useState<CodeReference | null>(null);
   const [variants, setVariants] = useState<WikiVariant[]>([]);
   const [detail, setDetailState] = useState<BlueprintDetailLevel | null>(null);
 
-  const tree = useMemo(() => (wikiData ? buildTree(wikiData.pages) : []), [wikiData]);
+  const tree = useMemo(() => (wikiData ? buildTree(wikiData) : []), [wikiData]);
 
   // Load source code from API（源码属项目级，但显式传当前档位以便服务端校验）
   const loadSourceCode = useCallback(
@@ -136,7 +117,8 @@ export function WikiProvider({ children }: { children: React.ReactNode }) {
         const sameSlug = currentPage
           ? data.pages.find((page) => page.slug === currentPage.slug)
           : undefined;
-        const target = sameSlug ?? data.pages[0] ?? null;
+        // 新档位落点：同 slug 优先，否则落到蓝图第一篇（不是数组首项——那是并发完成顺序）
+        const target = sameSlug ?? orderedPages(data)[0] ?? null;
 
         if (target) {
           await selectPageForDetail(target, next);
@@ -177,38 +159,18 @@ export function WikiProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  // Select first page after data is loaded
+  // Select first page after data is loaded（落点是蓝图的第一个分类的第一篇，不是 pages 数组首项）
   useEffect(() => {
     if (initialLoadComplete && wikiData && wikiData.pages.length > 0 && !currentPage) {
-      const timer = setTimeout(() => {
-        selectPage(wikiData.pages[0]);
-      }, 0);
-      return () => clearTimeout(timer);
+      const first = orderedPages(wikiData)[0];
+      if (first) {
+        const timer = setTimeout(() => {
+          selectPage(first);
+        }, 0);
+        return () => clearTimeout(timer);
+      }
     }
   }, [initialLoadComplete, wikiData, currentPage, selectPage]);
-
-  // Expand all groups whenever the tree changes（含切换档位后的新目录树）
-  useEffect(() => {
-    if (tree.length > 0) {
-      const groupIds = collectGroupIds(tree);
-      const timer = setTimeout(() => {
-        setExpandedNodes(groupIds);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [tree]);
-
-  const toggleNode = useCallback((nodeId: string) => {
-    setExpandedNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
-  }, []);
 
   const toggleLeftPanel = useCallback(() => {
     setLeftPanelCollapsed((prev) => !prev);
@@ -240,14 +202,12 @@ export function WikiProvider({ children }: { children: React.ReactNode }) {
     activeReference,
     leftPanelCollapsed,
     rightPanelCollapsed,
-    expandedNodes,
     tree,
     variants,
     detail,
     loadWikiData,
     selectPage,
     setDetail,
-    toggleNode,
     toggleLeftPanel,
     toggleRightPanel,
     selectReference,
