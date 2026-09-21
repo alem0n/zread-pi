@@ -40,6 +40,15 @@ if (target.getComputedStyle === undefined) {
   target.getComputedStyle = (domWindow as unknown as { getComputedStyle: typeof getComputedStyle }).getComputedStyle.bind(domWindow);
 }
 
+// Node 22 原生提供全局 Event / CustomEvent（其余事件类只有 happy-dom 提供），
+// 它们与 happy-dom 的 Event 不是同一个类（不同 realm）。组件库（如 Radix 的
+// FocusScope）用全局 new CustomEvent(...) 派发到 happy-dom 的节点上时，
+// happy-dom 的 dispatchEvent 做 instanceof Event 校验会失败并抛
+// "parameter 1 is not of type 'Event'"。测试的 DOM 就是 happy-dom，
+// 事件类必须同 realm，这里显式覆盖到 happy-dom 的实现。
+target.Event = domWindow.Event;
+target.CustomEvent = domWindow.CustomEvent;
+
 /**
  * happy-dom 不做布局，clientWidth / clientHeight / getBoundingClientRect 恒为 0，
  * 依赖测量的组件（时间线宽度 / 虚拟化视口高度 / 光标坐标换算）无法测。

@@ -84,6 +84,23 @@ describe('MyComponent', () => {
    `dispatchEvent` 同样走原生监听——但见第 6 条，WheelEvent 的 clientX 要手动塞、
    且必须包 `act`。
 
+9. **Node 22 原生提供全局 `Event` / `CustomEvent`，与 happy-dom 的不是同一个类**
+   （不同 realm；其余事件类只有 happy-dom 提供）。组件库往 happy-dom 节点上
+   派发 `new CustomEvent(...)` 时（Radix 的 `FocusScope` 在 `Dialog.Content`
+   挂载时就会派发 `AUTOFOCUS_ON_MOUNT`），happy-dom 的 `dispatchEvent` 做
+   `instanceof Event` 校验会失败，抛
+   `Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'`，
+   整棵 React 树在 `commitHookPassiveMountEffects` 里炸掉。测试的 DOM 就是
+   happy-dom，事件类必须同 realm——`test/setup.ts` 已显式把全局
+   `Event` / `CustomEvent` 覆盖到 happy-dom 的实现，不用再在测试里处理。
+
+10. **mermaid 的组件测试必须在 `beforeAll` 里 `mermaid.initialize`**：弹窗类组件
+    （`MermaidPreviewModal`）自己不初始化 mermaid，生产环境里它只在
+    `MarkdownRenderer` 挂载后才可能被打开。测试不复现这个前置条件时，happy-dom
+    下未初始化的首帧 `mermaid.render` 会**静默返回空 svg**（不报错），断言
+    「渲染出 `<svg>`」的用例会一直卡到 `waitFor` 超时。用与
+    `MarkdownRenderer` 相同的参数初始化即可。
+
 ## 测试先行（TDD）
 
 改 `apps/browse` 的组件行为时，顺序是：
