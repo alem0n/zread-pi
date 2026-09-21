@@ -38,6 +38,7 @@ import { createRunLogSink } from '../agents/run-log-sink.js';
 import { rememberCurrentProject } from './memory.js';
 import PageAgentPrompt from '../prompts/page-agent';
 import { withPageFormat } from '../agents/page-format.js';
+import { withDiagramGuide } from '../agents/diagram-guide.js';
 import type { AppConfig, BlueprintDetailLevel, WikiPage, RunEventAgentMeta } from '@zread-pi/types';
 import type { WikiResult, ProgressState, PageResult, GenerateWikiOptions, ArticleEventPayload } from './types.js';
 
@@ -63,9 +64,10 @@ export function buildPagePrompt(
 
   // 页面格式契约（frontmatter / 标题层级 / Mermaid 引号 / 溯源格式 / 自检清单）：
   // 与叙述语气正交的硬性约束，拼在页面提示词之后、任务元数据之前。
-  const withFormat = withPageFormat(PageAgentPrompt, language);
+  // 图表选型纪律（diagram-guide）在格式契约之后：先定格式，再定选型。
+  const withGuide = withDiagramGuide(withPageFormat(PageAgentPrompt, language), language);
 
-  return `${withFormat}
+  return `${withGuide}
 
 ---
 

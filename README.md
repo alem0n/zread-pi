@@ -41,7 +41,7 @@
 - **五档蓝图细节（`blueprint.detail`）** —— 从 `minimal`（1 个分类 · 1 篇全景导览，必须 Mermaid 架构图，适合快速了解）到 `max`（每分类 5~12 篇、深挖关联文件），默认 `high` 与旧行为一致；数量越界先由模型按归并 / 补充策略重提，仍不收敛则由缩编 Agent 或代码确定性兜底，生成永不悬挂。
 - **多档共存 + 浏览切换** —— 每个档位的完整产物独立存放（`wiki/<档位>/`，互不覆盖）；浏览站侧边栏底部提供上拉档位选择器（显示各档位篇数，当前高亮），切换时同 slug 页面保留、否则落到新档位首页。旧的无档位产物以「默认」条目只读兼容。
 - **仓库自述注入** —— 目标仓库若有 `AGENTS.md` / `CLAUDE.md`（含大小写变体与全局 `~/.zread-pi`），会把里面的架构说明与约定注入页面 Agent 的系统提示，让生成的 Wiki 与仓库自述保持一致。
-- **文风纪律（humanizer）+ 读者优先（reader-first）** —— 按文档语言注入两套正交的写作纪律：humanizer 管「像人写的」（反 AI 腔，基于 Wikipedia "Signs of AI Writing"），reader-first 管「教会了读者」（教学型结构化自检）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，frontmatter / `Sources:` 溯源行 / Mermaid 代码块全程受「只许改散文」的 diff 断言保护，润色失败不会让页面失败。
+- **文风纪律（humanizer）+ 读者优先（reader-first）+ 图表纪律（diagram-guide）** —— 按文档语言注入三套正交的写作纪律：humanizer 管「像人写的」（反 AI 腔，基于 Wikipedia "Signs of AI Writing"），reader-first 管「教会了读者」（教学型结构化自检），diagram-guide 管「该画哪类图」（架构 / 流程 / 序列 / 状态四类的选型决策表 + grounding 要求 + 题注格式）；可选 `full` 模式会在每页落盘后额外跑一次轻量 polish Agent，frontmatter / `Sources:` 溯源行 / Mermaid 代码块全程受「只许改散文」的 diff 断言保护，润色失败不会让页面失败。
 - **符号级增量缓存** —— 基于 AST hash；未变更的符号跨运行直接跳过，Wiki 同步只重新生成源码确实变过的页面。
 - **并行页面 Agent** —— `p-limit` 调度扇出，并发可配置；每个 Agent 只拥有一个 Wiki 页面，只读它需要的真实代码。
 - **图片读取管线** —— `Read` 读图片时自动缩放到 2000×2000 / 4.5MB 以内（省 token、避免被 provider 拒收），BMP 等非内联格式自动转 PNG，并给出坐标换算提示。
