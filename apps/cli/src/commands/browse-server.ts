@@ -42,6 +42,8 @@ interface WikiCatalog {
   generated_at: string;
   language: string;
   pages: WikiPage[];
+  /** 分类阶段产出的一级结构清单（权威阅读顺序；前端侧边目录树按它排序） */
+  sections?: Array<{ title: string }>;
 }
 
 /** Browse 服务器信息 */

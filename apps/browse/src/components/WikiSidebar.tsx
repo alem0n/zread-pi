@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useWiki } from '@/hooks/useWiki';
-import { BookOpen, ChevronDown, ChevronRight, ChevronUp, Layers, Activity } from 'lucide-react';
+import { BookOpen, ChevronRight, ChevronUp, Layers, Activity } from 'lucide-react';
 import type { BlueprintDetailLevel, TreeNode, WikiPage } from '@/types/wiki';
 
 /** 档位展示名（与 CLI `/config/detail` 的文案保持一致） */
@@ -26,8 +26,7 @@ interface TreeItemProps {
 }
 
 function TreeItem({ node, level = 0, onSelectPage }: TreeItemProps) {
-  const { currentPage, expandedNodes, toggleNode } = useWiki();
-  const isExpanded = expandedNodes.has(node.id);
+  const { currentPage } = useWiki();
 
   const isActive = node.type === 'page' && currentPage?.slug === node.pageData?.slug;
 
@@ -37,7 +36,7 @@ function TreeItem({ node, level = 0, onSelectPage }: TreeItemProps) {
     }
   };
 
-  // Section: 醒目标题，不可点击，不展开
+  // Section: 醒目标题，不可点击（层级只两级：类型 → 文章）
   if (node.type === 'section') {
     const children = node.children ?? [];
     return (
@@ -49,34 +48,6 @@ function TreeItem({ node, level = 0, onSelectPage }: TreeItemProps) {
           {node.title}
         </div>
         {children.length > 0 && (
-          <div>
-            {children.map(child => (
-              <TreeItem key={child.id} node={child} level={level + 1} onSelectPage={onSelectPage} />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Group: 可展开的组
-  if (node.type === 'group') {
-    const children = node.children ?? [];
-    return (
-      <div>
-        <div
-          onClick={() => children.length > 0 && toggleNode(node.id)}
-          className="flex items-center justify-between py-2 px-2 rounded-md cursor-pointer text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150"
-          style={{ paddingLeft: `${(level + 1) * 12}px` }}
-        >
-          <span className="font-normal">{node.title}</span>
-          {children.length > 0 && (
-            <span className="text-gray-400">
-              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </span>
-          )}
-        </div>
-        {children.length > 0 && isExpanded && (
           <div>
             {children.map(child => (
               <TreeItem key={child.id} node={child} level={level + 1} onSelectPage={onSelectPage} />
