@@ -214,22 +214,11 @@ export { WikiStore } from './storage/wiki-store.js';
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Output
-// 结构优先蓝图的落盘设施：机器骨架 / 命名写回 / 旧三阶段的归并设施（供 sync 兼容期使用）
+// 结构优先蓝图的落盘设施：机器骨架 / 命名写回 / sync 对齐
 export {
-  generateWikiJson,
   loadWikiBlueprint,
-  MAX_BLUEPRINT_SECTIONS,
-  normalizeSectionList,
-  normalizeBlueprintSections,
-  mergeBlueprintSections,
-  sectionsFromBlueprint,
   slugStem,
-  nextPageIndex,
   normalizeLevel,
-  initWikiSkeleton,
-  mergeWikiSections,
-  mergeSectionTopics,
-  applySectionTitles,
   writeWikiPages,
   buildMachineBlueprint,
   initWikiBlueprint,
@@ -238,11 +227,6 @@ export {
   reconcileBlueprint,
 } from './output/wiki-content.js';
 export type {
-  MergeTopicsResult,
-  MergeTopicsOptions,
-  ApplyTitlesResult,
-  BlueprintSectionOptions,
-  BlueprintSkeletonOptions,
   MachinePageEntry,
   MachineBlueprint,
   MachineBlueprintOptions,

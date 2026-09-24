@@ -36,7 +36,7 @@ export type {
 } from './structure.js'
 
 // Wiki types
-export type { WikiPage, WikiOutput, WikiSection, WikiTopic, TechStackSummary, WikiLevel, SyncPageStatus, SyncDiff, WikiCoverage } from './wiki.js'
+export type { WikiPage, WikiOutput, WikiSection, TechStackSummary, WikiLevel, SyncPageStatus, SyncDiff, WikiCoverage } from './wiki.js'
 
 // Config types
 export type { AppConfig, AgentConfig, LLMConfig, LlmProviderConfig, CustomModelConfig, LlmAuthType, ThinkingLevel, ThinkingLevelMap, ToolConfig, ToolsConfig, PolishConfig, PolishMode, BlueprintConfig, BlueprintDetailLevel, QualityConfig, ContentGateMode } from './config.js'
