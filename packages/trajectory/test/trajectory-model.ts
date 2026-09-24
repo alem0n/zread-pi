@@ -59,12 +59,12 @@ function event(base: Omit<RunEvent, 'seq' | 'ts'>): RunEvent {
   return { ...base, seq: nextSeq, ts: nextSeq * 1_000 } as RunEvent;
 }
 
-const CLASSIFY_AGENT = { key: 'classify', role: 'classify' as const, sessionId: 'session-classify' };
-const TOPICS_A = {
-  key: 'topics:A',
-  role: 'topics' as const,
+const SECTIONS_AGENT = { key: 'sections', role: 'sections' as const, sessionId: 'session-sections' };
+const PAGES_A = {
+  key: 'pages:A',
+  role: 'pages' as const,
   section: 'A',
-  sessionId: 'session-topics-a',
+  sessionId: 'session-pages-a',
 };
 const PAGE_X = { key: 'page:x', role: 'page' as const, pageSlug: 'x', sessionId: 'session-page-x' };
 
@@ -112,21 +112,21 @@ console.log('▶ replay：turn / group / 请求编号');
 
 const events: RunEvent[] = [
   event({ kind: 'run_start', agent: RUN_LEVEL_AGENT, runKind: 'generate', targetDir: '/repo' }),
-  event({ kind: 'stage', agent: RUN_LEVEL_AGENT, stage: 'classify' }),
-  ...agentLifecycle(CLASSIFY_AGENT),
+  event({ kind: 'stage', agent: RUN_LEVEL_AGENT, stage: 'sections' }),
+  ...agentLifecycle(SECTIONS_AGENT),
   event({ kind: 'section', agent: RUN_LEVEL_AGENT, section: 'A' }),
-  // 分主题 Agent：压缩发生在它的运行期间（compact 归到当前 Agent 的上下文）
-  event({ kind: 'agent_start', agent: TOPICS_A, prompt: 'topics', systemPrompt: 's', toolCatalog: [] }),
-  event({ kind: 'message_start', agent: TOPICS_A, preview: 'topics…' }),
+  // 页面命名 Agent：压缩发生在它的运行期间（compact 归到当前 Agent 的上下文）
+  event({ kind: 'agent_start', agent: PAGES_A, prompt: 'pages', systemPrompt: 's', toolCatalog: [] }),
+  event({ kind: 'message_start', agent: PAGES_A, preview: 'pages…' }),
   event({
     kind: 'message_end',
-    agent: TOPICS_A,
+    agent: PAGES_A,
     blocks: [{ type: 'text', text: 'topics done' }],
     usage: USAGE,
     stopReason: 'stop',
   }),
-  event({ kind: 'compact', agent: TOPICS_A, summary: 'compacted context' }),
-  event({ kind: 'agent_end', agent: TOPICS_A, subtype: 'success', durationMs: 700, usage: USAGE }),
+  event({ kind: 'compact', agent: PAGES_A, summary: 'compacted context' }),
+  event({ kind: 'agent_end', agent: PAGES_A, subtype: 'success', durationMs: 700, usage: USAGE }),
   ...agentLifecycle(PAGE_X),
   event({
     kind: 'run_end',
@@ -142,8 +142,8 @@ const snapshot = replayRunEvents(events);
 checkEqual('记录数', snapshot.records.length, 13);
 // snapshot.turns 只列 Agent（turn = agent）；run 级记录的 turn 为 null，但不出现在这里
 checkEqual('turn 数 = 3 个 Agent', snapshot.turns.length, 3);
-checkEqual('turn 1 是 classify', snapshot.turns[0]?.key, 'classify');
-checkEqual('turn 2 是 topics:A', snapshot.turns[1]?.key, 'topics:A');
+checkEqual('turn 1 是 sections', snapshot.turns[0]?.key, 'sections');
+checkEqual('turn 2 是 pages:A', snapshot.turns[1]?.key, 'pages:A');
 checkEqual('turn 3 是 page:x', snapshot.turns[2]?.key, 'page:x');
 
 // 请求编号：assistant 消息 + 压缩共用一个时间序空间
@@ -159,7 +159,7 @@ checkEqual('最后一条请求的累计用量 = 全部之和', snapshot.requests
 checkEqual('run 摘要状态', snapshot.runSummary.status, 'completed');
 checkEqual('run 摘要 kind', snapshot.runSummary.kind, 'generate');
 checkEqual('run 摘要 agent 数', snapshot.runSummary.agents?.count ?? 0, 0);
-checkEqual('run 摘要 stages 含 classify', snapshot.runSummary.stages.includes('classify'), true);
+checkEqual('run 摘要 stages 含 sections', snapshot.runSummary.stages.includes('sections'), true);
 
 // ---------------------------------------------------------------------------
 // 2) layout：group 归属与工具挂载
@@ -170,18 +170,18 @@ console.log('▶ layout：group / cell');
 const layout = deriveTrajectoryLayout(snapshot);
 checkEqual('layout turn 数', layout.length, 4);
 
-const classifyTurn = layout.find((turn) => turn.turn === 1);
-check('classify turn 的标签来自 turn 信息', classifyTurn?.label === 'classify');
-checkEqual('classify turn 的 group 数', classifyTurn?.groups.length, 1);
-checkEqual('首条消息归到 Message 组', classifyTurn?.groups[0]?.title, 'Message');
-check('工具记录归到含其 callId 的父消息同组', classifyTurn?.groups[0]?.cells.some((cell) => cell.kind === 'tool'));
+const sectionsTurn = layout.find((turn) => turn.turn === 1);
+check('sections turn 的标签来自 turn 信息', sectionsTurn?.label === 'sections');
+checkEqual('sections turn 的 group 数', sectionsTurn?.groups.length, 1);
+checkEqual('首条消息归到 Message 组', sectionsTurn?.groups[0]?.title, 'Message');
+check('工具记录归到含其 callId 的父消息同组', sectionsTurn?.groups[0]?.cells.some((cell) => cell.kind === 'tool'));
 
-const toolCell = classifyTurn?.groups[0]?.cells.find((cell) => cell.kind === 'tool');
+const toolCell = sectionsTurn?.groups[0]?.cells.find((cell) => cell.kind === 'tool');
 check('工具单元格带 schemaDetail', toolCell?.schemaDetail !== undefined);
 check('工具单元格带 inputDetail（参数）', (toolCell?.inputDetail ?? '').includes('a.ts'));
 check('工具单元格带 outputDetail（结果）', (toolCell?.outputDetail ?? '').includes('file content'));
 
-const messageCell = classifyTurn?.groups[0]?.cells.find((cell) => cell.kind === 'message');
+const messageCell = sectionsTurn?.groups[0]?.cells.find((cell) => cell.kind === 'message');
 check('消息单元格带用量', messageCell?.input === 100 && messageCell?.output === 20);
 check('消息单元格带 TTFT 时序事实', messageCell?.assistantMetrics?.timingRecorded === true);
 check('消息单元格带 contextWindow', messageCell?.sourceBlocks?.some((block) => block.type === 'tool-call') === true);
@@ -198,7 +198,7 @@ console.log('▶ 失败归属');
 
 const failEvents: RunEvent[] = [
   event({ kind: 'run_start', agent: RUN_LEVEL_AGENT, runKind: 'generate', targetDir: '/repo' }),
-  ...agentLifecycle(CLASSIFY_AGENT, { fail: true }),
+  ...agentLifecycle(SECTIONS_AGENT, { fail: true }),
   event({ kind: 'run_end', agent: RUN_LEVEL_AGENT, status: 'failed', durationMs: 100, error: 'boom' }),
 ];
 const failSnapshot = replayRunEvents(failEvents);

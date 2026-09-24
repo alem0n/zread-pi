@@ -5,8 +5,8 @@
  * 而 `config/index.ts` 依赖 `file-io.ts`（写配置）。若把档位常量留在 config，
  * 会形成 file-io ↔ config 循环；这里保持零依赖，两侧都从这里取。
  *
- * 档位语义（分类数 / 每分类文章数 / 标题精修）见 @zread-pi/types 的 BlueprintDetailLevel
- * 与 orchestrator 的 `agents/blueprint-detail.ts`（数量控制纯函数）。
+ * 档位语义（结构层的目标参数：分类数 / 每分类文章数）见 @zread-pi/types 的 BlueprintDetailLevel
+ * 与 orchestrator 的 `agents/blueprint-detail.ts`（档位参数表）。
  */
 
 import type { BlueprintConfig, BlueprintDetailLevel } from '@zread-pi/types';

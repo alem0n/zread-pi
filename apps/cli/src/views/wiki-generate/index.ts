@@ -179,7 +179,7 @@ export default class WikiGeneratePage extends Screen {
         seconds,
       });
     } else if (status === "loading" && stage) {
-      // 三阶段：分类 → 分主题 → 标题（带分类级进度）
+      // 结构优先：结构切分 → 分类命名 → 页面命名（带分类级进度）
       statusText = this.stageStatusText(stage, sectionsProgress, section);
     } else if (status === "loading" && phase === "tool" && currentTool) {
       // 工具调用
@@ -220,7 +220,7 @@ export default class WikiGeneratePage extends Screen {
     return [
       ...new Divider(this.t("wikiGenerate.catalogTitle")).render(width),
       statusRow(width, left, style(rightText, { color: rightColor })),
-      // 目录生成会并发跑多个 Agent：分类 / 每个分类的主题、标题 / 缩编 subagent，
+      // 目录生成会跑多个命名 Agent：分类命名 1 个 + 每个分类的页面命名，
       // 每个 Agent 一行（其中一行的用量不是目录级聚合，是该 Agent 自己的快照）
       ...this.renderAgentRows(width),
     ];

@@ -61,7 +61,7 @@ export type {
 } from './wiki/traceability.js'
 
 // Phase 3: Wiki Sync
-// 三阶段增量修补：diff → （按需）分类合并 → 按变更 section 分主题 / 标题；SyncDiff 语义与旧实现一致
+// 结构优先增量同步：diff → reconcileBlueprint（身份继承）→ 只对新增分类 / 页面命名；SyncDiff 语义与旧实现一致
 export { syncWiki, computeSyncDiff } from './wiki/sync-wiki.js'
 export type { SyncResult } from './wiki/sync-wiki.js'
 

@@ -66,14 +66,14 @@ export type CatalogAgentRole =
 /**
  * 单个目录 Agent 的展示状态。
  *
- * 目录生成会并发跑多个 Agent（分类 1 个 + 每个分类的主题 / 标题各 1 个，
- * 数量越界时还有缩编 subagent），UI 为每个 Agent 渲染一行，
+ * 目录生成会跑多个命名 Agent（分类命名 1 个 + 每个分类的页面命名 1 个），
+ * UI 为每个 Agent 渲染一行，
  * 行内用量是该 Agent **自己**的累计快照（不是目录级聚合）。
  */
 export interface CatalogAgentState {
   /** 生命周期状态 */
   status: Status;
-  /** 所属阶段（分类 / 分主题 / 标题） */
+  /** 所属阶段（结构切分 / 分类命名 / 页面命名；旧日志可能是分类 / 主题 / 标题） */
   stage: CatalogStage;
   /** Agent 角色（缩编 subagent 单独成行） */
   role: CatalogAgentRole;
@@ -109,9 +109,9 @@ export interface CatalogState {
   phase?: CatalogPhase;
   /** 当前工具名（tool 阶段） */
   currentTool?: string;
-  /** 当前蓝图阶段（分类 → 分主题 → 标题） */
+  /** 当前蓝图阶段（结构切分 → 分类命名 → 页面命名；旧日志可能是分类 / 主题 / 标题） */
   stage?: CatalogStage;
-  /** 当前处理的分类（topics / titles 阶段） */
+  /** 当前处理的分类（页面命名阶段） */
   section?: string;
   /** 当前阶段的分类级进度 */
   sectionsProgress?: { current: number; total: number };

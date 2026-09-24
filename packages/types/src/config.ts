@@ -201,14 +201,13 @@ export interface PolishConfig {
 /**
  * BlueprintDetailLevel - 蓝图细节档位（blueprint.detail）
  *
- * 决定三阶段蓝图（分类 → 分主题 → 标题）的「项目理解深度」：
- * - minimal：1 个分类（概览）· 1 篇全景导览，跳过标题精修，页面必须用 Mermaid 架构图梳理模块关系；
- * - low：3~5 个分类 · 每分类 1~3 篇，跳过标题精修；
+ * 决定结构层的目标参数（分类数 / 每分类文章数）；区间是目标不是硬约束
+ * （plan D7：结构层按代码库的实际结构选层，不再有数量回路）：
+ * - minimal：1 个分类（概览）· 1 篇全景导览，跳过两个命名 Agent，页面必须用 Mermaid 架构图梳理模块关系；
+ * - low：3~5 个分类 · 每分类 1~3 篇；
  * - medium：4~6 个分类 · 每分类 3~5 篇；
  * - high（默认）：4~8 个分类 · 每分类 3~10 篇（与旧行为一致）；
  * - max：4~8 个分类 · 每分类 5~12 篇，强调全面详尽与更深关联文件探索。
- *
- * 数量控制由四层机制承担：提示词数量目标 + 常驻数量反馈 + AI 归并 + 代码确定性兜底。
  */
 export type BlueprintDetailLevel = 'minimal' | 'low' | 'medium' | 'high' | 'max';
 
