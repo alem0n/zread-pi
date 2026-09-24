@@ -1,25 +1,27 @@
 /**
- * e2e-blueprint.ts —— Orchestrator 蓝图三阶段端到端验证（分类 → 分主题 → 标题）
+ * e2e-blueprint.ts —— Orchestrator 蓝图端到端验证（结构 → 分类命名 → 页面命名）
  *
  * 链路：generateWikiCatalog()
- *   -> 阶段 1 分类：submit_sections 写 wiki.json 骨架（sections + 空 pages）
- *   -> 阶段 2 分主题：每个 section 一个 Agent，submit_section_topics 增量归并页面
- *   -> 阶段 3 标题：每个 section 一个 Agent，refine_section_titles 写回精修标题
+ *   -> 阶段 0 结构：代码扫描符号 → 切片 / 归并 → 机器骨架落盘（无 LLM）
+ *   -> 阶段 1 分类命名：submit_sections 写 title / description / scope
+ *   -> 阶段 2 页面命名：每个 section 一个 Agent，submit_pages 写 title / summary / group / level
  *   -> 最后校验 wiki.json 可加载
  *
- * mock LLM 依据请求里的工具名区分四个角色（classify / topics / titles / page）。
+ * mock LLM 依据请求里的工具名区分两个命名角色（sections / pages），
+ * 并从提示词的 json fence 里解析机器骨架原样回填命名。
  *
  * 运行：bun run packages/orchestrator/test/e2e-blueprint.ts
  */
 
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
 	checks.push({ name, ok, detail });
-	console.log(`${ok ? "  ✅" : "  ❌"} ${name}${detail ? ` — ${detail}` : ""}`);
+	console.error(`${ok ? "  ✅" : "  ❌"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,16 @@ await mkdir(join(repo, "src"), { recursive: true });
 await writeFile(
 	join(repo, "src", "greet.ts"),
 	"export function greet(name: string): string {\n  return `hi ${name}`;\n}\n",
+	"utf-8",
+);
+await writeFile(
+	join(repo, "src", "math.ts"),
+	"export function add(a: number, b: number): number {\n  return a + b;\n}\n",
+	"utf-8",
+);
+await writeFile(
+	join(repo, "README.md"),
+	"# mock-repo\n一个用于端到端验证的最小仓库。\n",
 	"utf-8",
 );
 // 目标仓库自述：应被注入系统提示（AGENTS.md 优先于无）
@@ -49,77 +61,11 @@ await writeFile(
 );
 
 // ---------------------------------------------------------------------------
-// 2) 启动 mock OpenAI 兼容服务（按工具名分派四个角色）
+// 2) 启动 mock OpenAI 兼容服务（按工具名分派两个命名角色）
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [
-	{ title: "Overview", description: "项目定位与速览" },
-	{ title: "Core Architecture", description: "整体架构与模块协作" },
-	{ title: "核心模块", description: "问候模块的实现细节" },
-];
-
-const TOPICS: Record<string, Array<Record<string, unknown>>> = {
-	Overview: [
-		{
-			title: "项目概览",
-			slug: "project-overview",
-			level: "Beginner",
-			associatedFiles: ["README.md"],
-		},
-		{
-			title: "核心特性速览",
-			slug: "feature-tour",
-			level: "Beginner",
-			associatedFiles: ["src/"],
-		},
-		{
-			title: "设计目标与边界",
-			slug: "design-goals",
-			level: "Intermediate",
-			associatedFiles: ["README.md"],
-		},
-	],
-	"Core Architecture": [
-		{
-			title: "整体架构设计",
-			slug: "architecture",
-			level: "Intermediate",
-			associatedFiles: ["src/"],
-		},
-		{
-			title: "模块职责划分",
-			slug: "module-responsibilities",
-			level: "Intermediate",
-			associatedFiles: ["src/"],
-		},
-		{
-			title: "数据流与调用链",
-			slug: "data-flow",
-			level: "Advanced",
-			associatedFiles: ["src/"],
-		},
-	],
-	核心模块: [
-		{
-			title: "问候模块实现",
-			slug: "greet-module",
-			level: "Intermediate",
-			associatedFiles: ["src/greet.ts"],
-		},
-		{
-			title: "问候模块 API",
-			slug: "greet-api",
-			level: "Intermediate",
-			associatedFiles: ["src/greet.ts"],
-		},
-		{
-			title: "问候模块扩展点",
-			slug: "greet-extension",
-			level: "Advanced",
-			associatedFiles: ["src/greet.ts"],
-		},
-	],
-};
+const BASE_SECTION_IDS = ["overview", "core"];
+const NAMED_SUFFIX = "（命名）";
 
 function contentToText(content: unknown): string {
 	if (typeof content === "string") return content;
@@ -135,6 +81,19 @@ function contentToText(content: unknown): string {
 			.join("\n");
 	}
 	return "";
+}
+
+/** 从提示词里抠出第一个 json fence 的 payload */
+function parseJsonFence(text: string, key: string): unknown[] {
+	const match = /```json\n([\s\S]*?)\n```/.exec(text);
+	if (!match) return [];
+	try {
+		const payload = JSON.parse(match[1]) as Record<string, unknown>;
+		const value = payload[key];
+		return Array.isArray(value) ? value : [];
+	} catch {
+		return [];
+	}
 }
 
 function chunk(payload: Record<string, unknown>): string {
@@ -171,15 +130,15 @@ function textChunk(text: string): string {
 	return chunk(baseChunk({ role: "assistant", content: text }, null)) + chunk(baseChunk({}, "stop"));
 }
 
-/** 场景：ok（正常三阶段）| no-sections（分类不调工具）| section-skip（某分类不调工具） */
-let mode: "ok" | "no-sections" | "section-skip" = "ok";
+/** 场景：ok（正常命名）| section-skip（某分类页面不调工具）| no-structure（无可解析源文件，致命） */
+let mode: "ok" | "section-skip" | "no-structure" = "ok";
+/** section-skip 场景下要跳过的分类标题 */
+let skipSection = "";
 /** 记录每次请求的 system 消息（验证上下文文件注入） */
 const seenSystemPrompts: string[] = [];
 const seenSections: string[] = [];
 /** 记录每次请求的输出上限（验证 llm.max_tokens 覆盖下发；openai-completions 依 compat 用 max_tokens 或 max_completion_tokens） */
 const seenMaxTokens: Array<number | undefined> = [];
-/** 记录工具结果内容（验证常驻数量反馈） */
-const seenToolResults: string[] = [];
 let requestCount = 0;
 /** 单次请求的 mock 用量（断言「跨 Agent 聚合」时按请求数换算） */
 let totalInputTokens = 0;
@@ -190,7 +149,7 @@ const server = Bun.serve({
 	async fetch(request) {
 		requestCount += 1;
 		const body = (await request.json()) as {
-			messages?: Array<{ role?: string; content?: unknown }>;
+			messages?: Array<{ role?: string; content?: unknown }> ;
 			tools?: Array<{ function?: { name?: string } }>;
 			max_tokens?: number;
 			max_completion_tokens?: number;
@@ -211,10 +170,7 @@ const server = Bun.serve({
 				.filter((name): name is string => typeof name === "string"),
 		);
 		const hasToolResult = messages.some((message) => message.role === "tool");
-		for (const message of messages) {
-			if (message.role === "tool") seenToolResults.push(contentToText(message.content));
-		}
-		const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
+		const section = /^- 分类：(.+)$/m.exec(promptText)?.[1]?.trim() ?? "";
 		if (section) seenSections.push(section);
 
 		const encoder = new TextEncoder();
@@ -224,28 +180,42 @@ const server = Bun.serve({
 
 				if (!hasToolResult) {
 					if (toolNames.has("submit_sections")) {
-						if (mode === "no-sections") {
-							write(textChunk("分类完成"));
+						// 分类命名：从机器清单原样回填（基础分类只补 scope）
+						const machineSections = parseJsonFence(promptText, "machineSections");
+						write(
+						 toolCall("call_sections", "submit_sections", {
+							sections: machineSections.map((entry) => {
+								const item = entry as { id: string; title: string };
+								const isBase = BASE_SECTION_IDS.includes(item.id);
+								return {
+									id: item.id,
+									...(isBase
+										? {}
+										: { title: `${item.title}${NAMED_SUFFIX}`, description: `${item.title} 的命名说明` }),
+									scope: [`包含：${item.title} 的能力域`, "不包含：相邻分类"],
+								};
+							}),
+						}));
+					} else if (toolNames.has("submit_pages")) {
+						if (mode === "section-skip" && section === skipSection) {
+							write(textChunk("本分类暂不命名"));
 						} else {
-							write(toolCall("call_sections", "submit_sections", { sections: SECTIONS }));
-						}
-					} else if (toolNames.has("submit_section_topics")) {
-						if (mode === "section-skip" && section === "核心模块") {
-							write(textChunk("本分类暂不规划"));
-						} else {
+							const machinePages = parseJsonFence(promptText, "machinePages");
 							write(
-								toolCall(`call_topics_${section}`, "submit_section_topics", {
+								toolCall(`call_pages_${section}`, "submit_pages", {
 									section,
-									topics: TOPICS[section] ?? [],
+									pages: machinePages.map((entry) => {
+										const item = entry as { id: string; label: string };
+										return {
+											id: item.id,
+											title: `${item.label}${NAMED_SUFFIX}`,
+											summary: `${item.label} 的页面摘要`,
+											level: "Intermediate",
+										};
+									}),
 								}),
 							);
 						}
-					} else if (toolNames.has("refine_section_titles")) {
-						const titles = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^\[\n（]+)/gm)].map((match) => ({
-							slug: match[1],
-							title: `${match[2].trim()}（精修）`,
-						}));
-						write(toolCall(`call_titles_${section}`, "refine_section_titles", { section, titles }));
 					} else {
 						write(textChunk("done"));
 					}
@@ -309,13 +279,12 @@ process.chdir(repo);
 // ---------------------------------------------------------------------------
 
 const { generateWikiCatalog } = await import("../src/orchestrator.js");
-const { loadWikiBlueprint } = await import("@zread-pi/utils");
 
 // 默认配置档位 high：产物落在变体子目录 `.zread-pi/wiki/high/`
 const WIKI_DETAIL = "high";
 const wikiJsonPath = join(repo, ".zread-pi", "wiki", WIKI_DETAIL, "wiki.json");
 
-console.log("▶ generateWikiCatalog()（三阶段）…");
+console.error("▶ generateWikiCatalog()（结构 → 命名）…");
 const events: Array<{
 	type: string;
 	stage?: string;
@@ -329,7 +298,7 @@ const events: Array<{
 	contextTokens?: number;
 	contextWindow?: number;
 }> = [];
-let skeletonCheck: Promise<{ pages: number; sections: number }> | undefined;
+let skeletonSnapshot: { pages: unknown[]; sections: unknown[] } | undefined;
 
 const result = await generateWikiCatalog((event) => {
 	events.push({
@@ -345,11 +314,17 @@ const result = await generateWikiCatalog((event) => {
 		contextTokens: event.contextTokens,
 		contextWindow: event.contextWindow,
 	});
-	if (event.stage === "classify" && event.type === "tool_result" && !skeletonCheck) {
-		skeletonCheck = loadWikiBlueprint(undefined, WIKI_DETAIL).then((blueprint) => ({
-			pages: blueprint.pages.length,
-			sections: blueprint.sections?.length ?? 0,
-		}));
+	// 结构阶段落盘后骨架即可加载（sections / pages / coverage 一起落盘，永不悬挂）
+	// 同步快照：promise 的 resolve 时机晚于后续阶段，会读到命名后的页面
+	if (event.stage === "structure" && event.agentStatus === "completed" && !skeletonSnapshot) {
+		try {
+			skeletonSnapshot = JSON.parse(readFileSync(wikiJsonPath, "utf-8")) as {
+				pages: unknown[];
+				sections: unknown[];
+			};
+		} catch {
+			skeletonSnapshot = undefined;
+		}
 	}
 });
 
@@ -370,38 +345,54 @@ interface PageShape {
 	file: string;
 	section: string;
 	level?: string;
-	associatedFiles?: string[];
+	topicSummary?: string;
+	ownsFiles?: string[];
 }
 
 const pages = ((blueprint?.pages as PageShape[] | undefined) ?? []).slice();
-const sections = ((blueprint?.sections as Array<{ title: string }> | undefined) ?? []).slice();
+const sections = ((blueprint?.sections as Array<{ title: string; id?: string; scope?: string[] }> | undefined) ?? []).slice();
+const structureSections = sections.filter((section) => section.id && !BASE_SECTION_IDS.includes(section.id));
 
-console.log("\n▶ 断言（三阶段正向）");
+console.error("\n▶ 断言（结构优先正向）");
 check("wiki.json 已写出", blueprint !== undefined, wikiJsonPath);
-check("页面数与主题阶段一致", pages.length === 9, `实际 ${pages.length}`);
-check("sectionsCount 已回传", result.sectionsCount === 3, String(result.sectionsCount));
-check("pagesCount 已回传", result.pagesCount === 9, String(result.pagesCount));
+check("schemaVersion = 2", blueprint?.schemaVersion === 2, String(blueprint?.schemaVersion));
+check("sectionsCount 已回传", result.sectionsCount === sections.length, `${result.sectionsCount} / ${sections.length}`);
+check("pagesCount 已回传", result.pagesCount === pages.length, `${result.pagesCount} / ${pages.length}`);
 check("failedSections 为空", result.failedSections === undefined, JSON.stringify(result.failedSections));
 
 check(
-	"分类清单含强制基础分类（Overview/Core Architecture）",
+	"分类清单含强制基础分类（Overview / Core Architecture）",
 	["Overview", "Core Architecture"].every((title) => sections.some((section) => section.title === title)),
 	JSON.stringify(sections.map((section) => section.title)),
 );
 check(
-	"模型新增的“核心模块”分类被保留",
-	sections.some((section) => section.title === "核心模块"),
-	JSON.stringify(sections.map((section) => section.title)),
+	"存在机器切出的结构分类（id 形如 sec-*）",
+	structureSections.length >= 1,
+	JSON.stringify(sections.map((section) => `${section.id}:${section.title}`)),
 );
 check(
-	"阶段 1 落盘后骨架即可加载（sections 非空、pages 为空）",
-	skeletonCheck !== undefined,
+	"每个页面的 section 都在分类清单里",
+	pages.length > 0 && pages.every((page) => sections.some((section) => section.title === page.section)),
+	JSON.stringify(pages.map((page) => `${page.slug}@${page.section}`)),
 );
-const skeleton = skeletonCheck ? await skeletonCheck : undefined;
 check(
-	"骨架快照：sections>=3 且 pages=0",
-	skeleton !== undefined && skeleton.sections >= 3 && skeleton.pages === 0,
-	JSON.stringify(skeleton),
+	"每个结构分类至少有一个切片页",
+	structureSections.every((section) => pages.some((page) => page.section === section.title)),
+	JSON.stringify(structureSections.map((section) => section.title)),
+);
+
+const skeleton = skeletonSnapshot;
+check(
+	"结构阶段落盘后骨架即可加载（sections / pages 数量齐备，页面为机器标题）",
+	skeleton !== undefined &&
+		skeleton.sections.length === sections.length &&
+		skeleton.pages.length === pages.length &&
+		(skeleton.pages as Array<{ title: string }>).every((page) => !page.title.endsWith(NAMED_SUFFIX)),
+	JSON.stringify(
+		skeleton === undefined
+			? null
+			: { sections: skeleton.sections.length, pages: skeleton.pages.length },
+	) + ` final sections=${sections.length} pages=${pages.length}`,
 );
 
 check(
@@ -410,30 +401,40 @@ check(
 	JSON.stringify(pages.map((page) => `${page.slug}/${page.file}`)),
 );
 check(
-	"标题阶段写回生效（全部标题被精修）",
-	pages.every((page) => page.title.endsWith("（精修）")),
+	"页面命名写回生效（结构分类页标题带命名后缀）",
+	pages.filter((page) => structureSections.some((section) => section.title === page.section)).every((page) => page.title.endsWith(NAMED_SUFFIX)),
 	JSON.stringify(pages.map((page) => page.title)),
 );
 check(
-	"每个页面的 section 都在分类清单里",
-	pages.every((page) => sections.some((section) => section.title === page.section)),
-	JSON.stringify(pages.map((page) => `${page.slug}@${page.section}`)),
+	"页面命名写回 topicSummary",
+	pages.every((page) => typeof page.topicSummary === "string" && page.topicSummary.length > 0),
+	JSON.stringify(pages.map((page) => page.topicSummary)),
 );
 check(
 	"难度等级被归一化（Beginner/Intermediate/Advanced）",
 	pages.every((page) => ["Beginner", "Intermediate", "Advanced"].includes(page.level ?? "")),
 	JSON.stringify(pages.map((page) => page.level)),
 );
+check(
+	"结构分类页拥有源文件（ownsFiles 非空）",
+	pages.filter((page) => structureSections.some((section) => section.title === page.section)).every((page) => (page.ownsFiles?.length ?? 0) > 0),
+	JSON.stringify(pages.map((page) => `${page.slug}:${page.ownsFiles?.length ?? 0}`)),
+);
+check(
+	"页面 ownsFiles 互斥（一文件只归一页）",
+	new Set(pages.flatMap((page) => page.ownsFiles ?? [])).size === pages.flatMap((page) => page.ownsFiles ?? []).length,
+	JSON.stringify(pages.flatMap((page) => page.ownsFiles ?? [])),
+);
 
 const stages = new Set(events.filter((event) => event.stage).map((event) => event.stage));
 check(
-	"进度事件带 stage（classify / topics / titles）",
-	stages.has("classify") && stages.has("topics") && stages.has("titles"),
+	"进度事件带 stage（structure / sections / pages）",
+	stages.has("structure") && stages.has("sections") && stages.has("pages"),
 	[...stages].join(","),
 );
 check(
-	"分主题事件带分类级进度（total=3）",
-	events.some((event) => event.stage === "topics" && event.progressTotal === 3),
+	"页面命名事件带分类级进度（total = 分类数）",
+	events.some((event) => event.stage === "pages" && event.progressTotal === sections.length),
 	JSON.stringify(events.filter((event) => event.progressTotal !== undefined).slice(0, 5)),
 );
 
@@ -441,26 +442,26 @@ check(
 // （UI 据此把「目录」展开成每个 Agent 一行）
 const agentEvents = events.filter((event) => event.agentKey !== undefined);
 const agentKeys = [...new Set(agentEvents.map((event) => event.agentKey))];
-const topicsKeys = [...new Set(agentEvents.filter((event) => event.agentRole === "topics").map((event) => event.agentKey))];
-const titlesKeys = [...new Set(agentEvents.filter((event) => event.agentRole === "titles").map((event) => event.agentKey))];
+const sectionsKeys = [...new Set(agentEvents.filter((event) => event.agentRole === "sections").map((event) => event.agentKey))];
+const pagesKeys = [...new Set(agentEvents.filter((event) => event.agentRole === "pages").map((event) => event.agentKey))];
 check(
-	"分类别 Agent 有独立行（agentKey=classify）",
-	agentKeys.includes("classify"),
+	"结构阶段有独立 Agent 行（agentKey=structure）",
+	agentKeys.includes("structure"),
 	JSON.stringify(agentKeys),
 );
 check(
-	"每个分类一个主题 Agent 行（3 行）",
-	topicsKeys.length === 3,
-	JSON.stringify(topicsKeys),
+	"分类命名只有 1 个 Agent 行（单 Agent）",
+	sectionsKeys.length === 1,
+	JSON.stringify(sectionsKeys),
 );
 check(
-	"每个有页面的分类一个标题 Agent 行（3 行）",
-	titlesKeys.length === 3,
-	JSON.stringify(titlesKeys),
+	"每个分类一个页面命名 Agent 行",
+	pagesKeys.length === sections.length,
+	JSON.stringify(pagesKeys),
 );
 check(
 	"每个 Agent 行都有 running 与 completed 终态（UI 行状态依据）",
-	topicsKeys.every(
+	pagesKeys.every(
 		(key) =>
 			agentEvents.some((event) => event.agentKey === key && event.agentStatus === "running") &&
 			agentEvents.some((event) => event.agentKey === key && event.agentStatus === "completed"),
@@ -480,8 +481,8 @@ check(
 );
 const visitedSections = new Set(seenSections);
 check(
-	"每个分类都跑到了主题/标题阶段",
-	["Overview", "Core Architecture", "核心模块"].every((title) => visitedSections.has(title)),
+	"每个分类都跑到了页面命名阶段",
+	sections.every((section) => visitedSections.has(section.title)),
 	[...visitedSections].join(","),
 );
 
@@ -493,21 +494,6 @@ check(
 	`usage=${JSON.stringify(result.tokenUsage)} mockTotals=${totalInputTokens}/${totalOutputTokens} requests=${requestCount}`,
 );
 check("durationMs 已回传", typeof result.durationMs === "number" && result.durationMs >= 0, String(result.durationMs));
-
-check(
-	"submit_sections 成功结果带常驻数量反馈（区间内也发）",
-	seenToolResults.some((content) =>
-		content.includes("分类数量反馈：当前 3 / 要求 3~8（当前档位：high）"),
-	),
-	seenToolResults.filter((content) => content.includes("数量反馈")).slice(0, 2).join(" || "),
-);
-check(
-	"submit_section_topics 成功结果带常驻数量反馈（区间内也发）",
-	seenToolResults.some((content) =>
-		content.includes("文章数量反馈：当前 3 / 要求 3~10（当前档位：high）"),
-	),
-	seenToolResults.filter((content) => content.includes("数量反馈")).slice(0, 2).join(" || "),
-);
 
 check(
 	"目标仓库 AGENTS.md 被注入系统提示（<project_context> 块）",
@@ -540,11 +526,12 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// 5) 失败语义 1：某分类不调用 submit_section_topics —— 记录 failedSections 但不阻断
+// 5) 失败语义：某分类不调用 submit_pages —— 记录 failedSections 但不阻断
 // ---------------------------------------------------------------------------
 
 mode = "section-skip";
-console.log("\n▶ generateWikiCatalog()（核心模块不调用工具）…");
+skipSection = structureSections[0]?.title ?? "";
+console.error(`\n▶ generateWikiCatalog()（「${skipSection}」不调用工具）…`);
 const partialAgentEvents: Array<{ agentKey?: string; agentStatus?: string }> = [];
 const partial = await generateWikiCatalog((event) => {
 	partialAgentEvents.push({ agentKey: event.agentKey, agentStatus: event.agentStatus });
@@ -558,41 +545,51 @@ try {
 const partialPages = ((partialBlueprint?.pages as PageShape[] | undefined) ?? []).slice();
 
 check(
-	"失败分类被记录到 failedSections（topics）",
-	partial.failedSections?.some((entry) => entry.section === "核心模块" && entry.stage === "topics") === true,
+	"失败分类被记录到 failedSections（pages）",
+	partial.failedSections?.some((entry) => entry.section === skipSection && entry.stage === "pages") === true,
 	JSON.stringify(partial.failedSections),
 );
-check("失败分类不阻断其余分类", partialPages.length === 6, `实际 ${partialPages.length}`);
+check("失败分类不阻断其余分类（页面数不变）", partialPages.length === pages.length, `实际 ${partialPages.length} / 期望 ${pages.length}`);
 check("失败后 wiki.json 仍可加载", partialBlueprint !== undefined);
-check("失败后 pagesCount 反映实际页面数", partial.pagesCount === 6, String(partial.pagesCount));
+check("失败后 pagesCount 反映实际页面数", partial.pagesCount === pages.length, String(partial.pagesCount));
+check(
+	"失败分类的页面保留机器标题（不带命名后缀）",
+	partialPages
+		.filter((page) => page.section === skipSection)
+		.every((page) => !page.title.endsWith(NAMED_SUFFIX)),
+	JSON.stringify(partialPages.filter((page) => page.section === skipSection).map((page) => page.title)),
+);
 check(
 	"未产出工具的分类其 Agent 行被标为 failed（业务判定，不是运行状态）",
 	partialAgentEvents.some(
 		(event) =>
 			event.agentKey !== undefined &&
-			event.agentKey.includes("核心模块") &&
-			event.agentKey.startsWith("topics:") &&
+			event.agentKey === `pages:${skipSection}` &&
 			event.agentStatus === "failed",
 	),
 	JSON.stringify(partialAgentEvents.filter((event) => event.agentStatus !== undefined).slice(-4)),
 );
 
 // ---------------------------------------------------------------------------
-// 6) 失败语义 2：分类阶段不产出 sections —— 必须报错
+// 6) 失败语义 2：无可解析源文件 —— 结构层致命报错（D21，不静默回退）
 // ---------------------------------------------------------------------------
 
-mode = "no-sections";
-await rm(wikiJsonPath, { force: true });
-console.log("\n▶ generateWikiCatalog()（分类不调用 submit_sections）…");
-const sectionsFailure = await generateWikiCatalog().then(
+mode = "no-structure";
+const emptyRepo = await mkdtemp(join(tmpdir(), "zread-pi-empty-"));
+await writeFile(join(emptyRepo, "README.md"), "# empty\n只有自述，没有可解析源文件。\n", "utf-8");
+const structureErrorCwd = process.cwd();
+process.chdir(emptyRepo);
+const structureFailure = await generateWikiCatalog().then(
 	() => null,
 	(err: unknown) => (err instanceof Error ? err.message : String(err)),
 );
 check(
-	"分类阶段未产出有效 wiki.json 时报错",
-	typeof sectionsFailure === "string" && sectionsFailure.includes("wiki.json"),
-	sectionsFailure ?? "(未报错)",
+	"无可解析源文件时结构层致命报错",
+	typeof structureFailure === "string" && structureFailure.includes("没有可解析的源文件"),
+	structureFailure ?? "(未报错)",
 );
+process.chdir(structureErrorCwd);
+await rm(emptyRepo, { recursive: true, force: true });
 
 // ---------------------------------------------------------------------------
 // 7) 模型大小覆盖：llm.context_window / llm.max_tokens 下发到运行时
@@ -619,7 +616,7 @@ await writeFile(
 	].join("\n"),
 	"utf-8",
 );
-console.log("\n▶ generateWikiCatalog()（llm.context_window/max_tokens 覆盖）…");
+console.error("\n▶ generateWikiCatalog()（llm.context_window/max_tokens 覆盖）…");
 const overrideEvents: Array<{ contextWindow?: number }> = [];
 const overrideMaxTokensSeen = [...seenMaxTokens];
 await generateWikiCatalog((event) => {
@@ -643,7 +640,7 @@ check(
 
 mode = "ok";
 await rm(wikiJsonPath, { force: true });
-console.log("\n▶ generateWikiCatalog()（runLog 自动落盘 + 并发归属）…");
+console.error("\n▶ generateWikiCatalog()（runLog 自动落盘 + 并发归属）…");
 const {
 	listRuns,
 	readEvents,
@@ -683,7 +680,11 @@ check("末事件是 run_end", logEvents[logEvents.length - 1]?.kind === "run_end
 
 // 事件携带 agent 身份与 sessionId（轨迹回放并发归属的依据）
 const agentConfigs = logEvents.filter((event) => event.kind === "agent_config");
-check("有 agent_config 事件（1 分类 + N 主题 + N 标题）", agentConfigs.length >= 7, `count=${agentConfigs.length}`);
+check(
+	"有 agent_config 事件（1 分类 + N 页面命名；结构阶段是代码无 Agent）",
+	agentConfigs.length === sections.length + 1,
+	`count=${agentConfigs.length} 期望=${sections.length + 1}`,
+);
 const sessions = agentConfigs
 	.map((event) => event.agent?.sessionId)
 	.filter((value): value is string => typeof value === "string");
@@ -723,7 +724,7 @@ check("replay 的 turn 数 = agent_config 数", sessionSnapshot.turns.length ===
 const assistantBySession = new Map(
 	facts.map((fact) => [
 		fact.sessionId,
-		fact.entries.filter((entry) => entry.type === "message" && entry.message?.role === "assistant").length,
+		facts.length === 0 ? 0 : fact.entries.filter((entry) => entry.type === "message" && entry.message?.role === "assistant").length,
 	]),
 );
 let mismatches = 0;
@@ -750,10 +751,8 @@ await rm(repo, { recursive: true, force: true });
 await rm(home, { recursive: true, force: true });
 
 const failed = checks.filter((entry) => !entry.ok);
-console.log(`\n结果：${checks.length - failed.length}/${checks.length} 通过`);
+console.error(`\n结果：${checks.length - failed.length}/${checks.length} 通过`);
 if (failed.length > 0) {
 	console.error("失败项：", failed.map((entry) => entry.name).join(", "));
 	process.exit(1);
 }
-
-

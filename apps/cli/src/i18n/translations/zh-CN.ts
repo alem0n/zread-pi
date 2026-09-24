@@ -414,12 +414,21 @@ export const zhCN: TranslationKeys = {
     agentTitles: '精修标题 · {section}',
     agentCondenseSections: '精简主题',
     agentCondenseTopics: '精简标题 · {section}',
+    // 结构优先蓝图的新角色（旧键保留，供旧日志回放）
+    agentStructure: '结构切分',
+    agentSections: '命名分类',
+    agentPages: '命名页面 · {section}',
     // 三阶段进度：与 Agent 行同词，避免同一阶段出现两种叫法
     stageClassify: '规划主题中',
     stageTopics: '拟定标题 {current}/{total}',
     stageTitles: '精修标题 {current}/{total}',
     stageTopicsIdle: '拟定标题中',
     stageTitlesIdle: '精修标题中',
+    // 结构优先蓝图的新阶段（旧键保留，供旧日志回放）
+    stageStructure: '结构切分中',
+    stageSections: '命名分类中',
+    stagePages: '命名页面 {current}/{total}',
+    stagePagesIdle: '命名页面中',
     stageSection: ' · {section}',
     failedSections: '{n} 个分类失败',
     gateWarn: '密度门未达标',

@@ -104,46 +104,34 @@ export {
 export type { ReaderLanguage } from './agents/reader-first.js'
 export { READER_FIRST_TAG } from './agents/reader-first.js'
 
-// 蓝图细节档位（blueprint.detail）：数量区间 / 数量反馈 / 归并策略 / 缩编与代码兜底
-// 纯函数（数量控制四层机制的第 1、2、4 层；第 3 层缩编 subagent 在 blueprint-stages.ts）
+// 蓝图细节档位（blueprint.detail）：数量区间是**机器目标参数**（算 minSliceSize 与选层窗口）
 export {
   BLUEPRINT_DETAIL_SPECS,
-  CONDENSE_SYSTEM_PROMPT,
-  DEFAULT_CONDENSE_TOKEN_BUDGET,
-  MAX_QUANTITY_FEEDBACK_ROUNDS,
   MINIMAL_PANORAMA_REQUIREMENT,
-  QUANTITY_FALLBACK_NOTE,
-  buildCondenseSectionTask,
-  buildCondenseTopicsTask,
-  buildSectionQuantityStrategy,
-  buildTopicsQuantityStrategy,
-  codeFallbackSections,
-  condenseTopicsToMax,
-  formatQuantityFeedback,
   getDetailSpec,
-  judgeQuantity,
 } from './agents/blueprint-detail.js'
-export type {
-  BlueprintDetailSpec,
-  DetailRange,
-  QuantityToolState,
-  QuantityVerdict,
-} from './agents/blueprint-detail.js'
+export type { BlueprintDetailSpec, DetailRange } from './agents/blueprint-detail.js'
 
-// 蓝图阶段提示词渲染（数量目标按档位参数化）
-export { renderClassifyPrompt } from './prompts/classify'
-export type { ClassifyPromptOptions } from './prompts/classify'
-export { renderTopicsPrompt, SYNC_TOPICS_RULES } from './prompts/topics'
-export type { TopicsPromptOptions } from './prompts/topics'
-
-// 蓝图输出工具（数量反馈 / 越界不落盘 / 缩编一次性输出工具）
+// 蓝图阶段提示词渲染（命名阶段；机器骨架以 json fence 给出）
 export {
-  createSubmitSectionsTool,
-  createSubmitSectionTopicsTool,
-  createSubmitCondensedSectionsTool,
-  createSubmitCondensedTopicsTool,
-} from './tools/output-tools.js'
-export type { CondensedSectionCapture, CondensedTopicCapture } from './tools/output-tools.js'
+  renderSectionsNamingPrompt,
+  renderMachineSectionsFence,
+  machineSectionViews,
+} from './prompts/classify.js'
+export type {
+  SectionsNamingPromptOptions,
+  MachineSectionView,
+} from './prompts/classify.js'
+export {
+  renderPagesNamingPrompt,
+  renderMachinePagesFence,
+  machinePageViews,
+  SYNC_NAMING_RULES,
+} from './prompts/topics.js'
+export type { PagesNamingPromptOptions, MachinePageView } from './prompts/topics.js'
+
+// 蓝图命名工具（只写语义字段；结构由机器蓝图锁定）
+export { createSubmitSectionsTool, createSubmitPagesTool } from './tools/output-tools.js'
 
 // Types
 export * from './types.js'

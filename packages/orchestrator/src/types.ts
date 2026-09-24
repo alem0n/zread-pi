@@ -45,11 +45,11 @@ export interface BlueprintResult {
   tokenUsage?: TokenUsage;
 }
 
-/** 蓝图三阶段（分类 → 分主题 → 标题） */
-export type CatalogStage = 'classify' | 'topics' | 'titles';
+/** 蓝图三阶段（结构 → 分类命名 → 页面命名） */
+export type CatalogStage = 'structure' | 'sections' | 'pages';
 
-/** 产生目录事件的 Agent 角色（每个 Agent 一行；缩编 subagent 单独成行） */
-export type CatalogAgentRole = 'classify' | 'topics' | 'titles' | 'condense';
+/** 产生目录事件的 Agent 角色（每个 Agent 一行） */
+export type CatalogAgentRole = 'structure' | 'sections' | 'pages';
 
 /** 单个目录 Agent 的生命周期状态 */
 export type CatalogAgentStatus = 'waiting' | 'running' | 'completed' | 'failed';
@@ -58,8 +58,8 @@ export type CatalogAgentStatus = 'waiting' | 'running' | 'completed' | 'failed';
 export interface BlueprintFailedSection {
   /** 分类标题 */
   section: string;
-  /** 失败的阶段 */
-  stage: 'topics' | 'titles';
+  /** 失败的阶段（页面命名） */
+  stage: 'pages';
   /** 失败原因（模型未调用工具 / Agent 报错等） */
   error: string;
 }

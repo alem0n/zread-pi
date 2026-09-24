@@ -214,7 +214,7 @@ export { WikiStore } from './storage/wiki-store.js';
 export { generateSnapshotName, createVersionSnapshot } from './storage/versioning.js';
 
 // Output
-// 三阶段蓝图（分类 → 分主题 → 标题）的落盘设施：骨架 / 分类归并 / 主题归并 / 标题写回
+// 结构优先蓝图的落盘设施：机器骨架 / 命名写回 / 旧三阶段的归并设施（供 sync 兼容期使用）
 export {
   generateWikiJson,
   loadWikiBlueprint,
@@ -231,6 +231,10 @@ export {
   mergeSectionTopics,
   applySectionTitles,
   writeWikiPages,
+  buildMachineBlueprint,
+  initWikiBlueprint,
+  applySectionNames,
+  applyPageNames,
 } from './output/wiki-content.js';
 export type {
   MergeTopicsResult,
@@ -238,6 +242,13 @@ export type {
   ApplyTitlesResult,
   BlueprintSectionOptions,
   BlueprintSkeletonOptions,
+  MachinePageEntry,
+  MachineBlueprint,
+  MachineBlueprintOptions,
+  ApplySectionNamesResult,
+  ApplySectionNamesOptions,
+  ApplyPageNamesResult,
+  ApplyPageNamesOptions,
 } from './output/wiki-content.js';
 
 // Provider Registry

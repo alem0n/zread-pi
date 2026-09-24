@@ -415,12 +415,21 @@ export const enUS: TranslationKeys = {
     agentTitles: 'Refining titles · {section}',
     agentCondenseSections: 'Trimming themes',
     agentCondenseTopics: 'Trimming titles · {section}',
+    // Structure-first blueprint roles (legacy keys kept for old run replay)
+    agentStructure: 'Structuring',
+    agentSections: 'Naming sections',
+    agentPages: 'Naming pages · {section}',
     // Three-stage progress: same wording as the agent rows
     stageClassify: 'Planning themes',
     stageTopics: 'Drafting titles {current}/{total}',
     stageTitles: 'Refining titles {current}/{total}',
     stageTopicsIdle: 'Drafting titles',
     stageTitlesIdle: 'Refining titles',
+    // Structure-first blueprint stages (legacy keys kept for old run replay)
+    stageStructure: 'Structuring',
+    stageSections: 'Naming sections',
+    stagePages: 'Naming pages {current}/{total}',
+    stagePagesIdle: 'Naming pages',
     stageSection: ' · {section}',
     failedSections: '{n} section(s) failed',
     gateWarn: 'below content gate',

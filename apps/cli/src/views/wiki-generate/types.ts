@@ -9,15 +9,20 @@
  */
 
 import type { WikiPage } from '@zread-pi/types';
-import type { TokenUsage, BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus, ContentGateReport } from '@zread-pi/orchestrator';
+import type {
+  TokenUsage,
+  BlueprintFailedSection,
+  CatalogAgentStatus,
+  ContentGateReport,
+} from '@zread-pi/orchestrator';
 
 // ==================== 基础状态类型 ====================
 
 /** 统一状态枚举 */
 export type Status = 'waiting' | 'loading' | 'completed' | 'failed';
 
-/** 蓝图三阶段（分类 → 分主题 → 标题） */
-export type CatalogStage = 'classify' | 'topics' | 'titles';
+/** 蓝图阶段（结构优先：结构 → 分类命名 → 页面命名；含 legacy 三值，旧日志回放用） */
+export type CatalogStage = 'structure' | 'sections' | 'pages' | 'classify' | 'topics' | 'titles';
 
 /** 目录生成阶段 */
 export type CatalogPhase = 'scanning' | 'requesting' | 'responding' | 'tool' | 'retry';
@@ -42,10 +47,19 @@ export type {
   TokenUsage,
   ArticleEventPayload,
   BlueprintFailedSection,
-  CatalogAgentRole,
   CatalogAgentStatus,
   ContentGateReport,
 } from '@zread-pi/orchestrator';
+
+/** 目录 Agent 角色（含 legacy 旧值，旧日志回放用） */
+export type CatalogAgentRole =
+  | 'structure'
+  | 'sections'
+  | 'pages'
+  | 'classify'
+  | 'topics'
+  | 'titles'
+  | 'condense';
 
 // ==================== 目录 Agent 行（每个 Agent 一行） ====================
 

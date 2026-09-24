@@ -1,6 +1,6 @@
 /**
  * mock-wiki-run.ts —— 离线全链路试跑：用本地 mock LLM 对任意目标仓库跑一遍
- * 「三阶段蓝图（分类 → 分主题 → 标题） -> 并行页面生成」，不需要任何真实 API Key。
+ * 「结构优先蓝图（结构 → 分类命名 → 页面命名） -> 并行页面生成」，不需要任何真实 API Key。
  *
  * 用途：验证流水线是否正常（扫描/AST/工具落盘/事件/并发），或在没有额度时做回归。
  * 真实模型请用 `bun run cli`（读 ~/.zread-pi/config.yaml）。
@@ -38,42 +38,8 @@ for (const relative of entries) {
 	}
 }
 
-const slugify = (value: string): string =>
-	value
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "") || "page";
-
-/** 分类阶段交给 mock LLM 的分类清单（概览/核心架构是强制基础分类；low 档位 2~5 个） */
-const SECTIONS = [
-	{ title: "概览", description: "项目定位与整体速览" },
-	{ title: "核心架构", description: "核心模块与实现细节" },
-];
-
-/** 分主题阶段：每个分类的文章主题（low 档位每分类 1~3 篇；核心架构覆盖扫描到的源文件） */
-const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
-	概览: [
-		{
-			title: "项目概览",
-			slug: "project-overview",
-			level: "Beginner",
-			associatedFiles: entries.filter((entry) => entry.toLowerCase().includes("readme")).slice(0, 1),
-		},
-	],
-	核心架构: entries.slice(0, 3).map((relative) => ({
-		title: basename(relative, extname(relative)),
-		slug: slugify(basename(relative, extname(relative))),
-		level: "Intermediate",
-		associatedFiles: [relative],
-	})),
-};
-
-const expectedPages = Object.values(TOPICS_BY_SECTION).reduce((sum, topics) => sum + topics.length, 0);
-
-if (expectedPages === 0) {
-	console.error(`目标目录没有可扫描的源文件: ${target}`);
-	process.exit(1);
-}
+const BASE_SECTION_IDS = ["overview", "core"];
+const NAMED_SUFFIX = "（命名）";
 
 // ---------------------------------------------------------------------------
 // 1) mock LLM（OpenAI 兼容）
@@ -120,6 +86,19 @@ function toolCall(id: string, name: string, args: unknown): string {
 }
 function textChunk(text: string): string {
 	return chunk(baseChunk({ role: "assistant", content: text }, null)) + chunk(baseChunk({}, "stop"));
+}
+
+/** 从提示词里抠出第一个 json fence 的 payload（机器骨架） */
+function parseJsonFence(text: string, key: string): unknown[] {
+	const match = /```json\n([\s\S]*?)\n```/.exec(text);
+	if (!match) return [];
+	try {
+		const payload = JSON.parse(match[1]) as Record<string, unknown>;
+		const value = payload[key];
+		return Array.isArray(value) ? value : [];
+	} catch {
+		return [];
+	}
 }
 const usageChunk = JSON.stringify({
 	id: "chatcmpl-mock",
@@ -202,7 +181,7 @@ const server = Bun.serve({
 				.map((tool) => tool?.function?.name)
 				.filter((name): name is string => typeof name === "string"),
 		);
-		const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
+		const section = /^- 分类：(.+)$/m.exec(promptText)?.[1]?.trim() ?? "";
 
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream<Uint8Array>({
@@ -210,21 +189,41 @@ const server = Bun.serve({
 				const write = (text: string): void => controller.enqueue(encoder.encode(text));
 
 				if (!hasToolResult) {
-					if (toolNames.has("submit_sections")) {
-						write(toolCall("call_sections", "submit_sections", { sections: SECTIONS }));
-					} else if (toolNames.has("submit_section_topics")) {
-						write(
-							toolCall(`call_topics_${section}`, "submit_section_topics", {
+													if (toolNames.has("submit_sections")) {
+								// 分类命名：从机器清单原样回填（基础分类只补 scope）
+								const machineSections = parseJsonFence(promptText, "machineSections");
+								write(
+								toolCall("call_sections", "submit_sections", {
+								sections: machineSections.map((entry) => {
+								const item = entry as { id: string; title: string };
+								const isBase = BASE_SECTION_IDS.includes(item.id);
+								return {
+								id: item.id,
+								...(isBase
+								? {}
+								: { title: `${item.title}${NAMED_SUFFIX}`, description: `${item.title} 的命名说明` }),
+								scope: [`包含：${item.title} 的能力域`, "不包含：相邻分类"],
+								};
+								}),
+								}),
+								);
+								} else if (toolNames.has("submit_pages")) {
+								// 页面命名：从机器清单原样回填（title / summary / level）
+								const machinePages = parseJsonFence(promptText, "machinePages");
+								write(
+								toolCall(`call_pages_${section}`, "submit_pages", {
 								section,
-								topics: TOPICS_BY_SECTION[section] ?? [],
-							}),
-						);
-					} else if (toolNames.has("refine_section_titles")) {
-						const titles = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^\[\n（]+)/gm)].map((match) => ({
-							slug: match[1],
-							title: match[2].trim(),
-						}));
-						write(toolCall(`call_titles_${section}`, "refine_section_titles", { section, titles }));
+								pages: machinePages.map((entry) => {
+								const item = entry as { id: string; label: string };
+								return {
+								id: item.id,
+								title: `${item.label}${NAMED_SUFFIX}`,
+								summary: `${item.label} 的页面摘要`,
+								level: "Intermediate",
+								};
+								}),
+								}),
+								);
 					} else if (isPageAgent || toolNames.has("write_page")) {
 						const slug = /\*\*Slug\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "page";
 						const file = /\*\*文件名\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? `${slug}.md`;
@@ -292,7 +291,7 @@ await writeFile(
 		"  model: mock-model",
 		"  api_key: sk-mock",
 		`  base_url: http://127.0.0.1:${server.port}/v1`,
-		// 离线试跑用 low 档位：3~5 个分类 · 每分类 1~3 篇，跳过标题精修（请求更少、产物更小）
+		// 离线试跑用 low 档位：目标参数 2~5 个分类 · 每分类 1~3 篇（结构由代码切分，LLM 只命名）
 		"blueprint:",
 		"  detail: low",
 		"concurrency:",
@@ -317,7 +316,7 @@ const { RunLogWriter } = await import("../packages/utils/src/trajectory-store/in
 // ---------------------------------------------------------------------------
 
 console.log(`▶ 目标仓库: ${target}`);
-console.log(`▶ 扫描到源文件: ${entries.length}，规划页面: ${expectedPages}`);
+console.log(`▶ 扫描到源文件: ${entries.length}`);
 
 const runLog = await RunLogWriter.create(target, { kind: "generate", detail: "low" });
 runLog.appendRunStart({ targetDir: target, detail: "low" });
@@ -379,7 +378,7 @@ await rm(home, { recursive: true, force: true });
 
 // 结构类检查必须全绿（SKIP 允许：mock 不产符号缓存，traceability 降级属预期）
 const structuralFailures = structural.filter((c) => c.status === 'FAIL');
-if (result.failed > 0 || result.completed !== expectedPages || structuralFailures.length > 0) {
+if (result.failed > 0 || result.completed !== catalog.pagesCount || structuralFailures.length > 0) {
 	if (structuralFailures.length > 0) {
 		console.log(`\n❌ 结构类检查失败 ${structuralFailures.length} 项`);
 		for (const c of structuralFailures) console.log(`   ✗ [${c.group}] ${c.message}`);
