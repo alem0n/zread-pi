@@ -58,6 +58,19 @@ export function buildPagePrompt(
   language?: string | null,
 ): string {
   const associatedFilesList = page.associatedFiles?.map(f => `- ${f}`).join('\n') || '（无关联路径）';
+  const ownsFilesList =
+    page.ownsFiles && page.ownsFiles.length > 0
+      ? page.ownsFiles.map((f) => `- ${f}`).join('\n')
+      : '（无独占文件——全局槽位页不拥有文件；旧产物无该字段时按关联路径兜底）';
+  const refs = page.refs ?? [];
+  const refsList =
+    refs.length > 0
+      ? refs.map((r) => `- \`${r.path}\`（${r.reason}，归属页面 \`${r.ownerSlug}\`）`).join('\n')
+      : '（无跨页引用）';
+  const seamsList =
+    refs.length > 0
+      ? refs.map((r) => `- \`${r.path}\` ← 归属 \`${r.ownerSlug}\` 的缝合线`).join('\n')
+      : '（本页文件未触及跨切片缝合线）';
   const topicSummary = page.topicSummary ? `\n**主题摘要**: ${page.topicSummary}` : '';
   const panorama = spec.panorama ? `\n\n---\n\n${MINIMAL_PANORAMA_REQUIREMENT}` : '';
   const wikiBase = variant ? `.zread-pi/wiki/${variant}` : '.zread-pi/wiki';
@@ -83,6 +96,15 @@ export function buildPagePrompt(
 ${associatedFilesList}
 
 **范围纪律**: 文章内容不得超出上面的主题摘要（若有）与关联路径所划定的范围；关联文档 / 源码导航只指向同分类或相邻分类。
+
+**本页拥有（ownsFiles）**: 文件级排他归属——这些文件由本页独占讲解，清单外的文件属于其它页面，不要代写。
+${ownsFilesList}
+
+**跨页引用（refs）**: 本页文件依赖的、归属其它页面的文件——只引用不讲解（沿用范围纪律，不重复展开别人的页面）。
+${refsList}
+
+**触及本页的缝合线**: 本页文件参与的跨切片依赖，供调用链 / 架构图 grounding 取数。
+${seamsList}
 
 ---
 

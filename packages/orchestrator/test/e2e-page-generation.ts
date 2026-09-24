@@ -13,6 +13,7 @@
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WikiPage } from "@zread-pi/types";
 
 const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -410,6 +411,55 @@ check(
 		!promptWithoutSummary.includes("**主题摘要**:") &&
 			promptWithoutSummary.includes("**关联路径**:") &&
 			promptWithoutSummary.includes("**范围纪律**:"),
+	);
+}
+
+// ---- 结构优先蓝图 v2：页面提示词注入 owns / refs / 缝合线三块（链 D）----
+{
+	const ownsPage: WikiPage = {
+		...pages[0],
+		ownsFiles: ["src/a.ts", "README.md"],
+		refs: [
+			{ path: "src/b.ts", reason: "import 来自 src/a.ts", ownerSlug: "2-arch" },
+			{ path: "src/c.ts", reason: "reexport 来自 src/a.ts", ownerSlug: "3-api" },
+		],
+	};
+	const prompt = buildPagePrompt(ownsPage, getDetailSpec("high"));
+	check(
+		"注入「本页拥有」块（ownsFiles 逐条列出）",
+		prompt.includes("**本页拥有（ownsFiles）**:") &&
+			prompt.includes("- src/a.ts") &&
+			prompt.includes("- README.md"),
+		prompt.split("\n").filter((line) => line.includes("ownsFiles") || line.startsWith("- src/")).join(" | "),
+	);
+	check(
+		"注入「跨页引用」块（path / reason / ownerSlug 三要素）",
+		prompt.includes("**跨页引用（refs）**:") &&
+			prompt.includes("`src/b.ts`（import 来自 src/a.ts，归属页面 `2-arch`）"),
+		prompt.split("\n").find((line) => line.includes("src/b.ts")) ?? "(无)",
+	);
+	check(
+		"注入「缝合线」块（跨切片依赖 grounding 取数）",
+		prompt.includes("**触及本页的缝合线**:") &&
+			prompt.includes("`src/b.ts` ← 归属 `2-arch` 的缝合线"),
+	);
+	check(
+		"三块都在范围纪律之后、输出路径规范之前",
+		prompt.indexOf("**范围纪律**:") < prompt.indexOf("**本页拥有（ownsFiles）**:") &&
+			prompt.indexOf("**触及本页的缝合线**:") < prompt.indexOf("## 输出路径规范"),
+	);
+
+	// 缺省时是空段而非删块（旧产物无 ownsFiles / refs）
+	const legacyPrompt = buildPagePrompt(pages[1], getDetailSpec("high"));
+	check(
+		"旧产物无 ownsFiles / refs：三块仍在，且给出空段文案",
+		legacyPrompt.includes("**本页拥有（ownsFiles）**:") &&
+			legacyPrompt.includes("（无独占文件") &&
+			legacyPrompt.includes("**跨页引用（refs）**:") &&
+			legacyPrompt.includes("（无跨页引用）") &&
+			legacyPrompt.includes("**触及本页的缝合线**:") &&
+			legacyPrompt.includes("（本页文件未触及跨切片缝合线）"),
+		legacyPrompt.split("\n").filter((line) => line.includes("（无") || line.includes("未触及")).join(" | "),
 	);
 }
 
