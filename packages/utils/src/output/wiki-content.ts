@@ -1079,6 +1079,220 @@ export async function applyPageNames(
   });
 }
 
+// ==================== sync 对齐（链 E） ====================
+
+export interface ReconcileResult {
+  /** 对齐后的机器蓝图（命中页继承旧身份，section 按多数票协调） */
+  blueprint: MachineBlueprint;
+  /** 需要命名的「新分类」id（无票 / 票冲突落败的结构分类） */
+  freshSectionIds: Set<string>;
+  /** 需要命名的「新页面」id（未命中任何旧页面的机器页） */
+  freshPageIds: Set<MachinePageId>;
+}
+
+/**
+ * reconcileBlueprint —— sync 的纯函数对齐（plan 链 E，确定性）。
+ *
+ * 页面匹配：`pair 重叠 = |oldPage.ownsFiles ∩ newPage.ownsFiles|`，
+ * 候选对按（重叠 desc, oldSlug asc, newSlug asc）排序 → 贪心双射
+ * （每边至多命中一次，重叠 ≥ 1）。槽位页（ownsFiles 为空）不参与匹配。
+ *
+ * - 命中页：整份身份继承 { slug, file, title, topicSummary, group, level }，
+ *   section 归属取机器新值；ownsFiles / associatedFiles / refs 取机器新值；
+ * - 未命中页 = 新页（fresh，待命名）；
+ * - 旧页 slug 不在结果集 → 归档（无条件，由 computeSyncDiff 判定）。
+ *
+ * 分类协调：结构分类得票 = 其命中页的旧 section title 集合；
+ * 多数票（> 命中页半数，平票取旧 wiki.json 中顺序靠前者）→ 继承旧 title / description / scope；
+ * 无票 / 落败 → 机器 title（计入新分类）。
+ * 基础分类：title / description 系统固定，description / scope 从旧 wiki.json 继承。
+ */
+export function reconcileBlueprint(
+  machine: MachineBlueprint,
+  old: WikiOutput,
+  config: AppConfig,
+): ReconcileResult {
+  const oldPages = Array.isArray(old.pages) ? old.pages : [];
+  const oldSections = Array.isArray(old.sections) ? old.sections : [];
+  const oldBySlug = new Map(oldPages.map((page) => [page.slug, page]));
+
+  // —— 页面匹配（贪心双射）——
+  interface Pair {
+    oldPage: WikiPage;
+    entry: MachinePageEntry;
+    overlap: number;
+  }
+  const pairs: Pair[] = [];
+  for (const entry of machine.pages) {
+    const newFiles = new Set(entry.page.ownsFiles ?? []);
+    if (newFiles.size === 0) continue; // 槽位页不参与
+    for (const oldPage of oldPages) {
+      const oldFiles = oldPage.ownsFiles ?? [];
+      if (oldFiles.length === 0) continue;
+      let overlap = 0;
+      for (const file of oldFiles) if (newFiles.has(file)) overlap += 1;
+      if (overlap > 0) pairs.push({ oldPage, entry, overlap });
+    }
+  }
+  pairs.sort(
+    (a, b) =>
+      b.overlap - a.overlap ||
+      a.oldPage.slug.localeCompare(b.oldPage.slug) ||
+      a.entry.page.slug.localeCompare(b.entry.page.slug),
+  );
+
+  const usedOld = new Set<string>();
+  const usedNew = new Set<string>();
+  const inheritedOf = new Map<string, WikiPage>(); // 机器页 slug → 旧页
+  for (const pair of pairs) {
+    if (usedOld.has(pair.oldPage.slug) || usedNew.has(pair.entry.page.slug)) continue;
+    usedOld.add(pair.oldPage.slug);
+    usedNew.add(pair.entry.page.slug);
+    inheritedOf.set(pair.entry.page.slug, pair.oldPage);
+  }
+
+  // 槽位页（ownsFiles 为空）没有文件重叠可匹配：按机器 slug 对齐槽位页
+  // （槽位 slug 由槽位种类决定，跨次运行稳定；页身份 = slug，见 plan 链 E）
+  for (const entry of machine.pages) {
+    if (usedNew.has(entry.page.slug)) continue;
+    if ((entry.page.ownsFiles ?? []).length > 0) continue;
+    const slotOld = oldPages.find((page) => page.slug === entry.page.slug && (page.ownsFiles ?? []).length === 0);
+    if (!slotOld || usedOld.has(slotOld.slug)) continue;
+    usedOld.add(slotOld.slug);
+    usedNew.add(entry.page.slug);
+    inheritedOf.set(entry.page.slug, slotOld);
+  }
+
+  // —— 分类协调：先算出每个机器分类的最终 title ——
+  const baseTitles = new Set(baseSectionsFor(config.doc_language).map((section) => section.title));
+  const oldSectionIndex = new Map(oldSections.map((section, index) => [section.title, index]));
+  const resolvedTitle = new Map<string, string>();
+  const freshSectionIds = new Set<string>();
+
+  for (const section of machine.sections) {
+    const id = section.id ?? '';
+    if (isBaseSectionId(id)) {
+      resolvedTitle.set(id, section.title); // 系统固定
+      continue;
+    }
+
+    // 该结构分类的命中页（用机器清单的 section title 归属筛选）
+    const sectionKey = section.title.trim().toLowerCase();
+    const matched = machine.pages.filter(
+      (entry) => entry.page.section.trim().toLowerCase() === sectionKey,
+    );
+    const inheritedPages = matched.filter((entry) => inheritedOf.has(entry.page.slug));
+
+    const votes = new Map<string, number>();
+    for (const entry of inheritedPages) {
+      const oldTitle = inheritedOf.get(entry.page.slug)?.section;
+      if (!oldTitle) continue;
+      votes.set(oldTitle, (votes.get(oldTitle) ?? 0) + 1);
+    }
+
+    const threshold = inheritedPages.length / 2;
+    let winner: string | null = null;
+    for (const [title, count] of [...votes.entries()].sort((a, b) => {
+      const indexDiff = (oldSectionIndex.get(a[0]) ?? Number.MAX_SAFE_INTEGER) -
+        (oldSectionIndex.get(b[0]) ?? Number.MAX_SAFE_INTEGER);
+      return b[1] - a[1] || indexDiff;
+    })) {
+      if (count > threshold) {
+        winner = title;
+        break;
+      }
+    }
+
+    if (winner !== null) {
+      resolvedTitle.set(id, winner);
+    } else {
+      resolvedTitle.set(id, section.title);
+      freshSectionIds.add(id);
+    }
+  }
+
+  // —— 页面：继承身份 + section 归属取协调后的 title ——
+  const freshPageIds = new Set<MachinePageId>();
+  const entries: MachinePageEntry[] = [];
+  for (const entry of machine.pages) {
+    const inherited = inheritedOf.get(entry.page.slug);
+    if (!inherited) {
+      freshPageIds.add(entry.id);
+      entries.push(entry);
+      continue;
+    }
+    entries.push({
+      ...entry,
+      page: {
+        ...entry.page,
+        slug: inherited.slug,
+        file: inherited.file,
+        title: inherited.title,
+        ...(inherited.topicSummary !== undefined ? { topicSummary: inherited.topicSummary } : {}),
+        ...(inherited.group !== undefined ? { group: inherited.group } : {}),
+        level: inherited.level,
+      },
+    });
+  }
+
+  // section 归属：按机器分类的协调结果重写每页的 section
+  const titleBySectionTitle = new Map<string, string>();
+  for (const section of machine.sections) {
+    titleBySectionTitle.set(section.title, resolvedTitle.get(section.id ?? '') ?? section.title);
+  }
+  for (const entry of entries) {
+    entry.page.section = titleBySectionTitle.get(entry.page.section) ?? entry.page.section;
+  }
+
+  // —— 基础分类的 description / scope 从旧产物继承 ——
+  const sections: WikiSection[] = machine.sections.map((section) => {
+    const id = section.id ?? '';
+    if (!isBaseSectionId(id)) {
+      const resolved = resolvedTitle.get(id);
+      if (resolved && resolved !== section.title) {
+        const oldSection = oldSections.find((entry) => entry.title === resolved);
+        return {
+          ...section,
+          title: resolved,
+          ...(oldSection?.description ? { description: oldSection.description } : {}),
+          ...(oldSection?.scope ? { scope: oldSection.scope } : {}),
+        };
+      }
+      return section;
+    }
+    const oldSection = oldSections.find((entry) => entry.title === section.title);
+    return {
+      ...section,
+      ...(oldSection?.description ? { description: oldSection.description } : {}),
+      ...(oldSection?.scope ? { scope: oldSection.scope } : {}),
+    };
+  });
+
+  // —— coverage 重算（slug 变了，fileOwner 必须重建）——
+  const fileOwner: Record<string, string> = {};
+  for (const entry of entries) {
+    for (const file of entry.page.ownsFiles ?? []) fileOwner[file] = entry.page.slug;
+  }
+  const slicesBySection: Record<string, string[]> = {};
+  for (const section of machine.sections) {
+    slicesBySection[section.id ?? ''] = [...(section.slices ?? [])];
+  }
+
+  return {
+    blueprint: {
+      sections,
+      pages: entries,
+      coverage: {
+        ...machine.coverage,
+        fileOwner,
+        slicesBySection,
+      },
+    },
+    freshSectionIds,
+    freshPageIds,
+  };
+}
+
 // ==================== 兼容旧流程 ====================
 
 /**

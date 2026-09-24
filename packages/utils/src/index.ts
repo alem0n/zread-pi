@@ -235,6 +235,7 @@ export {
   initWikiBlueprint,
   applySectionNames,
   applyPageNames,
+  reconcileBlueprint,
 } from './output/wiki-content.js';
 export type {
   MergeTopicsResult,
@@ -249,6 +250,7 @@ export type {
   ApplySectionNamesOptions,
   ApplyPageNamesResult,
   ApplyPageNamesOptions,
+  ReconcileResult,
 } from './output/wiki-content.js';
 
 // Provider Registry
