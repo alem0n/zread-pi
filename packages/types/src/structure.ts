@@ -100,6 +100,14 @@ export interface StructureParams {
   hierarchyCounts: number[];
 }
 
+/** 行级台账（信息性）：measured / total / declared / gap */
+export interface LineLedger {
+  measured: number;
+  total: number;
+  declared: number;
+  gap: number;
+}
+
 /** 结构缓存（§5 全部中间产物 + manifestHash） */
 export interface StructureCache {
   manifestHash: string;
@@ -114,6 +122,8 @@ export interface StructureCache {
   seams: SeamRecord[];
   /** 切片划分在文件图（无向投影）上的模块度 */
   modularity: number;
+  /** 行级台账（由 symbols 的 lineCount / ranges 汇总） */
+  lines: LineLedger;
   params: StructureParams;
 }
 

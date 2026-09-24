@@ -39,7 +39,7 @@
     "vendor:build": "bun run tsc -p vendor/pi/packages/telemetry/tsconfig.build.json && bun run tsc -p vendor/pi/packages/chord/tsconfig.build.json && bun run tsc -p vendor/pi/packages/ai/tsconfig.app.json && bun run tsc -p vendor/pi/packages/agent/tsconfig.build.json && bun run tsc -p vendor/pi/packages/tui/tsconfig.build.json",
     "browse:build": "cd apps/browse && bun run build",
     "browse:dev": "cd apps/browse && bun run dev",
-    "test:blueprint": "bun run packages/orchestrator/test/e2e-blueprint.ts && bun run packages/orchestrator/test/blueprint-detail.ts && bun run packages/orchestrator/test/e2e-sync.ts && bun run packages/orchestrator/test/context-files.ts && bun run packages/orchestrator/test/style-discipline.ts && bun run packages/orchestrator/test/titles-diagnostic.ts && bun run packages/orchestrator/test/golden-parity.ts",
+       "test:blueprint": "bun run packages/orchestrator/test/machine-blueprint.ts && bun run packages/orchestrator/test/e2e-blueprint.ts && bun run packages/orchestrator/test/blueprint-detail.ts && bun run packages/orchestrator/test/e2e-sync.ts && bun run packages/orchestrator/test/context-files.ts && bun run packages/orchestrator/test/style-discipline.ts && bun run packages/orchestrator/test/titles-diagnostic.ts && bun run packages/orchestrator/test/golden-parity.ts",
     "test:trajectory": "bun run packages/trajectory/test/trajectory-model.ts && bun run packages/trajectory/test/session-replay.ts && bun run packages/utils/test/trajectory-store.ts && bun run packages/utils/test/session-completeness.ts && bun run packages/utils/test/run-dir-order.ts",
     "test:browse": "bun run apps/cli/test/browse-server.ts && bun run test:components",
 "test:components": "cd apps/browse && bun test",

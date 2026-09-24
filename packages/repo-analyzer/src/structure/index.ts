@@ -19,6 +19,7 @@ import { buildSlices } from './partition.js';
 import {
   buildSections,
   buildSlots,
+  computeLineLedger,
   computeSeams,
   type StructureSpec,
 } from './coverage.js';
@@ -27,6 +28,8 @@ export interface BuildStructureOptions {
   spec: StructureSpec;
   /** minimal 档位：跳过分类选层（由机器蓝图侧收敛为 1 分类 1 页） */
   minimal?: boolean;
+  /** 文档语言（决定槽位页的系统标题与描述文案；缺省 zh） */
+  language?: string;
 }
 
 /** 目标页面数 = sections.max × max(1, round((topics.min + topics.max) / 2)) */
@@ -104,7 +107,8 @@ export function buildStructureCache(
     : buildSections(graph, slicesWithDegree, sliceIndexOf, spec);
 
   // 全局槽位（minimal 也算：全景导览页需要 hub 路径作为 associatedFiles）
-  const slots = buildSlots(seams, fileSeamDegree, 'zh');
+  const slots = buildSlots(seams, fileSeamDegree, options.language ?? 'zh');
+  const lines = computeLineLedger(normSymbols, universe);
 
   return {
     manifestHash,
@@ -116,6 +120,7 @@ export function buildStructureCache(
     slots,
     seams,
     modularity,
+    lines,
     params: {
       detail: spec.level,
       universeCount: universe.length,
@@ -128,16 +133,7 @@ export function buildStructureCache(
   };
 }
 
-export { computeLineLedger } from './coverage.js';
+export { buildSections, buildSlots, computeSeams, hubCandidates, edgeView, computeLineLedger, type StructureSpec, type SectionSelection } from './coverage.js';
 export { computeManifestHash, computeExcluded, buildCodeGraph } from './graph.js';
 export { buildSlices, louvainHierarchy, modularityOf, sliceQuotient } from './partition.js';
-export {
-  buildSections,
-  buildSlots,
-  computeSeams,
-  hubCandidates,
-  edgeView,
-  type StructureSpec,
-  type SectionSelection,
-} from './coverage.js';
 export type { CodeGraph } from './graph.js';

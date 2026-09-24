@@ -16,6 +16,11 @@ import { join } from 'path';
 import type {
   AppConfig,
   BlueprintDetailLevel,
+  StructureCache,
+  StructureEdgeKind,
+  MachinePageId,
+  PageRef,
+  WikiCoverage,
   WikiLevel,
   WikiOutput,
   WikiPage,
@@ -612,6 +617,466 @@ export async function writeWikiPages(
     output.pages = pages;
   });
   return outputPath;
+}
+
+// ==================== 机器蓝图（结构优先） ====================
+
+/** 基础分类的固定 id（与语言无关；title / description 随 doc_language） */
+const BASE_SECTION_IDS = ['overview', 'core'] as const;
+
+function isBaseSectionId(id: string | undefined): boolean {
+  return id !== undefined && (BASE_SECTION_IDS as readonly string[]).includes(id);
+}
+
+export interface MachinePageEntry {
+  /** 运行期机器页 id（`slice:S1` / `slot:overview` …），不入库，仅用于本轮工具绑定 */
+  id: MachinePageId;
+  /** slug 词干（英文短名），slug / file 由此派生 */
+  stem: string;
+  page: WikiPage;
+}
+
+export interface MachineBlueprint {
+  sections: WikiSection[];
+  pages: MachinePageEntry[];
+  coverage: WikiCoverage;
+}
+
+export interface MachineBlueprintOptions {
+  /** 写盘变体（档位子目录） */
+  variant: BlueprintDetailLevel;
+  /** minimal 档位：收敛为 1 分类 1 页（拥有全部 U） */
+  minimal?: boolean;
+}
+
+/** 跨切片依赖原因文案（`import 来自 <文件>` / `reexport 来自 <文件>`） */
+function refReason(kind: StructureEdgeKind, from: string): string {
+  return kind === 'reexport' ? `reexport 来自 ${from}` : `import 来自 ${from}`;
+}
+
+/** 按路径去重排序的合集（associatedFiles 是集合语义；接受数组或 Set） */
+function unionFiles(...groups: Array<Iterable<string>>): string[] {
+  const set = new Set<string>();
+  for (const group of groups) for (const path of group) set.add(path);
+  return [...set].sort();
+}
+
+/**
+ * 由结构缓存派生机器蓝图骨架：sections / pages / coverage 全部由代码构造。
+ *
+ * - minimal（D16）：1 个「概览」分类 + 1 个页拥有全部 U（hub 路径作 associatedFiles）；
+ * - 非 minimal：概览 + 核心架构 + 结构分类；槽位页归基础分类，切片页归结构分类；
+ * - 页号顺序（§5.5）：slot:overview(0) → slot:seams(1) → hub 槽位(2..) → 切片页(续)。
+ *
+ * LLM 只能改 title / description / scope / summary / group / level（P2 命名阶段）。
+ */
+export function buildMachineBlueprint(
+  cache: StructureCache,
+  config: AppConfig,
+  options: MachineBlueprintOptions,
+): MachineBlueprint {
+  const language = config.doc_language;
+  const isEn = language === 'en';
+  const base = baseSectionsFor(language);
+  const overviewSlot = cache.slots.find((slot) => slot.id === 'slot:overview');
+  const hubPaths = overviewSlot?.associatedFiles ?? [];
+
+  // —— minimal：1 分类 1 页（D16）——
+  if (options.minimal) {
+    const slug = '0-overview';
+    const page: WikiPage = {
+      slug,
+      title: base[0].title,
+      file: `${slug}.md`,
+      section: base[0].title,
+      ownsFiles: [...cache.universe],
+      associatedFiles: normalizeAssociatedFiles(hubPaths) ?? [],
+      level: 'Intermediate',
+    };
+    return {
+      sections: [{ ...base[0], id: 'overview', slices: [] }],
+      pages: [{ id: 'slot:overview', stem: 'overview', page }],
+      coverage: {
+        manifestHash: cache.manifestHash,
+        universeCount: cache.universe.length,
+        excluded: [...cache.excluded],
+        fileOwner: Object.fromEntries(cache.universe.map((path) => [path, slug])),
+        slicesBySection: {},
+        modularity: cache.modularity,
+        seamCount: cache.seams.length,
+        lines: cache.lines,
+      },
+    };
+  }
+
+  // —— 非 minimal ——
+  const sections: WikiSection[] = [
+    { ...base[0], id: 'overview', slices: [] },
+    { ...base[1], id: 'core', slices: [] },
+    ...cache.sections.map((section) => ({
+      id: section.id,
+      title: section.title,
+      description: section.description,
+      slices: section.slices,
+    })),
+  ];
+
+  const entries: MachinePageEntry[] = [];
+  const usedSlugs = new Set<string>();
+  let index = 0;
+  const addPage = (
+    id: MachinePageId,
+    stem: string,
+    page: Omit<WikiPage, 'slug' | 'file'>,
+  ): string => {
+    const slug = uniqueSlug(`${index}-${stem}`, usedSlugs);
+    index += 1;
+    usedSlugs.add(slug);
+    entries.push({ id, stem, page: { ...page, slug, file: `${slug}.md` } });
+    return slug;
+  };
+
+  // 槽位页（顺序：overview → seams → hubs）
+  addPage('slot:overview', 'overview', {
+    title: overviewSlot?.title ?? base[0].title,
+    section: base[0].title,
+    ownsFiles: [],
+    associatedFiles: normalizeAssociatedFiles(hubPaths) ?? [],
+    level: 'Intermediate',
+  });
+
+  const seamsSlot = cache.slots.find((slot) => slot.id === 'slot:seams');
+  if (seamsSlot) {
+    addPage('slot:seams', 'cross-slice-dependency-map', {
+      title: seamsSlot.title,
+      section: base[1].title,
+      ownsFiles: [],
+      associatedFiles: normalizeAssociatedFiles(seamsSlot.associatedFiles) ?? [],
+      level: 'Intermediate',
+    });
+  }
+
+  for (const slot of cache.slots) {
+    if (slot.kind !== 'hub') continue;
+    const stem = `hub-${slugStem(slot.associatedFiles[0] ?? slot.id)}`;
+    addPage(`slot:hub:${slot.associatedFiles[0] ?? ''}`, stem, {
+      title: slot.title,
+      section: base[1].title,
+      ownsFiles: [],
+      associatedFiles: normalizeAssociatedFiles(slot.associatedFiles) ?? [],
+      level: 'Intermediate',
+    });
+  }
+
+  // 切片页（按结构分类顺序 → 切片顺序，即 S1..Sn）
+  const sliceById = new Map(cache.slices.map((slice) => [slice.id, slice]));
+  const fileSlice: Map<string, { sliceId: string; slug: string }> = new Map();
+  const slicesBySection: Record<string, string[]> = {};
+
+  for (const section of cache.sections) {
+    slicesBySection[section.id] = [...section.slices];
+    for (const sliceId of section.slices) {
+      const slice = sliceById.get(sliceId);
+      if (!slice) continue;
+
+      // 该切片对外的跨切片边（去重 by path）
+      const refs: PageRef[] = [];
+      const seenRefs = new Set<string>();
+      for (const file of slice.files) {
+        for (const edge of cache.edges) {
+          if (edge.from !== file) continue;
+          const owner = fileSlice.get(edge.to);
+          // 目标尚未分配页（同切片或后面的切片）→ 暂不记，第二轮回填
+          if (!owner || owner.sliceId === slice.id) continue;
+          if (seenRefs.has(edge.to)) continue;
+          seenRefs.add(edge.to);
+          refs.push({ path: edge.to, reason: refReason(edge.kind, file), ownerSlug: owner.slug });
+        }
+      }
+
+      const slug = addPage(`slice:${sliceId}`, slugStem(slice.label), {
+        title: slice.label,
+        section: section.title,
+        ownsFiles: [...slice.files],
+        refs: refs.length > 0 ? refs : undefined,
+        associatedFiles: unionFiles(slice.files, seenRefs),
+        topicSummary: isEn
+          ? `Slice ${slice.id} (${slice.label}): ${slice.files.length} files, ${slice.seamDegree} cross-slice dependencies`
+          : `覆盖切片 ${slice.id}（${slice.label}）：${slice.files.length} 个文件，${slice.seamDegree} 条跨切片依赖`,
+        level: 'Intermediate',
+      });
+
+      for (const file of slice.files) fileSlice.set(file, { sliceId: slice.id, slug });
+    }
+  }
+
+  // 第二轮：补齐「目标切片在本切片之后」的 refs（ownerSlug 与 associatedFiles）
+  for (const entry of entries) {
+    const sliceId = entry.id.startsWith('slice:') ? entry.id.slice('slice:'.length) : null;
+    if (!sliceId) continue;
+    const slice = sliceById.get(sliceId);
+    if (!slice) continue;
+    const refs: PageRef[] = entry.page.refs ? [...entry.page.refs] : [];
+    const seenRefs = new Set(refs.map((ref) => ref.path));
+    let appended = false;
+    for (const file of slice.files) {
+      for (const edge of cache.edges) {
+        if (edge.from !== file) continue;
+        const owner = fileSlice.get(edge.to);
+        if (!owner || owner.sliceId === sliceId || seenRefs.has(edge.to)) continue;
+        seenRefs.add(edge.to);
+        refs.push({ path: edge.to, reason: refReason(edge.kind, file), ownerSlug: owner.slug });
+        appended = true;
+      }
+    }
+    if (appended) entry.page.refs = refs;
+    entry.page.associatedFiles = unionFiles(slice.files, seenRefs);
+  }
+
+  const fileOwner: Record<string, string> = {};
+  for (const [file, { slug }] of fileSlice) fileOwner[file] = slug;
+
+  return {
+    sections,
+    pages: entries,
+    coverage: {
+      manifestHash: cache.manifestHash,
+      universeCount: cache.universe.length,
+      excluded: [...cache.excluded],
+      fileOwner,
+      slicesBySection,
+      modularity: cache.modularity,
+      seamCount: cache.seams.length,
+      lines: cache.lines,
+    },
+  };
+}
+
+/**
+ * 初始化机器蓝图（覆盖写）：schemaVersion = 2 + sections + pages + coverage。
+ *
+ * 之后的命名阶段只做增量归并，任何时刻 wiki.json 都可加载（pages 为空合法）。
+ */
+export async function initWikiBlueprint(
+  blueprint: MachineBlueprint,
+  config: AppConfig,
+  techStackSummary: TechStackSummary | undefined,
+  options: MachineBlueprintOptions,
+): Promise<string> {
+  const output: WikiOutput = {
+    id: generateWikiId(),
+    generated_at: new Date().toISOString(),
+    language: config.doc_language,
+    schemaVersion: 2,
+    sections: blueprint.sections,
+    pages: blueprint.pages.map((entry) => entry.page),
+    coverage: blueprint.coverage,
+    detail: options.variant,
+    ...(techStackSummary ? { techStackSummary } : {}),
+  };
+
+  const outputPath = getWikiJsonPath(options.variant);
+  await withFileLock(outputPath, () => writeWikiOutput(outputPath, output));
+
+  logger.info(
+    `机器蓝图已生成: ${outputPath}（${output.sections?.length ?? 0} 个分类，${output.pages.length} 个页面）`,
+  );
+  return outputPath;
+}
+
+/** 命名提交的通用条目形状 */
+interface NameEntry {
+  id?: string;
+  title?: string;
+  description?: string;
+  scope?: unknown;
+  summary?: string;
+  group?: string;
+  level?: string;
+}
+
+export interface ApplySectionNamesResult {
+  /** title / description 实际写入数 */
+  updated: number;
+  /** scope 写入数（所有分类都接受） */
+  scope: number;
+  /** 跳过（空值 / 重名 / 基础分类的 title 提交 / onlyIds 排除） */
+  skipped: number;
+  /** id 在 sections 中不存在 */
+  unknown: number;
+}
+
+export interface ApplySectionNamesOptions {
+  variant: BlueprintDetailLevel;
+  /** 只允许写入这些 id（空槽回收 / 增量命名用）；不在集合内的一律跳过 */
+  onlyIds?: Set<string>;
+}
+
+/**
+ * 写回分类命名（命名阶段）：只改 title / description / scope，
+ * id / slices / 顺序恒不变；基础分类（overview / core）的 title / description 提交一律忽略。
+ *
+ * 结构分类改名时同步更新 pages[].section（页面靠 title 归属分类）。
+ */
+export async function applySectionNames(
+  names: NameEntry[],
+  options: ApplySectionNamesOptions,
+): Promise<ApplySectionNamesResult> {
+  const incoming = Array.isArray(names) ? names : [];
+
+  return withWikiOutput(options.variant, (output) => {
+    const sections = Array.isArray(output.sections) ? output.sections : [];
+    const byId = new Map<string, WikiSection>();
+    for (const section of sections) {
+      if (section.id) byId.set(section.id, section);
+    }
+    const usedTitles = new Set(sections.map((section) => sectionKey(section.title)));
+    const renames: Array<{ from: string; to: string }> = [];
+
+    let updated = 0;
+    let scopeCount = 0;
+    let skipped = 0;
+    let unknown = 0;
+
+    for (const entry of incoming) {
+      const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+      const target = id ? byId.get(id) : undefined;
+      if (!target) {
+        unknown += 1;
+        continue;
+      }
+      if (options.onlyIds && !options.onlyIds.has(id)) {
+        skipped += 1;
+        continue;
+      }
+
+      const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+      const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+      const scope = normalizeStringList(entry.scope);
+
+      // scope 所有分类都接受（下游硬边界）
+      if (scope) {
+        target.scope = scope;
+        scopeCount += 1;
+      }
+
+      // 基础分类的 title / description 是系统固定值，提交一律忽略
+      if (isBaseSectionId(id)) {
+        if (title || description) skipped += 1;
+        continue;
+      }
+
+      if (title && !sameTitle(title, target.title)) {
+        const key = sectionKey(title);
+        if (usedTitles.has(key)) {
+          skipped += 1;
+        } else {
+          usedTitles.delete(sectionKey(target.title));
+          renames.push({ from: target.title, to: title });
+          target.title = title;
+          usedTitles.add(key);
+          updated += 1;
+        }
+      }
+      if (description) {
+        target.description = description;
+        updated += 1;
+      }
+    }
+
+    // 分类改名 → 页面的 section 字段同步
+    if (renames.length > 0) {
+      for (const page of output.pages) {
+        const rename = renames.find((entry) => sameTitle(page.section, entry.from));
+        if (rename) page.section = rename.to;
+      }
+    }
+
+    return { updated, scope: scopeCount, skipped, unknown };
+  });
+}
+
+export interface ApplyPageNamesResult {
+  updated: number;
+  skipped: number;
+  unknown: number;
+}
+
+export interface ApplyPageNamesOptions {
+  variant: BlueprintDetailLevel;
+  /** 机器页清单（id → slug 绑定；wiki.json 不存 id，必须由调用方提供） */
+  machinePages: MachinePageEntry[];
+  /** 只允许写入这些 id（空槽回收后防止写过期页） */
+  onlyIds?: Set<string>;
+}
+
+/**
+ * 写回页面命名（命名阶段）：只改 title / topicSummary / group / level，
+ * slug / file / section / ownsFiles / associatedFiles / refs 结构性不可改。
+ */
+export async function applyPageNames(
+  names: NameEntry[],
+  options: ApplyPageNamesOptions,
+): Promise<ApplyPageNamesResult> {
+  const incoming = Array.isArray(names) ? names : [];
+  const slugById = new Map(options.machinePages.map((entry) => [entry.id, entry.page.slug]));
+
+  return withWikiOutput(options.variant, (output) => {
+    const bySlug = new Map(output.pages.map((page) => [page.slug, page]));
+
+    let updated = 0;
+    let skipped = 0;
+    let unknown = 0;
+
+    for (const entry of incoming) {
+      const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+      const slug = id ? slugById.get(id as MachinePageId) : undefined;
+      const page = slug ? bySlug.get(slug) : undefined;
+      if (!slug || !page) {
+        unknown += 1;
+        continue;
+      }
+      if (options.onlyIds && !options.onlyIds.has(id)) {
+        skipped += 1;
+        continue;
+      }
+
+      const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+      if (title) {
+        const usedTitles = new Set(
+          output.pages
+            .filter((other) => sameTitle(other.section, page.section) && other.slug !== page.slug)
+            .map((other) => other.title.trim().toLowerCase()),
+        );
+        if (usedTitles.has(title.toLowerCase())) {
+          skipped += 1;
+        } else {
+          page.title = title;
+          updated += 1;
+        }
+      }
+
+      const summary = normalizeSummary(entry.summary);
+      if (summary !== undefined) {
+        page.topicSummary = summary;
+        updated += 1;
+      }
+      const group = normalizeGroup(entry.group);
+      if (group !== undefined) {
+        page.group = group;
+        updated += 1;
+      }
+      if (entry.level !== undefined) {
+        const level = normalizeLevel(entry.level);
+        if (level !== page.level) {
+          page.level = level;
+          updated += 1;
+        }
+      }
+    }
+
+    return { updated, skipped, unknown };
+  });
 }
 
 // ==================== 兼容旧流程 ====================
