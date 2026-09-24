@@ -98,7 +98,7 @@ function lastSegmentOfPath(path: string): string {
 }
 
 /** 清单哈希：只用实读字段 path / language，排序后 sha256（plan §5.1） */
-export function computeManifestHash(manifest: FileManifest): string {
+export function computeManifestHash(manifest: { files: Array<{ path: string; language?: string }> }): string {
   const entries = manifest.files
     .map((file) => [file.path, file.language] as [string, string])
     .sort();

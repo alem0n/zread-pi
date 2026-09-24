@@ -36,6 +36,8 @@ type PageSpec = {
 	section: string;
 	level?: "Beginner" | "Intermediate" | "Advanced";
 	associatedFiles?: string[];
+	/** 本页拥有的源文件（v2 覆盖台账） */
+	ownsFiles?: string[];
 	/** 页面正文（不含 frontmatter；由 buildWiki 自动加 frontmatter） */
 	body: string;
 	/** 覆盖 frontmatter（用于构造不一致场景） */
@@ -47,8 +49,12 @@ type PageSpec = {
 interface BuildOptions {
 	variant?: string | null; // null = 遗留目录布局
 	sections?: string[];
-	/** 额外的源文件（相对仓库根）：路径 -> 内容行数组 */
+	/** 额外的源文件（相对仓库根）：路径 -> 内容行数组） */
 	sourceFiles?: Record<string, string[]>;
+	/** wiki.json 的 schemaVersion（v2 产物才填） */
+	schemaVersion?: number;
+	/** 覆盖台账（v2 产物才填） */
+	coverage?: Record<string, unknown>;
 }
 
 /**
@@ -90,6 +96,8 @@ async function buildWiki(pages: PageSpec[], options: BuildOptions = {}): Promise
 		generated_at: new Date().toISOString(),
 		language: "zh",
 		detail: variant ?? undefined,
+		...(options.schemaVersion ? { schemaVersion: options.schemaVersion } : {}),
+		...(options.coverage ? { coverage: options.coverage } : {}),
 		pages: pages.map((p) => ({
 			slug: p.slug,
 			title: p.title,
@@ -97,6 +105,7 @@ async function buildWiki(pages: PageSpec[], options: BuildOptions = {}): Promise
 			section: p.section,
 			level: p.level ?? "Beginner",
 			associatedFiles: p.associatedFiles ?? [],
+			...(p.ownsFiles ? { ownsFiles: p.ownsFiles } : {}),
 		})),
 		sections,
 	};
@@ -698,8 +707,8 @@ console.log("\n▶ L. generateWikiContent 的 verifyAfterGenerate 集成");
 		check("verify.json 的 ok 与闸门一致（mock 产物结构类应通过）", typeof report.ok === "boolean");
 		check("verify.json 命中生成的档位", report.variant === "high", String(report.variant));
 		check(
-			"verify.json 含全部五个检查组",
-			["structure", "content", "mermaid", "frontmatter", "traceability"].every((g) =>
+			"verify.json 含全部六个检查组",
+			["structure", "content", "mermaid", "frontmatter", "traceability", "coverage"].every((g) =>
 				report.checks.some((c) => c.group === g),
 			),
 			JSON.stringify(report.checks.map((c) => `${c.group}:${c.status}`)),
@@ -713,6 +722,224 @@ console.log("\n▶ L. generateWikiContent 的 verifyAfterGenerate 集成");
 	process.chdir(join(repo, ".."));
 	await rm(repo, { recursive: true, force: true });
 	await rm(home, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// M. coverage 组（结构优先蓝图 v2）：等式 / 排他 / 行台账 / excluded / SKIP 分支
+// ---------------------------------------------------------------------------
+
+console.log("\n▶ M. coverage 组");
+{
+	const { verifyWiki } = await import("../src/wiki/verify-wiki.js");
+	const { computeManifestHash } = await import("@zread-pi/repo-analyzer");
+
+	const previousCwd = process.cwd();
+
+	// 两个源文件 + 清单 / 符号缓存（缓存走 process.cwd()，verify 前先 chdir 到临时仓库）
+	const manifestFiles = [
+		{ path: "src/a.ts", hash: "h1", size: 30, language: "typescript" },
+		{ path: "src/b.ts", hash: "h2", size: 10, language: "typescript" },
+	];
+	const symbols = [
+		{
+			file: "src/a.ts",
+			exports: ["a"],
+			functions: [{ name: "a", signature: "() => number" }],
+			imports: [] as string[],
+			docstrings: [] as string[],
+			lineCount: 3,
+			ranges: [
+				{ name: "a", start: 1, end: 1 },
+				{ name: "b", start: 2, end: 2 },
+				{ name: "c", start: 3, end: 3 },
+			],
+		},
+		{
+			file: "src/b.ts",
+			exports: ["d"],
+			functions: [{ name: "d", signature: "() => number" }],
+			imports: [] as string[],
+			docstrings: [] as string[],
+			lineCount: 1,
+			ranges: [{ name: "d", start: 1, end: 1 }],
+		},
+	];
+	const hash = computeManifestHash({ files: manifestFiles });
+
+	async function writeCaches(root: string, opts: { manifest?: boolean; symbols?: boolean } = {}): Promise<void> {
+		const cacheDir = join(root, ".zread-pi", "cache");
+		await mkdir(cacheDir, { recursive: true });
+		if (opts.manifest !== false) {
+			await writeFile(
+				join(cacheDir, "last_manifest.json"),
+				JSON.stringify({ version: "1.0", generated_at: new Date().toISOString(), files: manifestFiles }, null, 2),
+				"utf-8",
+			);
+		}
+		if (opts.symbols !== false) {
+			await writeFile(
+				join(cacheDir, "last_symbols.json"),
+				JSON.stringify({ version: "1.0", generated_at: new Date().toISOString(), symbols, loadedParsers: ["typescript"] }, null, 2),
+				"utf-8",
+			);
+		}
+	}
+
+	// Windows 不能删除 cwd：清理前先切回原目录
+	async function cleanup(target: string): Promise<void> {
+		process.chdir(previousCwd);
+		await rm(target, { recursive: true, force: true }).catch(() => {});
+	}
+
+	function coverageOf(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+		return {
+			manifestHash: hash,
+			universeCount: 2,
+			excluded: [],
+			fileOwner: { "src/a.ts": "1-a", "src/b.ts": "2-b" },
+			slicesBySection: {},
+			modularity: 0.5,
+			seamCount: 1,
+			lines: { measured: 2, total: 4, declared: 4, gap: 0 },
+			...overrides,
+		};
+	}
+
+	const pageA: PageSpec = {
+		slug: "1-a",
+		title: "甲",
+		file: "1-a.md",
+		section: "工具函数",
+		ownsFiles: ["src/a.ts"],
+		body: "# 甲\n\n## 小节\n\n" + fatProse() + "\n\nSources: [a](src/a.ts#L1-2)",
+	};
+	const pageB: PageSpec = {
+		slug: "2-b",
+		title: "乙",
+		file: "2-b.md",
+		section: "工具函数",
+		ownsFiles: ["src/b.ts"],
+		body: "# 乙\n\n## 小节\n\n" + fatProse() + "\n\nSources: [b](src/b.ts#L1)",
+	};
+
+	// M1 v2 正常：C1~C4 全 PASS
+	{
+		const root = await buildWiki([pageA, pageB], {
+			schemaVersion: 2,
+			coverage: coverageOf(),
+			sourceFiles: { "src/a.ts": ["l1", "l2", "l3"], "src/b.ts": ["l1"] },
+		});
+		await writeCaches(root);
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		check("C1 覆盖等式 PASS", findCheck(report, "coverage", "覆盖等式成立")?.status === "PASS", report.checks.filter((c) => c.group === "coverage").map((c) => c.message).join(" | "));
+		check("C2 排他 PASS", findCheck(report, "coverage", "排他")?.status === "PASS");
+		check("C3 行台账 PASS（且信息行含已测文件数）", findCheck(report, "coverage", "行台账一致")?.status === "PASS");
+		check("C4 excluded PASS", findCheck(report, "coverage", "excluded 一致")?.status === "PASS");
+		check("v2 产物 OVERALL PASS", report.ok === true, report.checks.map((c) => `${c.group}:${c.status}`).join(","));
+		await cleanup(root);
+	}
+
+	// M2 旧版产物（无 schemaVersion）→ 整组 SKIP
+	{
+		const root = await buildWiki([pageA], { sourceFiles: { "src/a.ts": ["l1"] } });
+		await writeCaches(root);
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		const cov = report.checks.filter((c) => c.group === "coverage");
+		check("旧版产物 coverage 组只发一条 SKIP", cov.length === 1 && cov[0].status === "SKIP", JSON.stringify(cov));
+		check("SKIP 说明点名重新 generate", cov[0]?.message.includes("重新 generate"), cov[0]?.message);
+		await cleanup(root);
+	}
+
+	// M3 清单哈希不一致 → SKIP（哈希点名）
+	{
+		const root = await buildWiki([pageA], {
+			schemaVersion: 2,
+			coverage: coverageOf({ manifestHash: "deadbeef" }),
+			sourceFiles: { "src/a.ts": ["l1"] },
+		});
+		await writeCaches(root);
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		const cov = report.checks.filter((c) => c.group === "coverage");
+		check("清单哈希不一致 → SKIP", cov.length === 1 && cov[0].status === "SKIP", JSON.stringify(cov));
+		check("SKIP 明细含产物哈希与当前哈希", cov[0]?.message.includes("deadbeef") && cov[0]?.message.includes(hash), cov[0]?.message);
+		await cleanup(root);
+	}
+
+	// M4 无缓存清单 → SKIP
+	{
+		const root = await buildWiki([pageA], {
+			schemaVersion: 2,
+			coverage: coverageOf(),
+			sourceFiles: { "src/a.ts": ["l1"] },
+		});
+		await writeCaches(root, { manifest: false });
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		const cov = report.checks.filter((c) => c.group === "coverage");
+		check("无缓存清单 → SKIP", cov.length === 1 && cov[0].status === "SKIP" && cov[0].message.includes("无缓存文件清单"), JSON.stringify(cov));
+		await cleanup(root);
+	}
+
+	// M5 双归属 → C2 FAIL（details 点名两个页面）
+	{
+		const root = await buildWiki([pageA, { ...pageB, ownsFiles: ["src/b.ts", "src/a.ts"] }], {
+			schemaVersion: 2,
+			coverage: coverageOf(),
+			sourceFiles: { "src/a.ts": ["l1", "l2", "l3"], "src/b.ts": ["l1"] },
+		});
+		await writeCaches(root);
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		const c2 = findCheck(report, "coverage", "被多个页面同时拥有");
+		check("双归属 → C2 FAIL", c2?.status === "FAIL", `${c2?.status} ${c2?.message}`);
+		check("C2 明细点名两个页面", (c2?.details ?? []).some((d) => d.includes("1-a") && d.includes("2-b")), JSON.stringify(c2?.details));
+		check("双归属导致 OVERALL FAIL", report.ok === false);
+		await cleanup(root);
+	}
+
+	// M6 漏归属 → C1 FAIL（unclaimed）+ C4 FAIL（excluded 不一致）
+	{
+		const root = await buildWiki([pageA, { ...pageB, ownsFiles: [] }], {
+			schemaVersion: 2,
+			coverage: coverageOf(),
+			sourceFiles: { "src/a.ts": ["l1", "l2", "l3"], "src/b.ts": ["l1"] },
+		});
+		await writeCaches(root);
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		const c1 = findCheck(report, "coverage", "覆盖等式不成立");
+		check("漏归属 → C1 FAIL", c1?.status === "FAIL", `${c1?.status} ${c1?.message} :: ${JSON.stringify(c1?.details)}`);
+		check("C1 明细点名未归属文件", (c1?.details ?? []).some((d) => d.includes("src/b.ts")), JSON.stringify(c1?.details));
+		const c4 = findCheck(report, "coverage", "excluded 与 (manifest − U) 不一致");
+		check("漏归属 → C4 FAIL", c4?.status === "FAIL", `${c4?.status} ${c4?.message}`);
+		await cleanup(root);
+	}
+
+	// M7 行台账：ranges 越界 + coverage.lines 与独立重算不符 → C3 FAIL
+	{
+		const root = await buildWiki([pageA], {
+			schemaVersion: 2,
+			coverage: coverageOf({ universeCount: 1, fileOwner: { "src/a.ts": "1-a" }, lines: { measured: 1, total: 3, declared: 3, gap: 0 } }),
+			sourceFiles: { "src/a.ts": ["l1", "l2", "l3"] },
+		});
+		// 符号缓存里的区间越界（end > lineCount）
+		await writeCaches(root);
+		const symbolsPath = join(root, ".zread-pi", "cache", "last_symbols.json");
+		const cached = JSON.parse(await readFile(symbolsPath, "utf-8")) as { symbols: Array<{ file: string; lineCount: number; ranges: Array<{ name: string; start: number; end: number }> }> };
+		cached.symbols[0].ranges = [{ name: "a", start: 1, end: 99 }];
+		await writeFile(symbolsPath, JSON.stringify(cached, null, 2), "utf-8");
+		process.chdir(root);
+		const report = await verifyWiki({ root });
+		const c3 = findCheck(report, "coverage", "行台账不一致");
+		check("ranges 越界 → C3 FAIL", c3?.status === "FAIL", `${c3?.status} ${c3?.message}`);
+		check("C3 明细点名文件与区间", (c3?.details ?? []).some((d) => d.includes("src/a.ts") && d.includes("1-99")), JSON.stringify(c3?.details));
+		await cleanup(root);
+	}
+
+	process.chdir(previousCwd);
 }
 
 // ---------------------------------------------------------------------------
