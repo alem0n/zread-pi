@@ -25,7 +25,7 @@
     "test:context": "bun run packages/agent-runtime/test/context-compaction.ts",
     "test:agent:http": "bun run packages/agent-runtime/test/openai-http-smoke.ts",
     "test:provider": "bun run packages/agent-runtime/test/provider-http-smoke.ts",
-    "test:analyzer": "bun run packages/repo-analyzer/test/smoke-analyzer.ts && bun test packages/repo-analyzer/src/repo-map",
+       "test:analyzer": "bun run packages/repo-analyzer/test/smoke-analyzer.ts && bun run packages/repo-analyzer/test/structure.ts && bun test packages/repo-analyzer/src/repo-map",
     "test:pages": "bun run packages/orchestrator/test/e2e-page-generation.ts && bun run packages/orchestrator/test/page-output-fallback.ts && bun run packages/orchestrator/test/page-polish.ts && bun run packages/orchestrator/test/content-gate.ts && bun run packages/orchestrator/test/page-gate-degraded.ts && bun run packages/orchestrator/test/mermaid-validation.ts",
  "test:verify": "bun run packages/orchestrator/test/verify-wiki.ts",
  "test:traceability": "bun run packages/orchestrator/test/traceability.ts",

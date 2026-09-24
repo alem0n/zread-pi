@@ -5,6 +5,7 @@
  */
 
 import type { BlueprintDetailLevel } from './config.js';
+import type { PageRef } from './structure.js';
 
 /**
  * Wiki 难度级别
@@ -24,6 +25,12 @@ export type SyncPageStatus = 'unchanged' | 'new' | 'updated' | 'archived';
  * 分类阶段只产出 section，主题阶段再把页面增量归并到各 section 下。
  */
 export interface WikiSection {
+  /**
+   * 分类 id（结构优先蓝图 v2 产物）：基础分类为 overview / core，结构分类为 sec-<最小切片 id>。
+   *
+   * 可选字段：旧 wiki.json（schemaVersion 缺失）无该字段，读取方按 title 聚合。
+   */
+  id?: string;
   /** 分类标题（如 "核心架构"） */
   title: string;
   /** 分类说明（供分主题 / 标题 Agent 参考） */
@@ -36,6 +43,11 @@ export interface WikiSection {
    * 可选字段：旧 wiki.json 无该字段时下游照常工作。
    */
   scope?: string[];
+  /**
+   * 成员切片 id（结构优先蓝图 v2）：基础分类为空数组（只持全局槽位），
+   * 结构分类为其机器切片成员（互斥完备）。可选字段：旧产物无该字段。
+   */
+  slices?: string[];
 }
 
 /**
@@ -90,6 +102,17 @@ export interface WikiPage {
   topicSummary?: string;
   /** 同步状态（sync 流程中标记，非同步流程为 undefined） */
   status?: SyncPageStatus;
+  /**
+   * 本页拥有的源文件（结构优先蓝图 v2）：文件级排他归属，
+   * 覆盖等式 |U| == Σ|ownsFiles| 的判据。全局槽位页为空数组。
+   * 可选字段：旧产物无该字段（按 associatedFiles 兜底展示）。
+   */
+  ownsFiles?: string[];
+  /**
+   * 跨页引用（结构优先蓝图 v2）：本页文件指向其它页面拥有文件的边，
+   * 写作期注入为「只引用不讲解」清单。可选字段：旧产物无该字段。
+   */
+  refs?: PageRef[];
 }
 
 /**
@@ -100,6 +123,13 @@ export interface WikiOutput {
   generated_at: string;
   language: string;
   pages: WikiPage[];
+  /**
+   * 产物 schema 版本（结构优先蓝图 = 2）。
+   *
+   * 缺失 = 旧产物（三阶段蓝图）：sync 拒绝执行并提示重新 generate；
+   * verify 的 coverage 检查组整组 SKIP。
+   */
+  schemaVersion?: number;
   /**
    * 生成时使用的蓝图细节档位（多档共存布局下 = 变体子目录名）。
    *
@@ -113,6 +143,8 @@ export interface WikiOutput {
    * 三阶段流程中骨架先写 sections、pages 为空，主题/标题阶段再增量补齐。
    */
   sections: WikiSection[];
+  /** 覆盖台账（v2 必填；旧产物缺失） */
+  coverage?: WikiCoverage;
   techStackSummary?: TechStackSummary;
 }
 
@@ -121,6 +153,36 @@ export interface SyncDiff {
   newPages: WikiPage[];
   updatedPages: WikiPage[];
   archivedPages: WikiPage[];
+}
+
+/**
+ * 覆盖台账（结构优先蓝图 v2）：文件级排他归属的证明数据。
+ *
+ * 等式（verify 的 C1 判据）：`|M| == Σ|page.ownsFiles| + |excluded|`，
+ * 等价于 `|U| == Σ|page.ownsFiles|`（U 内每个文件恰被一个页面拥有）。
+ * 行级台账（lines）是信息性报表，不参与归属判定。
+ */
+export interface WikiCoverage {
+  /** 生成时清单的哈希（manifest.files 的 path+language 排序哈希） */
+  manifestHash: string;
+  /** 全集文件数 |U|（可解析源文件） */
+  universeCount: number;
+  /** 未解析文件（manifest − U） */
+  excluded: string[];
+  /** 文件 → 拥有它的页面 slug（与 pages.ownsFiles 逐项一致） */
+  fileOwner: Record<string, string>;
+  /** 分类 id → 成员切片 id */
+  slicesBySection: Record<string, string[]>;
+  /** 切片划分在文件图（无向投影）上的模块度 */
+  modularity: number;
+  /** 缝合线（跨切片边）总数 */
+  seamCount: number;
+  /**
+   * 行级台账（信息性）：measured = 已测文件数，total = U 的总行数，
+   * declared = 符号 ranges 覆盖的行数，gap = total − declared（import / export / 空行等间隙）。
+   * 可选字段：符号缓存无 ranges 时缺失。
+   */
+  lines?: { measured: number; total: number; declared: number; gap: number };
 }
 
 /**
