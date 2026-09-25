@@ -12,15 +12,18 @@
 
 import type { BlueprintDetailLevel } from './config.js';
 
-/** 产生事件的 Agent 角色（与编排层 CatalogAgentRole 对齐，另加 page / polish / run） */
+/** 产生事件的 Agent 角色（与编排层 CatalogAgentRole 对齐，另加 page / polish / run；旧值保留供旧日志回放） */
 export type RunEventAgentRole =
+  | 'structure'
+  | 'sections'
+  | 'pages'
+  | 'page'
+  | 'polish'
+  | 'run'
   | 'classify'
   | 'topics'
   | 'titles'
-  | 'condense'
-  | 'page'
-  | 'polish'
-  | 'run';
+  | 'condense';
 
 /** 标识产生事件的 Agent（run 级事件可缺省） */
 export interface RunEventAgentMeta {
@@ -77,8 +80,8 @@ export interface RunEventBase {
   agent?: RunEventAgentMeta;
 }
 
-/** 蓝图阶段（分类 / 分主题 / 标题） */
-export type RunStage = 'classify' | 'topics' | 'titles';
+/** 蓝图阶段（结构优先：结构 → 分类命名 → 页面命名；旧值保留供旧日志回放） */
+export type RunStage = 'structure' | 'sections' | 'pages' | 'classify' | 'topics' | 'titles';
 
 export interface RunStartEvent extends RunEventBase {
   kind: 'run_start';
@@ -271,7 +274,7 @@ export interface PageEndEvent extends RunEventBase {
 
 export interface FailedSectionsEvent extends RunEventBase {
   kind: 'failed_sections';
-  sections: Array<{ section: string; stage: 'topics' | 'titles'; error: string }>;
+  sections: Array<{ section: string; stage: 'pages' | 'topics' | 'titles'; error: string }>;
 }
 
 export type RunEvent =

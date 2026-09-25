@@ -165,7 +165,7 @@ export class WikiSyncController {
   }
 
   private handleCatalogEvent(rawEvent: CatalogEvent): void {
-    // 带 `agentKey` 的事件只描述「某一个 Agent」（分类 / 分主题 / 标题 / 缩编），
+    // 带 `agentKey` 的事件只描述「某一个 Agent」（结构切分 / 分类命名 / 页面命名），
     // 其中终态事件同样是 `complete` / `error`；同步页不展示逐 Agent 行，
     // 错过它们，只让不带该字段的事件驱动目录整体状态。
     if (rawEvent.agentKey) return;

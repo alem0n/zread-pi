@@ -9,15 +9,20 @@
  */
 
 import type { WikiPage } from '@zread-pi/types';
-import type { TokenUsage, BlueprintFailedSection, CatalogAgentRole, CatalogAgentStatus, ContentGateReport } from '@zread-pi/orchestrator';
+import type {
+  TokenUsage,
+  BlueprintFailedSection,
+  CatalogAgentStatus,
+  ContentGateReport,
+} from '@zread-pi/orchestrator';
 
 // ==================== 基础状态类型 ====================
 
 /** 统一状态枚举 */
 export type Status = 'waiting' | 'loading' | 'completed' | 'failed';
 
-/** 蓝图三阶段（分类 → 分主题 → 标题） */
-export type CatalogStage = 'classify' | 'topics' | 'titles';
+/** 蓝图阶段（结构优先：结构 → 分类命名 → 页面命名；含 legacy 三值，旧日志回放用） */
+export type CatalogStage = 'structure' | 'sections' | 'pages' | 'classify' | 'topics' | 'titles';
 
 /** 目录生成阶段 */
 export type CatalogPhase = 'scanning' | 'requesting' | 'responding' | 'tool' | 'retry';
@@ -42,24 +47,33 @@ export type {
   TokenUsage,
   ArticleEventPayload,
   BlueprintFailedSection,
-  CatalogAgentRole,
   CatalogAgentStatus,
   ContentGateReport,
 } from '@zread-pi/orchestrator';
+
+/** 目录 Agent 角色（含 legacy 旧值，旧日志回放用） */
+export type CatalogAgentRole =
+  | 'structure'
+  | 'sections'
+  | 'pages'
+  | 'classify'
+  | 'topics'
+  | 'titles'
+  | 'condense';
 
 // ==================== 目录 Agent 行（每个 Agent 一行） ====================
 
 /**
  * 单个目录 Agent 的展示状态。
  *
- * 目录生成会并发跑多个 Agent（分类 1 个 + 每个分类的主题 / 标题各 1 个，
- * 数量越界时还有缩编 subagent），UI 为每个 Agent 渲染一行，
+ * 目录生成会跑多个命名 Agent（分类命名 1 个 + 每个分类的页面命名 1 个），
+ * UI 为每个 Agent 渲染一行，
  * 行内用量是该 Agent **自己**的累计快照（不是目录级聚合）。
  */
 export interface CatalogAgentState {
   /** 生命周期状态 */
   status: Status;
-  /** 所属阶段（分类 / 分主题 / 标题） */
+  /** 所属阶段（结构切分 / 分类命名 / 页面命名；旧日志可能是分类 / 主题 / 标题） */
   stage: CatalogStage;
   /** Agent 角色（缩编 subagent 单独成行） */
   role: CatalogAgentRole;
@@ -95,9 +109,9 @@ export interface CatalogState {
   phase?: CatalogPhase;
   /** 当前工具名（tool 阶段） */
   currentTool?: string;
-  /** 当前蓝图阶段（分类 → 分主题 → 标题） */
+  /** 当前蓝图阶段（结构切分 → 分类命名 → 页面命名；旧日志可能是分类 / 主题 / 标题） */
   stage?: CatalogStage;
-  /** 当前处理的分类（topics / titles 阶段） */
+  /** 当前处理的分类（页面命名阶段） */
   section?: string;
   /** 当前阶段的分类级进度 */
   sectionsProgress?: { current: number; total: number };

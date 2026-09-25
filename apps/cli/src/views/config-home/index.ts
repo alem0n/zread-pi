@@ -87,7 +87,7 @@ const configItems: ConfigItem[] = [
     route: "/config/max-turns",
   },
   {
-    // 蓝图细节档位（blueprint.detail）：分类/文章数量与标题精修的深度
+    // 蓝图细节档位（blueprint.detail）：结构层的目标参数（分类 / 文章数量）
     key: "blueprint.detail",
     labelKey: "config.blueprintDetail",
     getValue: (config, t) => t(`blueprintDetail.${config.blueprint?.detail ?? "high"}`),

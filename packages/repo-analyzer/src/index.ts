@@ -14,3 +14,25 @@ export {
   buildCoreSignatures,
   buildModuleDetails,
 } from './repo-map/index.js';
+
+// Structure - 结构优先蓝图（CEG / 切片 / 分类 / 槽位）
+export {
+  buildStructureCache,
+  computeLineLedger,
+  computeManifestHash,
+  computeExcluded,
+  buildCodeGraph,
+  buildSlices,
+  louvainHierarchy,
+  modularityOf,
+  sliceQuotient,
+  buildSections,
+  buildSlots,
+  computeSeams,
+  hubCandidates,
+  edgeView,
+  type BuildStructureOptions,
+  type StructureSpec,
+  type SectionSelection,
+  type CodeGraph,
+} from './structure/index.js';

@@ -365,13 +365,13 @@ console.log('▶ replayRun：无会话事实 → 回退事件 replay（旧 run �
     event({ kind: 'run_start', runKind: 'generate', targetDir: '/repo' }),
     event({
       kind: 'agent_start',
-      agent: { key: 'classify', role: 'classify', sessionId: 's1' },
-      prompt: '分类',
+      agent: { key: 'sections', role: 'sections', sessionId: 's1' },
+      prompt: '分类命名',
       toolCatalog: [],
     }),
     event({
       kind: 'message_end',
-      agent: { key: 'classify', role: 'classify', sessionId: 's1' },
+      agent: { key: 'sections', role: 'sections', sessionId: 's1' },
       blocks: [{ type: 'text', text: '旧格式内容' }],
       usage: { input_tokens: 10, output_tokens: 5 },
     }),

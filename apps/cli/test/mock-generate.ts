@@ -1,9 +1,9 @@
 /**
  * mock-generate.ts —— Wiki 生成页的离线端到端回归（mock LLM，无需 API Key）
  *
- * 覆盖迁移后新写的 WikiGenerateController：
- * 扫描 → 解析 → 缓存 → 生成目录（generate_blueprint） → reload wiki.json
- * → 检测缺失页面 → 并发生成页面（write_page） → UI 显示完成
+ * 覆盖迁移后的 WikiGenerateController：扫描 → 解析 → 缓存 → 结构层（代码）
+ * → 分类命名 → 页面命名 → reload wiki.json → 检测缺失页面 → 并发生成页面（write_page）
+ * → UI 显示完成。
  *
  * 运行：bun run test:tui（或单独 bun run apps/cli/test/mock-generate.ts）
  */
@@ -38,75 +38,38 @@ function checkContains(name: string, haystack: string, needle: string): void {
 // 1) mock LLM（OpenAI 兼容 SSE）
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [
-  { title: "概览", description: "项目定位与整体速览" },
-  { title: "核心架构", description: "核心模块与实现细节" },
-  { title: "模块", description: "工具模块与实现细节" },
-];
+const BASE_SECTION_IDS = ["overview", "core"];
+const NAMED_SUFFIX = "（命名）";
 
-/** 主题阶段：每个分类下的页面草稿（high 档位要求每分类 3~10 篇） */
-const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
-  概览: [
-    {
-      title: "概览",
-      slug: "overview",
-      level: "Beginner",
-      associatedFiles: ["main.ts"],
-    },
-    {
-      title: "核心特性",
-      slug: "features",
-      level: "Beginner",
-      associatedFiles: ["main.ts"],
-    },
-    {
-      title: "设计目标",
-      slug: "design-goals",
-      level: "Intermediate",
-      associatedFiles: ["main.ts"],
-    },
-  ],
-  核心架构: [
-    {
-      title: "整体架构",
-      slug: "architecture",
-      level: "Intermediate",
-      associatedFiles: ["utils.ts"],
-    },
-    {
-      title: "数据流",
-      slug: "data-flow",
-      level: "Intermediate",
-      associatedFiles: ["utils.ts"],
-    },
-    {
-      title: "扩展点",
-      slug: "extensions",
-      level: "Advanced",
-      associatedFiles: ["utils.ts"],
-    },
-  ],
-  模块: [
-    {
-      title: "工具函数",
-      slug: "utils",
-      level: "Intermediate",
-      associatedFiles: ["utils.ts"],
-    },
-    {
-      title: "工具函数 API",
-      slug: "utils-api",
-      level: "Intermediate",
-      associatedFiles: ["utils.ts"],
-    },
-    {
-      title: "工具函数测试",
-      slug: "utils-tests",
-      level: "Beginner",
-      associatedFiles: ["utils.ts"],
-    },
-  ],
-};
+/** 提取 OpenAI 兼容消息里的纯文本（user 消息是 content 数组） */
+function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (typeof block === "string") return block;
+        if (block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string") {
+          return (block as { text: string }).text;
+        }
+        return "";
+      })
+      .join("\n");
+  }
+  return "";
+}
+
+/** 从提示词里抠出第一个 json fence 的 payload（机器骨架） */
+function parseJsonFence(text: string, key: string): unknown[] {
+  const match = /```json\n([\s\S]*?)\n```/.exec(text);
+  if (!match) return [];
+  try {
+    const payload = JSON.parse(match[1]) as Record<string, unknown>;
+    const value = payload[key];
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
 
 function chunk(payload: Record<string, unknown>): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
@@ -139,10 +102,7 @@ function toolCall(id: string, name: string, args: unknown): string {
 }
 
 function textChunk(text: string): string {
-  return (
-    chunk(baseChunk({ role: "assistant", content: text }, null)) +
-    chunk(baseChunk({}, "stop"))
-  );
+  return chunk(baseChunk({ role: "assistant", content: text }, null)) + chunk(baseChunk({}, "stop"));
 }
 
 const usageChunk = JSON.stringify({
@@ -152,9 +112,9 @@ const usageChunk = JSON.stringify({
   model: "mock-model",
   choices: [],
   // 120 prompt = 60 非缓存输入 + 60 缓存读 → 用于验证底部合计行的缓存占比：
-  // 三阶段目录（分类 / 主题×3 / 标题×3 各 2 次请求 = 14）+ 9 个页面 Agent × 2 = 18，
-  // 首轮共 32 次请求：合计输入侧 3840（3.8k）、输出 960、缓存占比 50.0%；
-  // 重新生成一页再 +2 次请求 → 输入侧 4080（4.1k）、输出 1020（1.0k）。
+  // 目录（结构层无 Agent；分类命名 1 个 + 页面命名 4 个，各 2 次请求 = 10）
+  // + 4 个页面 Agent × 2 = 8，首轮共 18 次请求：合计输入侧 2160（2.2k）、输出 540、缓存占比 50.0%；
+  // 重新生成一页再 +2 次请求 → 输入侧 2400（2.4k）、输出 600。
   usage: {
     prompt_tokens: 120,
     completion_tokens: 30,
@@ -164,23 +124,6 @@ const usageChunk = JSON.stringify({
 });
 
 let requestCount = 0;
-
-/** 提取 OpenAI 兼容消息里的纯文本（user 消息是 content 数组） */
-function contentToText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((block) => {
-        if (typeof block === "string") return block;
-        if (block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string") {
-          return (block as { text: string }).text;
-        }
-        return "";
-      })
-      .join("\n");
-  }
-  return "";
-}
 
 const server = Bun.serve({
   port: 0,
@@ -200,15 +143,10 @@ const server = Bun.serve({
         .map((tool) => tool?.function?.name)
         .filter((name): name is string => typeof name === "string"),
     );
-    const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
+    const section = /^- 分类：(.+)$/m.exec(promptText)?.[1]?.trim() ?? "";
 
-    // 三阶段 Agent 稍作延迟，让测试能稳定观察到阶段文案（阶段切换很快）
-    if (
-      !hasToolResult &&
-      (toolNames.has("submit_sections") ||
-        toolNames.has("submit_section_topics") ||
-        toolNames.has("refine_section_titles"))
-    ) {
+    // 命名 Agent 稍作延迟，让测试能稳定观察到阶段文案（阶段切换很快）
+    if (!hasToolResult && (toolNames.has("submit_sections") || toolNames.has("submit_pages"))) {
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
 
@@ -218,20 +156,40 @@ const server = Bun.serve({
         const write = (text: string): void => controller.enqueue(encoder.encode(text));
         if (!hasToolResult) {
           if (toolNames.has("submit_sections")) {
-            write(toolCall("call_sections", "submit_sections", { sections: SECTIONS }));
-          } else if (toolNames.has("submit_section_topics")) {
+            // 分类命名：从机器清单原样回填（基础分类只补 scope）
+            const machineSections = parseJsonFence(promptText, "machineSections");
             write(
-              toolCall(`call_topics_${section}`, "submit_section_topics", {
-                section,
-                topics: TOPICS_BY_SECTION[section] ?? [],
+              toolCall("call_sections", "submit_sections", {
+                sections: machineSections.map((entry) => {
+                  const item = entry as { id: string; title: string };
+                  const isBase = BASE_SECTION_IDS.includes(item.id);
+                  return {
+                    id: item.id,
+                    ...(isBase
+                      ? {}
+                      : { title: `${item.title}${NAMED_SUFFIX}`, description: `${item.title} 的命名说明` }),
+                    scope: [`包含：${item.title} 的能力域`, "不包含：相邻分类"],
+                  };
+                }),
               }),
             );
-          } else if (toolNames.has("refine_section_titles")) {
-            const titles = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^\[\n（]+)/gm)].map((match) => ({
-              slug: match[1],
-              title: match[2].trim(),
-            }));
-            write(toolCall(`call_titles_${section}`, "refine_section_titles", { section, titles }));
+          } else if (toolNames.has("submit_pages")) {
+            // 页面命名：从机器清单原样回填（title / summary / level）
+            const machinePages = parseJsonFence(promptText, "machinePages");
+            write(
+              toolCall(`call_pages_${section}`, "submit_pages", {
+                section,
+                pages: machinePages.map((entry) => {
+                  const item = entry as { id: string; label: string };
+                  return {
+                    id: item.id,
+                    title: `${item.label}${NAMED_SUFFIX}`,
+                    summary: `${item.label} 的页面摘要`,
+                    level: "Intermediate",
+                  };
+                }),
+              }),
+            );
           } else if (isPageAgent || toolNames.has("write_page")) {
             const slug = /\*\*Slug\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "page";
             const file = /\*\*文件名\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? `${slug}.md`;
@@ -403,50 +361,52 @@ const catalogDone = await waitFor(
 clearInterval(stageSampler);
 check("目录完成后展示文章列表", catalogDone);
 
-// 三阶段进度文案（规划主题中 / 拟定标题 x/y / 精修标题 x/y）必须在生成页真实渲染过
+// 结构优先进度文案（结构切分 / 命名分类 / 命名页面 x/y）必须在生成页真实渲染过
+// 结构阶段是纯代码（毫秒级），只断言其 Agent 行标签出现过
 check(
-  "生成页渲染三阶段进度文案（规划主题 / 拟定标题 / 精修标题）",
-  catalogSamples.some((text) => text.includes("规划主题中")) &&
-    catalogSamples.some((text) => /拟定标题 \d+\/\d+/.test(text)) &&
-    catalogSamples.some((text) => /精修标题 \d+\/\d+/.test(text)),
-  catalogSamples.filter((text) => text.includes("规划主题中") || /拟定标题 \d+\/\d+/.test(text)).slice(0, 3).join(" || "),
+  "生成页渲染结构优先进度文案（结构切分 / 命名分类 / 命名页面）",
+  catalogSamples.some((text) => text.includes("结构切分")) &&
+    catalogSamples.some((text) => text.includes("命名分类中")) &&
+    catalogSamples.some((text) => /命名页面 \d+\/\d+/.test(text)),
+  catalogSamples
+    .filter((text) => text.includes("结构切分") || /命名页面 \d+\/\d+/.test(text))
+    .slice(0, 3)
+    .join(" || "),
 );
 
-// 目录按 Agent 分类显示：规划主题 / 每个分类的拟定标题 / 精修标题各一行（生成中就能看到）
+// 目录按 Agent 分类显示：结构切分 / 命名分类 / 每个分类的命名页面各一行（生成中就能看到）
 check(
-  "目录按 Agent 分类显示（规划主题 / 拟定标题 · / 精修标题 · 各一行）",
-  catalogSamples.some((text) => text.includes("拟定标题 · ")) &&
-    catalogSamples.some((text) => text.includes("精修标题 · ")),
-  catalogSamples.find((text) => text.includes("拟定标题 · "))?.split("\n").filter((line) => line.includes(" · ")).slice(0, 3).join(" || "),
+  "目录按 Agent 分类显示（命名分类 / 命名页面 · 各一行）",
+  catalogSamples.some((text) => text.includes("命名页面 · ")),
+  catalogSamples
+    .find((text) => text.includes("命名页面 · "))
+    ?.split("\n")
+    .filter((line) => line.includes(" · "))
+    .slice(0, 3)
+    .join(" || "),
 );
 check(
   "目录 Agent 行渲染四个状态指标（输入/输出/缓存占比/上下文占比）",
   catalogSamples.some(
-    (text) =>
-      text.includes("缓存占比") &&
-      text.includes("上下文 ") &&
-      /↑\d/.test(text) &&
-      /↓\d/.test(text),
+    (text) => text.includes("缓存占比") && text.includes("上下文 ") && /↑\d/.test(text) && /↓\d/.test(text),
   ),
   catalogSamples.find((text) => text.includes("上下文 "))?.split("\n").find((line) => line.includes("上下文 ")) ?? "(无)",
 );
 
-const allDone = await waitFor(() => screenText().includes("文章 9/9"), 60000, "全部页面生成完成");
-check("九篇文章全部完成（文章 9/9）", allDone);
+// 机器切分：2 个源文件 → 2 个结构分类 + 2 个基础分类 = 4 页
+const PAGE_COUNT = 4;
+const allDone = await waitFor(() => screenText().includes(`文章 ${PAGE_COUNT}/${PAGE_COUNT}`), 60000, "全部页面生成完成");
+check(`四篇文章全部完成（文章 ${PAGE_COUNT}/${PAGE_COUNT}）`, allDone);
 
 // 已完成的目录 Agent 行也要继续显示指标（[完成] 右侧：↑ / ↓ / 缓存占比 / 上下文占比）
 const catalogAgentLines = screenText()
   .split("\n")
-  .filter((line) => line.includes("规划主题") || line.includes("拟定标题 · ") || line.includes("精修标题 · "));
+  .filter((line) => line.includes("命名分类") || line.includes("命名页面 · ") || line.includes("结构切分"));
 check(
   "完成后目录 Agent 行仍显示四个指标（[完成] 右侧）",
   catalogAgentLines.some(
     (line) =>
-      line.includes("[完成]") &&
-      /↑\d/.test(line) &&
-      /↓\d/.test(line) &&
-      line.includes("缓存占比") &&
-      line.includes("上下文 "),
+      line.includes("[完成]") && /↑\d/.test(line) && /↓\d/.test(line) && line.includes("缓存占比") && line.includes("上下文 "),
   ),
   catalogAgentLines.slice(0, 3).join("\n      ") || "(无)",
 );
@@ -459,36 +419,32 @@ check(
   articleLines[0] ?? "(无)",
 );
 
-// 底部合计行：三阶段目录（分类 / 主题×3 / 标题×3 各 2 次请求 = 14）+ 9 个页面 Agent × 2 = 18，
-// 共 32 次请求；单次请求 60 非缓存输入 + 60 缓存读 + 30 输出
-// → 合计输入侧 3840（3.8k）、输出 960、缓存占比 50.0%
+// 底部合计行：目录（结构层无 Agent；分类命名 1 + 页面命名 4，各 2 次请求 = 10）
+// + 4 个页面 Agent × 2 = 8，共 18 次请求；单次请求 60 非缓存输入 + 60 缓存读 + 30 输出
+// → 合计输入侧 2160（2.2k）、输出 540、缓存占比 50.0%
 const totalsText = screenText();
-checkContains("底部显示用量合计（输入 token）", totalsText, "合计 输入 3.8k");
-checkContains("底部显示用量合计（输出 token）", totalsText, "输出 960");
+checkContains("底部显示用量合计（输入 token）", totalsText, "合计 输入 2.2k");
+checkContains("底部显示用量合计（输出 token）", totalsText, "输出 540");
 checkContains("底部显示缓存占比", totalsText, "缓存占比 50.0%");
 check(
   "用量合计行是页面的最后一行",
-  totalsText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 3.8k · 输出 960 · 缓存占比 50.0%",
+  totalsText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 2.2k · 输出 540 · 缓存占比 50.0%",
   totalsText.trimEnd().split("\n").at(-1) ?? "(空)",
 );
 
 // 重新生成一页（r）：合计必须继续累加（成功 + 失败 + 重试），
-// 不能把该页已消耗的 240 清零（底部合计输入侧 3840 -> 4080，输出 960 -> 1020）
+// 不能把该页已消耗的 240 清零（底部合计输入侧 2160 -> 2400，输出 540 -> 600）
 terminal.send("\x1b[B"); // 先移动选中项（onHighlight 才会记录 slug）
 await sleep(20);
 terminal.send("r");
-const regenerated = await waitFor(
-  () => screenText().includes("合计 输入 4.1k"),
-  60000,
-  "重新生成后合计继续累加",
-);
-check("重新生成一页后合计继续累加（3840 + 240 = 4080）", regenerated);
+const regenerated = await waitFor(() => screenText().includes("合计 输入 2.4k"), 60000, "重新生成后合计继续累加");
+check("重新生成一页后合计继续累加（2160 + 240 = 2400）", regenerated);
 const retryText = screenText();
-checkContains("重新生成后输出 token 累加（960→1020，跨越 k 边界）", retryText, "输出 1.0k");
+checkContains("重新生成后输出 token 累加（540→600）", retryText, "输出 600");
 checkContains("重新生成后缓存占比保持", retryText, "缓存占比 50.0%");
 check(
   "重新生成后合计行同步刷新",
-  retryText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 4.1k · 输出 1.0k · 缓存占比 50.0%",
+  retryText.trimEnd().split("\n").at(-1)?.trim() === "合计 输入 2.4k · 输出 600 · 缓存占比 50.0%",
   retryText.trimEnd().split("\n").at(-1) ?? "(空)",
 );
 
@@ -504,10 +460,10 @@ if (wikiJsonExists) {
     sections?: Array<{ title: string }>;
     pages: Array<{ slug: string; file: string; section: string }>;
   };
-  check("wiki.json 含 9 个页面", catalog.pages.length === 9, `实际 ${catalog.pages.length}`);
+  check("wiki.json 含 4 个页面", catalog.pages.length === PAGE_COUNT, `实际 ${catalog.pages.length}`);
   check(
-    "wiki.json 含三阶段分类骨架",
-    (catalog.sections?.length ?? 0) >= 2,
+    "wiki.json 含基础分类与结构分类",
+    (catalog.sections?.length ?? 0) >= 4,
     JSON.stringify(catalog.sections?.map((section) => section.title)),
   );
   check(
@@ -548,11 +504,11 @@ check("发生了真实的 mock LLM 请求", requestCount >= 4, `requests=${reque
 // 返回 wiki 首页：应识别出已生成完成（进度检查 + 选项重建）
 terminal.send("\x1b");
 const homeUpdated = await waitFor(
-  () => screenText().includes("文档已生成 (9 篇)"),
+  () => screenText().includes(`文档已生成 (${PAGE_COUNT} 篇)`),
   10000,
   "wiki 首页显示已完成状态",
 );
-check("返回首页后状态为「文档已生成 (9 篇)」", homeUpdated);
+check(`返回首页后状态为「文档已生成 (${PAGE_COUNT} 篇)」`, homeUpdated);
 const homeText = screenText();
 check("已完成时提供「浏览文档」", homeText.includes("浏览文档"));
 check("已完成时提供「管理文档」", homeText.includes("管理文档"));
@@ -575,7 +531,7 @@ check("同步页目录状态为完成", screenText().includes("[完成]"));
 
 // ESC 返回首页
 terminal.send("\x1b");
-const backHome = await waitFor(() => screenText().includes("文档已生成 (9 篇)"), 10000, "ESC 返回首页");
+const backHome = await waitFor(() => screenText().includes(`文档已生成 (${PAGE_COUNT} 篇)`), 10000, "ESC 返回首页");
 check("同步页 ESC 返回首页", backHome);
 
 app.exit();

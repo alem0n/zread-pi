@@ -26,7 +26,13 @@ import {
   slotUsageTotal,
   toUsageTotals,
 } from "./usage";
-import type { CatalogAgentState, PageStatus, TokenUsage, WikiPage } from "./types";
+import type {
+  CatalogAgentState,
+  CatalogStage,
+  PageStatus,
+  TokenUsage,
+  WikiPage,
+} from "./types";
 
 type ArticleItem = { value: string; page: WikiPage };
 
@@ -173,7 +179,7 @@ export default class WikiGeneratePage extends Screen {
         seconds,
       });
     } else if (status === "loading" && stage) {
-      // 三阶段：分类 → 分主题 → 标题（带分类级进度）
+      // 结构优先：结构切分 → 分类命名 → 页面命名（带分类级进度）
       statusText = this.stageStatusText(stage, sectionsProgress, section);
     } else if (status === "loading" && phase === "tool" && currentTool) {
       // 工具调用
@@ -214,7 +220,7 @@ export default class WikiGeneratePage extends Screen {
     return [
       ...new Divider(this.t("wikiGenerate.catalogTitle")).render(width),
       statusRow(width, left, style(rightText, { color: rightColor })),
-      // 目录生成会并发跑多个 Agent：分类 / 每个分类的主题、标题 / 缩编 subagent，
+      // 目录生成会跑多个命名 Agent：分类命名 1 个 + 每个分类的页面命名，
       // 每个 Agent 一行（其中一行的用量不是目录级聚合，是该 Agent 自己的快照）
       ...this.renderAgentRows(width),
     ];
@@ -256,9 +262,16 @@ export default class WikiGeneratePage extends Screen {
     return statusRow(width, left, style(rightText, { color: rightColor }));
   }
 
-  /** Agent 标签（名称描述该 Agent 此刻在做什么：规划主题 / 拟定标题 / 精修标题 / 精简清单） */
+  /** Agent 标签（名称描述该 Agent 此刻在做什么：结构切分 / 命名分类 / 命名页面） */
   private agentLabel(agent: CatalogAgentState): string {
     switch (agent.role) {
+      case "structure":
+        return this.t("wikiGenerate.agentStructure");
+      case "sections":
+        return this.t("wikiGenerate.agentSections");
+      case "pages":
+        return this.t("wikiGenerate.agentPages", { section: agent.section ?? "" });
+      // 旧三阶段角色（旧日志回放）
       case "topics":
         return this.t("wikiGenerate.agentTopics", { section: agent.section ?? "" });
       case "titles":
@@ -342,10 +355,21 @@ export default class WikiGeneratePage extends Screen {
 
   /** 三阶段状态文字（classify / topics / titles；带分类级进度） */
   private stageStatusText(
-    stage: "classify" | "topics" | "titles",
+    stage: CatalogStage,
     progress?: { current: number; total: number },
     section?: string,
   ): string {
+    if (stage === "structure") return this.t("wikiGenerate.stageStructure");
+    if (stage === "sections") return this.t("wikiGenerate.stageSections");
+    if (stage === "pages") {
+      const hasProgress = progress !== undefined && progress.total > 0;
+      const suffix = section ? this.t("wikiGenerate.stageSection", { section }) : "";
+      return hasProgress
+        ? this.t("wikiGenerate.stagePages", { current: progress.current, total: progress.total }) + suffix
+        : this.t("wikiGenerate.stagePagesIdle");
+    }
+
+    // 旧三阶段（旧日志回放）
     if (stage === "classify") return this.t("wikiGenerate.stageClassify");
 
     const suffix = section ? this.t("wikiGenerate.stageSection", { section }) : "";

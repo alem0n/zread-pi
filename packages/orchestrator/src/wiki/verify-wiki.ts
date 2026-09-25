@@ -24,7 +24,8 @@ import {
   loadWikiBlueprint,
   resolveWikiVariant,
 } from '@zread-pi/utils';
-import type { BlueprintDetailLevel, WikiOutput, WikiPage } from '@zread-pi/types';
+import { computeLineLedger, computeManifestHash } from '@zread-pi/repo-analyzer';
+import type { BlueprintDetailLevel, CacheManifest, WikiCoverage, WikiOutput, WikiPage, SymbolManifest } from '@zread-pi/types';
 import { getDetailSpec } from '../agents/blueprint-detail.js';
 import { evaluateContentGate, proseFloor } from './content-gate.js';
 import { validateMermaidContent } from '../tools/page-tools.js';
@@ -42,7 +43,7 @@ export { parseSourceRefs } from './traceability.js';
 export type VerifyStatus = 'PASS' | 'FAIL' | 'SKIP';
 
 /** 检查组（对齐 verify_notes.py 的分组结构；组名同时是机器可解析的 key） */
-export type VerifyGroup = 'structure' | 'content' | 'mermaid' | 'traceability' | 'frontmatter';
+export type VerifyGroup = 'structure' | 'content' | 'mermaid' | 'traceability' | 'frontmatter' | 'coverage';
 
 export interface VerifyCheck {
   status: VerifyStatus;
@@ -321,6 +322,9 @@ export async function verifyWiki(options: VerifyWikiOptions = {}): Promise<Verif
 
   await verifyTraceability(root, pages, contents, report, manifest, symbols);
 
+  // ==================== coverage（覆盖等式，结构优先蓝图 v2） ====================
+  verifyCoverage(blueprint, manifest, symbols, report);
+
   return { root, variant, legacy, checks: report.checks, ok: report.ok };
 }
 
@@ -352,7 +356,153 @@ function proseFloorOf(page: WikiPage): number {
   return proseFloor(page);
 }
 
-/** 溯源校验：路径真实 / 行号有效 / 跨页重复声明 / 符号可溯（委托 traceability.ts） */
+/** 覆盖检查组（plan 链 F）：前置分支任一命中 → 整组 SKIP；C1~C4 只在 v2 产物 + 清单一致时执行 */
+function verifyCoverage(
+  blueprint: WikiOutput,
+  manifest: CacheManifest | null,
+  symbols: SymbolManifest | null,
+  report: Report,
+): void {
+  // V0 旧产物（无 schemaVersion=2）：无迁移，整组跳过
+  if (blueprint.schemaVersion !== 2) {
+    report.emit('SKIP', 'coverage', '旧版产物（schemaVersion 不是 2），重新 generate 后可执行覆盖检查');
+    return;
+  }
+  // V1 无缓存清单
+  if (!manifest) {
+    report.emit('SKIP', 'coverage', '无缓存文件清单（未扫描源码），跳过覆盖检查');
+    return;
+  }
+  const coverage: WikiCoverage | undefined = blueprint.coverage;
+  const currentHash = computeManifestHash(manifest);
+  // V2 清单哈希不一致：产物基于旧清单
+  if (!coverage || coverage.manifestHash !== currentHash) {
+    report.emit(
+      'SKIP',
+      'coverage',
+      `产物基于旧清单（哈希点名：产物 ${coverage?.manifestHash ?? '(无 coverage)'} ≠ 当前 ${currentHash}），跳过覆盖检查`,
+    );
+    return;
+  }
+  // V3 无符号缓存（行台账无法独立重算）
+  if (!symbols) {
+    report.emit('SKIP', 'coverage', '无符号缓存，跳过覆盖检查（行台账无法独立重算）');
+    return;
+  }
+
+  const pages = blueprint.pages;
+  const manifestPaths = new Set(manifest.files.map((file) => file.path));
+
+  // ---- C1 覆盖等式：|U| == Σ|ownsFiles|（U 内每个文件恰被一个页面拥有）
+  const ownerOfFile = new Map<string, string>(); // path -> 首个拥有它的页面 slug（同时用于 C2 点名）
+  const occurrences = new Map<string, string[]>(); // path -> 拥有它的全部页面 slug
+  const outsideManifest: string[] = [];
+  for (const page of pages) {
+    for (const path of page.ownsFiles ?? []) {
+      if (!manifestPaths.has(path)) outsideManifest.push(`${page.slug}：${path}`);
+      occurrences.set(path, [...(occurrences.get(path) ?? []), page.slug]);
+      if (!ownerOfFile.has(path)) ownerOfFile.set(path, page.slug);
+    }
+  }
+  const owned = new Set(ownerOfFile.keys());
+  const expectedExcluded = manifest.files.map((file) => file.path).filter((path) => !owned.has(path));
+  const unclaimed = expectedExcluded.filter((path) => !coverage.excluded.includes(path));
+  const phantomExcluded = coverage.excluded.filter((path) => owned.has(path));
+  const equationIssues: string[] = [];
+  if (outsideManifest.length > 0) equationIssues.push(`归属指向清单外的文件：${outsideManifest.slice(0, 6).join('、')}`);
+  if (unclaimed.length > 0) equationIssues.push(`清单中的文件既无归属也未声明排除（${unclaimed.length} 个）：${unclaimed.slice(0, 6).join('、')}`);
+  if (phantomExcluded.length > 0) equationIssues.push(`已排除的文件同时又出现在 ownsFiles 里：${phantomExcluded.slice(0, 6).join('、')}`);
+  if (owned.size !== coverage.universeCount) {
+    equationIssues.push(`universeCount=${coverage.universeCount} ≠ 实际归属文件数 ${owned.size}`);
+  }
+  // fileOwner 与 pages.ownsFiles 逐项一致
+  const ownerMismatches: string[] = [];
+  for (const [path, slug] of ownerOfFile.entries()) {
+    if (coverage.fileOwner[path] !== slug) ownerMismatches.push(`${path}：台账 ${coverage.fileOwner[path] ?? '(缺)'} ≠ 页面 ${slug}`);
+  }
+  const extraOwnerKeys = Object.keys(coverage.fileOwner).filter((path) => !owned.has(path));
+  if (ownerMismatches.length > 0 || extraOwnerKeys.length > 0) {
+    equationIssues.push(
+      `fileOwner 与 ownsFiles 不一致：${[...ownerMismatches, ...extraOwnerKeys.map((path) => `${path}：台账有、ownsFiles 无`)].slice(0, 6).join('；')}`,
+    );
+  }
+  report.emit(
+    equationIssues.length === 0 ? 'PASS' : 'FAIL',
+    'coverage',
+    equationIssues.length === 0
+      ? `覆盖等式成立：${owned.size} 个文件恰被一个页面拥有（|U| == Σ|ownsFiles|）`
+      : `覆盖等式不成立（${equationIssues.length} 处问题）`,
+    equationIssues.length === 0 ? undefined : equationIssues,
+  );
+
+  // ---- C2 排他：同一文件出现在 ≥2 页 ownsFiles
+  const doubleOwned = [...occurrences.entries()].filter(([, owners]) => owners.length > 1);
+  report.emit(
+    doubleOwned.length === 0 ? 'PASS' : 'FAIL',
+    'coverage',
+    doubleOwned.length === 0
+      ? '文件归属排他（无文件被两页同时拥有）'
+      : `${doubleOwned.length} 个文件被多个页面同时拥有`,
+    doubleOwned.length === 0
+      ? undefined
+      : doubleOwned.map(([path, owners]) => `${path}：${owners.join(' / ')}`).slice(0, 12),
+  );
+
+  // ---- C3 行台账：从符号缓存独立重算，不信任 coverage.lines
+  const universeFiles = manifest.files.map((file) => file.path).filter((path) => !coverage.excluded.includes(path));
+  const rangeIssues: string[] = [];
+  for (const symbol of symbols.symbols) {
+    if (symbol.lineCount === undefined || !symbol.ranges) continue;
+    for (const range of symbol.ranges) {
+      if (range.start < 1 || range.end > symbol.lineCount || range.start > range.end) {
+        rangeIssues.push(`${symbol.file}：${range.name} ${range.start}-${range.end}（lineCount=${symbol.lineCount}）`);
+      }
+    }
+  }
+  const ledger = computeLineLedger(symbols, universeFiles);
+  const ledgerIssues: string[] = [];
+  if (coverage.lines) {
+    if (
+      coverage.lines.measured !== ledger.measured ||
+      coverage.lines.total !== ledger.total ||
+      coverage.lines.declared !== ledger.declared ||
+      coverage.lines.gap !== ledger.gap
+    ) {
+      ledgerIssues.push(
+        `coverage.lines(${coverage.lines.measured}/${coverage.lines.total}/${coverage.lines.declared}/${coverage.lines.gap}) ≠ 独立重算(${ledger.measured}/${ledger.total}/${ledger.declared}/${ledger.gap})`,
+      );
+    }
+  }
+  report.emit(
+    rangeIssues.length === 0 && ledgerIssues.length === 0 ? 'PASS' : 'FAIL',
+    'coverage',
+    rangeIssues.length === 0 && ledgerIssues.length === 0
+      ? `行台账一致：已测 ${ledger.measured} 个文件 / 共 ${ledger.total} 行（declared ${ledger.declared}，gap ${ledger.gap}）`
+      : `行台账不一致（${rangeIssues.length} 处越界 / ${ledgerIssues.length} 处对账差异）`,
+    [...rangeIssues, ...ledgerIssues].slice(0, 12) || undefined,
+  );
+
+  // ---- C4 excluded 一致性：coverage.excluded == (manifest − U)
+  const excludedActual = [...coverage.excluded].sort();
+  const excludedExpected = [...expectedExcluded].sort();
+  const excludedEqual =
+    excludedActual.length === excludedExpected.length &&
+    excludedActual.every((path, index) => path === excludedExpected[index]);
+  report.emit(
+    excludedEqual ? 'PASS' : 'FAIL',
+    'coverage',
+    excludedEqual
+      ? `excluded 一致：${excludedActual.length} 个未解析文件（manifest − U）`
+      : 'excluded 与 (manifest − U) 不一致',
+    excludedEqual
+      ? undefined
+      : [
+          `excluded 多余：${excludedActual.filter((path) => !excludedExpected.includes(path)).slice(0, 6).join('、')}`,
+          `缺失：${excludedExpected.filter((path) => !excludedActual.includes(path)).slice(0, 6).join('、')}`,
+        ].filter((line) => !line.endsWith('：')),
+  );
+}
+
 async function verifyTraceability(
   root: string,
   pages: WikiPage[],

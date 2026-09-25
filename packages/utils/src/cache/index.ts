@@ -25,6 +25,7 @@ export async function saveCachedManifest(manifest: FileManifest): Promise<void> 
       path: f.path,
       hash: f.hash,
       size: f.size,
+      language: f.language,
     })),
   };
 

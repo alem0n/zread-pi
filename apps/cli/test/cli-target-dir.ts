@@ -70,30 +70,22 @@ async function canonical(path: string): Promise<string> {
 // 1) mock LLM（OpenAI 兼容 SSE，与 apps/cli/test/mock-generate.ts 同款）
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [
-  { title: "概览", description: "项目定位与整体速览" },
-  { title: "核心架构", description: "核心模块与实现细节" },
-  { title: "模块", description: "工具模块与实现细节" },
-];
+const BASE_SECTION_IDS = ["overview", "core"];
+const NAMED_SUFFIX = "（命名）";
+const PAGE_COUNT = 4;
 
-/** 主题阶段：每个分类下的页面草稿（high 档位要求每分类 3~10 篇） */
-const TOPICS_BY_SECTION: Record<string, Array<Record<string, unknown>>> = {
-  概览: [
-    { title: "入口", slug: "main", level: "Beginner", associatedFiles: ["main.ts"] },
-    { title: "核心特性", slug: "features", level: "Beginner", associatedFiles: ["main.ts"] },
-    { title: "设计目标", slug: "design-goals", level: "Intermediate", associatedFiles: ["main.ts"] },
-  ],
-  核心架构: [
-    { title: "整体架构", slug: "architecture", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
-    { title: "数据流", slug: "data-flow", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
-    { title: "扩展点", slug: "extensions", level: "Advanced", associatedFiles: ["src/utils.ts"] },
-  ],
-  模块: [
-    { title: "工具函数", slug: "utils", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
-    { title: "工具函数 API", slug: "utils-api", level: "Intermediate", associatedFiles: ["src/utils.ts"] },
-    { title: "工具函数测试", slug: "utils-tests", level: "Beginner", associatedFiles: ["src/utils.ts"] },
-  ],
-};
+/** 从提示词里抠出第一个 json fence 的 payload（机器骨架） */
+function parseJsonFence(text: string, key: string): unknown[] {
+  const match = /```json\n([\s\S]*?)\n```/.exec(text);
+  if (!match) return [];
+  try {
+    const payload = JSON.parse(match[1]) as Record<string, unknown>;
+    const value = payload[key];
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
 
 function chunk(payload: Record<string, unknown>): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
@@ -177,7 +169,7 @@ const server = Bun.serve({
         .map((tool) => tool?.function?.name)
         .filter((name): name is string => typeof name === "string"),
     );
-    const section = /^- 分类: ([^\n]+)$/m.exec(promptText)?.[1]?.trim() ?? "";
+    const section = /^- 分类：(.+)$/m.exec(promptText)?.[1]?.trim() ?? "";
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
@@ -185,20 +177,40 @@ const server = Bun.serve({
         const write = (text: string): void => controller.enqueue(encoder.encode(text));
         if (!hasToolResult) {
           if (toolNames.has("submit_sections")) {
-            write(toolCall("call_sections", "submit_sections", { sections: SECTIONS }));
-          } else if (toolNames.has("submit_section_topics")) {
+            // 分类命名：从机器清单原样回填（基础分类只补 scope）
+            const machineSections = parseJsonFence(promptText, "machineSections");
             write(
-              toolCall(`call_topics_${section}`, "submit_section_topics", {
-                section,
-                topics: TOPICS_BY_SECTION[section] ?? [],
+              toolCall("call_sections", "submit_sections", {
+                sections: machineSections.map((entry) => {
+                  const item = entry as { id: string; title: string };
+                  const isBase = BASE_SECTION_IDS.includes(item.id);
+                  return {
+                    id: item.id,
+                    ...(isBase
+                      ? {}
+                      : { title: `${item.title}${NAMED_SUFFIX}`, description: `${item.title} 的命名说明` }),
+                    scope: [`包含：${item.title} 的能力域`, "不包含：相邻分类"],
+                  };
+                }),
               }),
             );
-          } else if (toolNames.has("refine_section_titles")) {
-            const titles = [...promptText.matchAll(/^- ([a-z0-9-]+): ([^\[\n（]+)/gm)].map((match) => ({
-              slug: match[1],
-              title: match[2].trim(),
-            }));
-            write(toolCall(`call_titles_${section}`, "refine_section_titles", { section, titles }));
+          } else if (toolNames.has("submit_pages")) {
+            // 页面命名：从机器清单原样回填（title / summary / level）
+            const machinePages = parseJsonFence(promptText, "machinePages");
+            write(
+              toolCall(`call_pages_${section}`, "submit_pages", {
+                section,
+                pages: machinePages.map((entry) => {
+                  const item = entry as { id: string; label: string };
+                  return {
+                    id: item.id,
+                    title: `${item.label}${NAMED_SUFFIX}`,
+                    summary: `${item.label} 的页面摘要`,
+                    level: "Intermediate",
+                  };
+                }),
+              }),
+            );
           } else if (isPageAgent || toolNames.has("write_page")) {
             const slug = /\*\*Slug\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? "page";
             const file = /\*\*文件名\*\*: ([^\\]+)/.exec(prompt)?.[1]?.trim() ?? `${slug}.md`;
@@ -379,7 +391,6 @@ const canonicalTarget = await canonical(targetRepo);
 
   run.send("\r");
   const wikiJsonPath = join(targetRepo, ".zread-pi", "wiki", "high", "wiki.json");
-  // 三阶段流程会先落盘骨架（pages 为空）；等到页面归并完成再断言
   const readWiki = async (): Promise<{ sections?: Array<{ title: string }>; pages: Array<{ slug: string; file: string; section: string }> } | null> => {
     try {
       return JSON.parse(await readFile(wikiJsonPath, "utf-8")) as {
@@ -390,29 +401,24 @@ const canonicalTarget = await canonical(targetRepo);
       return null;
     }
   };
-  const generated = await waitFor(
-    async () => ((await readWiki())?.pages.length ?? 0) === 9,
-    60000,
-    "目标目录生成 wiki.json（9 个页面归并完成）",
+  const wikiJsonExists = await waitFor(async () => exists(wikiJsonPath), 60000, "目标目录生成 wiki.json");
+  check("wiki.json 落盘到目标目录", wikiJsonExists, wikiJsonPath);
+
+  const allDone = await waitFor(() => run.text().includes(`文章 ${PAGE_COUNT}/${PAGE_COUNT}`), 60000, "页面生成完成");
+  check(`生成完成后界面显示「文章 ${PAGE_COUNT}/${PAGE_COUNT}」`, allDone);
+
+  // 机器骨架先以机器标题落盘，命名阶段会改 section 标题（并同步 pages[].section），
+  // 必须等命名与页面生成都结束后再读目录，否则 section 目录名会对不上
+  const catalog = await readWiki();
+  check("wiki.json 含 4 个页面", catalog?.pages.length === PAGE_COUNT, `实际 ${catalog?.pages.length}`);
+  check(
+    "wiki.json 含基础分类与结构分类",
+    (catalog?.sections?.length ?? 0) >= 4,
+    JSON.stringify(catalog?.sections?.map((section) => section.title)),
   );
-  check("wiki.json 落盘到目标目录", generated, wikiJsonPath);
+  const generatedPages: Array<{ file: string; section: string }> = catalog?.pages ?? [];
 
-  let generatedPages: Array<{ file: string; section: string }> = [];
-  if (generated) {
-    const catalog = (await readWiki())!;
-    check("wiki.json 含 9 个页面", catalog.pages.length === 9, `实际 ${catalog.pages.length}`);
-    check(
-      "wiki.json 含三阶段分类骨架",
-      (catalog.sections?.length ?? 0) >= 2,
-      JSON.stringify(catalog.sections?.map((section) => section.title)),
-    );
-    generatedPages = catalog.pages;
-  }
-
-  const allDone = await waitFor(() => run.text().includes("文章 9/9"), 60000, "页面生成完成");
-  check("生成完成后界面显示「文章 9/9」", allDone);
-
-  // 页面文件由并行 Agent 逐个 write_page 落盘，必须在「文章 2/2」之后再判定
+  // 页面文件由并行 Agent 逐个 write_page 落盘，必须在「文章 N/N」之后再判定
   const pageFiles = generatedPages.map((page) =>
     join(targetRepo, ".zread-pi", "wiki", "high", page.section, page.file),
   );
@@ -437,7 +443,7 @@ const canonicalTarget = await canonical(targetRepo);
 {
   const run = spawnCli(["-d", "target-repo"], workspace);
   const recognized = await waitFor(
-    () => run.text().includes("文档已生成 (9 篇)"),
+    () => run.text().includes(`文档已生成 (${PAGE_COUNT} 篇)`),
     20000,
     "相对路径解析到目标目录",
   );
@@ -451,7 +457,7 @@ const canonicalTarget = await canonical(targetRepo);
 {
   const run = spawnCli(["wiki", "--dir", targetRepo], workspace);
   const recognized = await waitFor(
-    () => run.text().includes("文档已生成 (9 篇)"),
+    () => run.text().includes(`文档已生成 (${PAGE_COUNT} 篇)`),
     20000,
     "`wiki --dir` 生效",
   );
@@ -465,7 +471,7 @@ const canonicalTarget = await canonical(targetRepo);
 {
   const run = spawnCli([], targetRepo);
   const rendered = await waitFor(
-    () => run.text().includes("文档已生成 (9 篇)"),
+    () => run.text().includes(`文档已生成 (${PAGE_COUNT} 篇)`),
     20000,
     "缺省 -d 时使用当前目录",
   );

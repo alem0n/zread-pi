@@ -38,18 +38,18 @@ export interface BlueprintResult {
   pagesCount: number;
   /** 分类阶段的分类数（三阶段流程；旧入口为 undefined） */
   sectionsCount?: number;
-  /** 分主题 / 标题阶段失败的分类（不阻断其余分类） */
+  /** 页面命名阶段失败的分类（不阻断其余分类） */
   failedSections?: BlueprintFailedSection[];
   techStackSummary?: TechStackSummary;
   durationMs: number;
   tokenUsage?: TokenUsage;
 }
 
-/** 蓝图三阶段（分类 → 分主题 → 标题） */
-export type CatalogStage = 'classify' | 'topics' | 'titles';
+/** 蓝图三阶段（结构 → 分类命名 → 页面命名） */
+export type CatalogStage = 'structure' | 'sections' | 'pages';
 
-/** 产生目录事件的 Agent 角色（每个 Agent 一行；缩编 subagent 单独成行） */
-export type CatalogAgentRole = 'classify' | 'topics' | 'titles' | 'condense';
+/** 产生目录事件的 Agent 角色（每个 Agent 一行） */
+export type CatalogAgentRole = 'structure' | 'sections' | 'pages';
 
 /** 单个目录 Agent 的生命周期状态 */
 export type CatalogAgentStatus = 'waiting' | 'running' | 'completed' | 'failed';
@@ -58,8 +58,8 @@ export type CatalogAgentStatus = 'waiting' | 'running' | 'completed' | 'failed';
 export interface BlueprintFailedSection {
   /** 分类标题 */
   section: string;
-  /** 失败的阶段 */
-  stage: 'topics' | 'titles';
+  /** 失败的阶段（页面命名） */
+  stage: 'pages';
   /** 失败原因（模型未调用工具 / Agent 报错等） */
   error: string;
 }
@@ -91,7 +91,7 @@ export interface CatalogEvent {
    * 带该字段的事件只描述「某一个 Agent」，目录整体状态由不带该字段的事件承担。
    */
   agentKey?: string;
-  /** 产生该事件的 Agent 角色（分类 / 分主题 / 标题 / 缩编 subagent） */
+  /** 产生该事件的 Agent 角色（结构切分 / 分类命名 / 页面命名；旧日志可能是分类 / 主题 / 标题 / 缩编） */
   agentRole?: CatalogAgentRole;
   /** 该 Agent 的生命周期状态（缺省按事件类型推断：complete→completed / error→failed / 其余→running） */
   agentStatus?: CatalogAgentStatus;
@@ -125,6 +125,6 @@ export interface CatalogEvent {
   maxRetries?: number;
   /** 重试延迟毫秒（retry 时） */
   delayMs?: number;
-  /** 分主题 / 标题阶段失败的分类（complete 事件携带） */
+  /** 页面命名阶段失败的分类（complete 事件携带） */
   failedSections?: BlueprintFailedSection[];
 }

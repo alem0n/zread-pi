@@ -49,15 +49,16 @@ bun run cli history        # 全局记忆：清理失效项目并列出
 | CLI TUI（`apps/cli/src/**`） | `typecheck` + `test:tui`；布局 / 快捷键 / 文案 / 列表分页改动必须同步 `smoke-tui.ts` 断言 |
 | 适配层 `packages/agent-runtime/**` | `test`（全部套件）+ 针对性断言；契约面改动同步 §4；首尾机制（预算 / 提示 / 终止）改动补 `test:context` |
 | 工具层 `agent-runtime/src/tools/**`（含图片管线 `image/**`） | `typecheck` + `test:tools` + `test`；**工具不得改名**（提示词与测试依赖名字）；图片管线改行为补 `test:tools` 的 6b 段；打包产物须保持 `apps/cli/dist/photon_rs_bg.wasm` |
-| 蓝图三阶段 / sync（`prompts/**`、`tools/output-tools.ts`、`agents/blueprint-stages.ts`、`wiki/sync-wiki.ts`） | `typecheck` + `test:blueprint` + `test`；每阶段落盘保持 `loadWikiBlueprint` 可加载（骨架 pages 为空合法）；单 section 失败与 SyncDiff 语义必须有 e2e 断言 |
-| 标题精修 / 蓝图档位 / 基础分类（`blueprint-detail.ts`、`prompts/classify.ts`、`prompts/topics.ts`、`BASE_SECTIONS`、`OVERVIEW_SECTIONS` 等） | `typecheck` + `test:blueprint` + `test:pages` + `mock:wiki` + `test`（配置界面另跑 `test:tui`）；增删基础分类须同步 ① sections 区间下限（`judgeQuantity` 判归一化后 count）② `OVERVIEW_SECTIONS` 的 Mermaid 强制角色 ③ 夹具里靠「基础分类 + 领域」凑越界的清单（少一个基础分类要补一个领域，否则缩编链路静默失效）④ mock 夹具页数与用量算术（`formatBytes` <1000 不带 k）⑤ `README.md` 档位区间描述 |
+| 结构层（`packages/repo-analyzer/src/structure/**`、`types/structure.ts`、`wiki/structure.ts`） | `typecheck` + `test:analyzer` + `test:blueprint` + `mock:wiki` + `test`；**结构计算必须确定性**：同一仓库同一档位重算 `cache/structure-<档位>.json` 须字节一致（抽检：连跑两次 mock:wiki 比对）；CEG 构建 / 切分 / 槽位语义改动必须同步 ① `plan.md` 的 D 编号决策 ② `test:analyzer` 的期望 ③ `verifyCoverage` 的覆盖等式口径；符号 / 清单缺失仍然致命报错（D21），不允许静默降级 |
+| 命名链 / 蓝图档位（`prompts/classify.ts`、`prompts/topics.ts`、`tools/output-tools.ts`、`agents/blueprint-stages.ts`、`agents/blueprint-detail.ts`） | `typecheck` + `test:blueprint` + `test:pages` + `mock:wiki` + `test`（配置界面另跑 `test:tui`）；**工具名不得改**（`submit_sections` / `submit_pages`）；档位区间数值改动必须同步 `BLUEPRINT_DETAIL_SPECS`（orchestrator）/ `STRUCTURE_SPECS`（structure.ts）/ i18n zh+en / `README.md` 档位表 / smoke-tui 档位文案断言（区间数值与 minimal 跳过命名 Agent 的口径）；提示词 json-fence 契约（`machineSections` / `machinePages`）改动必须同步 e2e-blueprint 的解析断言；minimal 档位 0 LLM 请求必须有断言 |
 | 内容密度门（`wiki/content-gate.ts`、`tools/page-tools.ts`、`generate-wiki.ts` 降级落盘、`QualityConfig` 等） | `typecheck` + `test:pages` + `test:catalog` + `test:tui` + `test`；**降级落盘必须覆盖 `try` 与 `catch` 两条路径**（预算耗尽走 `catch`）；门限判定语义变动须声明为有意偏差；工具名 / schema / 提示文本不要改。**有意偏差（声明）**：① `mermaidRequiredFor` 语义已收紧为「要求架构图（flowchart）≥1」——架构图属于 flowchart 语法，序列图 / 状态图不能替代（minimal panorama 提示词已写死 `flowchart TB`，此处对齐）；② 图表校验 / 计数按**三类语法**（flowchart / sequence / state）做，选型按**四类语义**教（见 `diagram-guide`）；③ 题注（`**图｜<类型词>｜<标题>**`）只在 `write_page` 生成期强制，**verify-wiki 不查题注**（旧页面无题注，回溯会报新 FAIL）；④ `mermaidBlocks` 保留为**全部 mermaid 围栏数**（含 erDiagram / gantt / pie 等四类之外的图种），因此 `mermaidBlocks >= flowchartBlocks + sequenceBlocks + stateBlocks`——不重定义为三者之和，是为了不改变旧密度门对四类之外图种的计数（旧调用方不破）；⑤ `SEQ_LABEL_QUOTES` 是**可移植性守卫**而非 mermaid 12 的解析必需（实测 mermaid 12 能渲染未加引号的 `网关(入口)`；拦截它是因产物会被 GitHub / GitLab / Notion 内置的可能更旧的 mermaid 渲染），规则文案须按此口径维护 |
-| 交付闸门（`wiki/verify-wiki.ts`、`commands/verify.ts`、`verifyAfterGenerate`） | `typecheck` + `test:verify` + `test`；**`verify-wiki.ts` 只读不写产物**；`RunMeta` 不得改；`verifyAfterGenerate` 缺省 false |
+| 多档共存 / 浏览（`utils/output/wiki-content.ts`、`browse-server.ts`、`apps/browse/src/**`） | `typecheck` + `test:blueprint` + `test:browse` + `test:tui` + `test`（前端另跑 `browse:build`）；**组件行为改动必须补 `test:components`（测试先行）** |
+| 交付闸门（`wiki/verify-wiki.ts`、`commands/verify.ts`、`verifyAfterGenerate`） | `typecheck` + `test:verify` + `test`；**`verify-wiki.ts` 只读不写产物**；`RunMeta` 不得改；`verifyAfterGenerate` 缺省 false；**coverage 组的四个 SKIP 分支（schemaVersion≠2 / 无清单 / 清单哈希不匹配 / 无符号）必须有断言**，且缺省产物在旧缓存上跑必须 SKIP 而不是 FAIL（旧 `last_manifest.json` 无 `language` 字段，哈希天然不一致） |
 | 溯源台账（`wiki/traceability.ts`、verify-wiki 检查组） | `typecheck` + `test:traceability` + `test:verify` + `test`；**只读不写产物**；符号层保持 WARN，蓝图 `associatedFiles` 是 FAIL |
 | 页面格式资产 / reader-first / 文风纪律 / 图表纪律（`prompts/page-format.*.md`、`prompts/reader-first.*.md`、`prompts/humanizer.*.md`、`prompts/diagram-guide.*.md`、`agents/{page-format,reader-first,style-discipline,diagram-guide}.ts`、`wiki/polish.ts`） | `typecheck` + `test:page-format` + `test:mermaid` + `test:pages` + `mock:wiki` + `test`；**zh / en 两份资产必须同步改动，条数与编号一一对应**；反注水三条（同义改写注水 / 不复制 README·AGENTS.md /「源里没有就应该是 0」）必须在双语都存在；改资产后 `mock:wiki` 须 `overall=PASS`；纪律文件保持 60~80 行 + 头部来源注释；图表选型纪律只在 `diagram-guide` 一处规定（page-format 只留格式契约 + 指向指针），避免两处规定打架 |
 | 一致性校验 / 黄金值对照（`tools/golden-parity-gen.py`、`packages/orchestrator/test/golden-parity.ts`、`content-gate.ts` 的 `countCjkChars` / `numbersIn`） | `python3 tools/golden-parity-gen.py` 重新生成 + `typecheck` + `test:golden-parity` + `test`；样本变动必须**两边同步**（Python 脚本与 TS 测试逐字一致）并重新生成黄金值；判定语义变动须声明为有意偏差；带 `g` 标志的正则不得用于逐元素 `test()`（`lastIndex` 状态会跳过元素）。黄金值已硬编码在 `golden-parity.ts`，只有样本 / 判定语义变动时才需重跑生成器（生成器导入本机的 `lecture-to-notes` 仓库，路径硬编码在脚本头）；`test:golden-parity` **不在** `bun run test` 聚合内，按需单跑 |
 | 重试策略（`agent-runtime/src/retry.ts`、`harness/driver.ts`、`create-agent.ts`） | `typecheck` + `test:agent` + `test:agent:http` + `test`；`RetryConfig` 形状改动同步 §4 |
-| 多档共存 / 浏览（`utils/output/wiki-content.ts`、`browse-server.ts`、`apps/browse/src/**`） | `typecheck` + `test:blueprint` + `test:browse` + `test:tui` + `test`（前端另跑 `browse:build`）；**组件行为改动必须补 `test:components`（测试先行）** |
+| sync / 身份继承（`wiki/sync-wiki.ts`、`utils/output/wiki-content.ts` 的 `reconcileBlueprint`） | `typecheck` + `test:blueprint` + `test`；`schemaVersion != 2` 直接报错（不做隐式迁移）；零变更必须零 LLM 请求；reconcile 语义（ownsFiles 重叠贪心匹配 + slot slug 精确兜底 + section 多数表决 + 只命名新增）必须有 e2e 断言 |
 | 轨迹视图 / 会话投影（`packages/trajectory/**`、`trajectory-store/**`、捕获点、`/api/runs*`） | `typecheck` + `test:trajectory` + `test:browse` + `mock:wiki` + `test`；`packages/trajectory/src/session.ts` 必须**无 node 依赖**（被 Vite 打包）；捕获层改动跑 `mock:wiki` 核对「会话文件数 = `agent_config` 数」；新增事件 kind 不得是内容类 |
 | 文件锁 / 日志 / 版本守卫 / 全局记忆（`lockfile.ts`、`logger/**`、`version-guard.ts`、`history/**`） | `typecheck` + 对应 `test:lock` / `test:logger` / `test:version-guard` / `test:history` + `test`；新增写入点必须包 `withFileLock*`；logger 渲染 / 哈希须与 cordis 逐字一致 |
 | 外部工具（`packages/utils/src/tools/**`） | `typecheck` + `test:installer` + `test`；新增工具加一条 `ToolSpec`（资产名需对过真实 release 列表） |
@@ -70,12 +71,13 @@ bun run cli history        # 全局记忆：清理失效项目并列出
 - `createProvider(providerIdOrApiType, { apiKey, baseURL })` → `{ apiType, createMessage({ model, maxTokens, system, messages }) }`
 - `SDKMessage` 联合类型与 `CatalogEvent` 时序（`requesting → responding → tool_start → tool_result → complete`）
 - 工具名：`read` / `write` / `edit` / `find` / `grep` / `ls` / `write_page` / `generate_blueprint`（提示词与测试依赖名字，不得改名）
+- 蓝图命名工具：`submit_sections` / `submit_pages`（`submit_section_topics` / `refine_section_titles` / `generate_blueprint` / `generate_sync_blueprint` 仅旧日志回放需要，代码不再调用）
+- 事件枚举：`RunStage` / `RunEventAgentRole` / CLI 的 `CatalogStage` / `CatalogAgentRole` / i18n 的 stage / agent 键**只做加法**（旧值 `classify` / `topics` / `titles` / `condense` 保留，用于旧 run 日志回放；新增值 `structure` / `sections` / `pages`）；轨迹夹具用新值，旧值兼容由 `mapper.test` 的 legacy 用例承担
 - `TokenUsage` 字段名；归并只用 `emptyTokenUsage / addTokenUsage / sumTokenUsage`（`packages/agent-runtime/src/usage.ts`）
 - `result.subtype` 含 `error_context_full`（上下文将满）与 `error_budget_exhausted`（预算耗尽强制交卷后仍无产物）
 - `RetryConfig`：Agent 层指数退避 2s→60s + Provider 层 `streamOptions.maxRetries / maxRetryDelayMs`（读服务端 `Retry-After`）；`maxRetries=0` **显式禁用**
 - `BlueprintResult.durationMs / tokenUsage / pagesCount / sectionsCount? / failedSections?`
-- 蓝图输出工具：`submit_sections` / `submit_section_topics` / `refine_section_titles`（`generate_blueprint` / `generate_sync_blueprint` 仅归档）
-- `WikiOutput.sections?`（旧 wiki.json 无字段时从 pages 推导）；路径口径 `getWikiDir(detail?)` / `getWikiJsonPath(detail?)` / `listWikiVariants()`
+- `WikiOutput.schemaVersion === 2`：sync 见到旧版 wiki.json 直接报错，不隐式迁移；`WikiOutput.sections?`（旧 wiki.json 无字段时从 pages 推导）；路径口径 `getWikiDir(detail?)` / `getWikiJsonPath(detail?)` / `listWikiVariants()`
 - 新增字段一律为**可选**，并保证旧配置 / 旧 wiki.json / 旧日志可读（运行时自动迁移 / 回退）
 
 ## 5. Git 工作流（强制：手动合并 + 版本号）
@@ -110,9 +112,11 @@ bun run cli history        # 全局记忆：清理失效项目并列出
 
 **业务工具 schema**：`ToolDefinition.inputSchema` 原样传给 pi 的 `AgentTool.parameters`（JSON Schema 当 TypeBox 用，已验证），不要引入 TypeBox DSL。
 
-**RepoAnalyzer 依赖 cwd**：`parseFiles()` / `scanFiles()` 以 `process.cwd()` 为根，调用前必须 `process.chdir(目标仓库)`；首次解析某语言会下载 WASM 到 `~/.zread-pi/parsers`。
+**RepoAnalyzer 依赖 cwd**：`parseFiles()` / `scanFiles()` 以 `process.cwd()` 为根，调用前必须 `process.chdir(目标仓库)`；首次解析某语言会下载 WASM 到 `~/.zread-pi/parsers`（结构层测试已在 CI 机器上跑过；若换机器首次跑 `test:analyzer` / `mock:wiki` 会联网下载 grammar，离线环境需先播种缓存）。
 
-**Wiki 产物不入库**：`.zread-pi/wiki/**` 已被 `.gitignore` 覆盖，跑完测试无需提交。
+**Wiki 产物不入库**：`.zread-pi/wiki/**` 与 `.zread-pi/cache/**` 已被 `.gitignore` 覆盖，跑完测试无需提交。`cache/structure-<档位>.json` 是结构骨架审计件，每次运行重算重写（无缓存读路径），确定性由 `test:analyzer` 保证。
+
+**结构优先蓝图（v1.23.0）**：页面「哪个文件进哪页」由代码决定（CEG 图 → 确定性两级切分 → 槽位 + ownsFiles + 缝合线），LLM 只命名；数量回路（越界归并 / 缩编 Agent / 数量反馈）整体删除，档位区间从硬校验改为目标参数。结构层改动必须连跑两次 `mock:wiki`（夹具复制成两份独立副本）比对 `cache/structure-<档位>.json` 与 `wiki.json` 页面 ownsFiles 字节一致，并核对 verify 的 coverage 组结果逐字一致（确定性抽检）。旧 wiki.json（`schemaVersion != 2`）只能全量重生成或由 sync 的 `reconcileBlueprint` 做身份继承，verify 的 coverage 组对旧产物 SKIP。
 
 **配置与凭据**：非敏感配置在 `~/.zread-pi/config.yaml`，秘密在 `auth.json`（pi-ai 格式，`Models.login()` 写入，可多 Provider）。`ZREAD_PI_HOME` 覆盖家目录（路径只在 `project-home.ts` 定义）。`config.yaml` / `auth.json` / `tools-state.json` / `history` 的读-改-写都经 `lockfile.ts` 跨进程锁 + config 临时文件 rename 原子替换，锁失败报错不静默降级。未登记的 providerId 回退 OpenAI 兼容协议（有意的健壮性增强）。
 

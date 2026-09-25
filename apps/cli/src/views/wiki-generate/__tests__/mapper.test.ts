@@ -127,7 +127,7 @@ describe('catalogEventToState', () => {
   });
 
   test('complete 携带失败分类（单分类失败不阻断整体）', () => {
-    const failed = [{ section: '核心模块', stage: 'topics' as const, error: '模型未调用 submit_section_topics' }];
+    const failed = [{ section: '核心模块', stage: 'pages' as const, error: '模型未调用 submit_pages' }];
     const done = catalogEventToState(initialCatalogState, {
       type: 'complete',
       usage,

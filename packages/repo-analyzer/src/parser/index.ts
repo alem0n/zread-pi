@@ -1,6 +1,6 @@
 import Parser from 'web-tree-sitter';
 import { join } from 'path';
-import type { FileManifest, SymbolManifest, SymbolInfo } from '@zread-pi/types';
+import type { FileManifest, SymbolManifest, SymbolInfo, SymbolRange } from '@zread-pi/types';
 import { createLogger, getProjectRoot, readTextFile } from '@zread-pi/utils';
 import { isLanguageSupported } from './language-map';
 import { loadParsers } from './wasm-loader';
@@ -175,11 +175,61 @@ function extractExportFromNode(node: Parser.SyntaxNode): string {
   return declLine.length > 100 ? declLine.slice(0, 100) + '...' : declLine;
 }
 
+/** 结构类捕获名（其余捕获是 import / export 或名称节点，不进 ranges） */
+const STRUCTURAL_CAPTURES = new Set([
+  'fn',
+  'method',
+  'class',
+  'iface',
+  'struct',
+  'enum',
+  'trait',
+  'module',
+  'type',
+]);
+
+/** 结构类捕获对应的名称捕获（`fn` → `fn_name`…；`type` 无对应名称捕获） */
+function nameCaptureFor(kind: string): string | null {
+  switch (kind) {
+    case 'type':
+      return null;
+    default:
+      return `${kind}_name`;
+  }
+}
+
+/** 从一次 query match 里抽结构类节点的行区间（import / export 不进 ranges） */
+function collectRanges(captures: Parser.QueryCapture[]): SymbolRange[] {
+  const names = new Map<string, string>();
+  for (const capture of captures) {
+    if (capture.name.endsWith('_name')) {
+      names.set(capture.name, capture.node.text);
+    }
+  }
+
+  const ranges: SymbolRange[] = [];
+  const seen = new Set<number>();
+  for (const capture of captures) {
+    if (!STRUCTURAL_CAPTURES.has(capture.name)) continue;
+    const node = capture.node;
+    if (seen.has(node.id)) continue;
+    seen.add(node.id);
+    const nameCapture = nameCaptureFor(capture.name);
+    const name = (nameCapture && names.get(nameCapture)) || resolveFunctionName(node) || capture.name;
+    ranges.push({
+      name,
+      start: node.startPosition.row + 1,
+      end: node.endPosition.row + 1,
+    });
+  }
+  return ranges;
+}
+
 function extractWithQuery(
   tree: Parser.Tree,
   language: string,
   parser: Parser
-): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string }> } {
+): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string }>; ranges: SymbolRange[] } {
   const queryStr = SCM_QUERIES[language];
   if (!queryStr) {
     return extractBasic(tree);
@@ -193,6 +243,7 @@ function extractWithQuery(
     const imports: string[] = [];
     const exports: string[] = [];
     const functions: Array<{ name: string; signature: string }> = [];
+    const ranges: SymbolRange[] = [];
 
     for (const match of matches) {
       for (const capture of match.captures) {
@@ -210,19 +261,21 @@ function extractWithQuery(
           });
         }
       }
+      ranges.push(...collectRanges(match.captures));
     }
 
-    return { imports, exports, functions };
+    return { imports, exports, functions, ranges };
   } catch {
     parserLogger.warn(`SCM Query failed, fallback to basic traversal: ${language}`);
     return extractBasic(tree);
   }
 }
 
-function extractBasic(tree: Parser.Tree): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string }> } {
+function extractBasic(tree: Parser.Tree): { imports: string[]; exports: string[]; functions: Array<{ name: string; signature: string }>; ranges: SymbolRange[] } {
   const imports: string[] = [];
   const exports: string[] = [];
   const functions: Array<{ name: string; signature: string }> = [];
+  const ranges: SymbolRange[] = [];
 
   for (const child of tree.rootNode.children) {
     if (child.type === 'import_statement' || child.type === 'import_declaration') {
@@ -233,16 +286,47 @@ function extractBasic(tree: Parser.Tree): { imports: string[]; exports: string[]
     }
     if (child.type === 'function_declaration') {
       const nameNode = child.childForFieldName('name');
+      const name = nameNode ? nameNode.text : 'anonymous';
       if (nameNode) {
         functions.push({
-          name: nameNode.text,
+          name,
           signature: extractFunctionSignature(child),
         });
       }
+      ranges.push({
+        name,
+        start: child.startPosition.row + 1,
+        end: child.endPosition.row + 1,
+      });
     }
   }
 
-  return { imports, exports, functions };
+  return { imports, exports, functions, ranges };
+}
+
+/**
+ * 文件总行数（行级台账用）：末元素为空串时移除（与 POSIX wc -l 口径一致）。
+ */
+function countLines(text: string): number {
+  if (text === '') return 0;
+  const parts = text.split(/\r?\n/);
+  if (parts[parts.length - 1] === '') parts.pop();
+  return parts.length;
+}
+
+/**
+ * 把行区间 clip 到 [1, lineCount]；越界（clip 后 start > end）直接丢弃。
+ */
+function clipRanges(ranges: SymbolRange[], lineCount: number): SymbolRange[] {
+  if (lineCount <= 0) return [];
+  const result: SymbolRange[] = [];
+  for (const range of ranges) {
+    const start = Math.max(1, Math.min(range.start, lineCount));
+    const end = Math.max(1, Math.min(range.end, lineCount));
+    if (start > end) continue;
+    result.push({ name: range.name, start, end });
+  }
+  return result;
 }
 
 async function parseFile(
@@ -253,6 +337,7 @@ async function parseFile(
   const projectRoot = getProjectRoot();
   const fullPath = join(projectRoot, filePath);
   const source = await readTextFile(fullPath);
+  const lineCount = countLines(source);
 
   const parser = parsers.get(language);
   if (!parser) {
@@ -270,11 +355,14 @@ async function parseFile(
       functions: [],
       imports: vueResult.imports,
       docstrings: [],
+      lineCount,
+      // vue 段不测行区间（语言适配器契约：ranges 为空 = 不测，计入行台账的 gap）
+      ranges: [],
     };
   }
 
   const tree = parser.parse(source);
-  const { imports, exports, functions } = extractWithQuery(tree, language, parser);
+  const { imports, exports, functions, ranges } = extractWithQuery(tree, language, parser);
 
   tree.delete();
 
@@ -284,6 +372,8 @@ async function parseFile(
     functions,
     imports,
     docstrings: [],
+    lineCount,
+    ranges: clipRanges(ranges, lineCount),
   };
 }
 

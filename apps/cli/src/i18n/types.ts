@@ -428,12 +428,21 @@ export interface TranslationKeys {
     agentTitles: string;
     agentCondenseSections: string;
     agentCondenseTopics: string;
+    /** 结构优先蓝图的新角色（旧键保留，供旧日志回放） */
+    agentStructure: string;
+    agentSections: string;
+    agentPages: string;
     /** 三阶段蓝图：阶段切换与分类级进度（与 Agent 行同词） */
     stageClassify: string;
     stageTopics: string;
     stageTitles: string;
     stageTopicsIdle: string;
     stageTitlesIdle: string;
+    /** 结构优先蓝图的新阶段（旧键保留，供旧日志回放） */
+    stageStructure: string;
+    stageSections: string;
+    stagePages: string;
+    stagePagesIdle: string;
     stageSection: string;
     failedSections: string;
     /** 内容门未达标时的行内标记（warn 只报告） */

@@ -5,8 +5,9 @@
  * 逐条检查输出 `<STATUS> <group> <message>`（STATUS ∈ PASS/FAIL/SKIP），
  * 末尾 `OVERALL PASS` / `OVERALL FAIL`，退出码随之（0 / 1）。
  *
- * 检查组：structure / content / mermaid / traceability / frontmatter
- * （content 组需要 `--enforce` 才把密度门失败计为整体失败，否则只列出）。
+ * 检查组：structure / content / mermaid / traceability / frontmatter / coverage
+ * （content 组需要 `--enforce` 才把密度门失败计为整体失败，否则只列出；
+ *  coverage 组只在 schemaVersion=2 产物且清单哈希一致时执行，旧产物整组 SKIP）。
  *
  * stdout 保护：本命令的输出是「可被脚本消费」的（CI 判定退出码 + 解析行），
  * 启动时接管 stdout，杂散写入转去 stderr，检查行本身走 `writeRawStdout`。

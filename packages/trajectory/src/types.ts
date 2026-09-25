@@ -127,7 +127,7 @@ export interface TrajectoryTurnModel {
   sessionId?: string;
   /** Agent 标识（每个 Agent 一个 turn） */
   agentKey?: string;
-  /** Agent 角色（分类 / 分主题 / 标题 / 缩编 / 页面 / 润色） */
+  /** Agent 角色（结构切分 / 分类命名 / 页面命名 / 页面 / 润色；旧日志可能是分类 / 主题 / 标题 / 缩编） */
   role?: RunEventAgentMeta['role'];
   section?: string;
   pageSlug?: string;

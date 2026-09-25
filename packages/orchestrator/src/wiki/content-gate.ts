@@ -463,7 +463,7 @@ export function evaluateContentGate(
   };
 }
 
-// ==================== 反馈文案（对齐 formatQuantityFeedback 的「当前 N / 下限 M」风格） ====================
+// ==================== 反馈文案（「当前 N / 下限 M」风格） ====================
 
 /** 把报告格式化成工具错误文案（enforce 拦截时返回给模型，促其重写） */
 export function formatContentGateError(report: ContentGateReport): string {
